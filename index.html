@@ -5,9 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Project Milestone Delivery Hub</title>
   <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Lucide Icons -->
-  <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- Lucide Icons -->
+<script src="https://unpkg.com/lucide@latest"></script>
+
+<!-- Supabase JavaScript Client -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
     .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -159,7 +163,12 @@
           <!-- Logged-in User Profile Badge -->
           <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs">
             <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span class="font-semibold text-slate-700" id="current-user-display">Ratnadeep (Admin)</span>
+            <span
+  class="font-semibold text-slate-700"
+  id="current-user-display"
+>
+  Loading...
+</span>
           </div>
 
           <!-- Admin User Management (Visible to Admin only) -->
@@ -557,141 +566,228 @@
   </div>
 
   <script>
-    // --- 1. UNIFIED USER MASTER DATA STORE & RBAC STATE ---
-    let userMaster = JSON.parse(localStorage.getItem('portal_user_master')) || [
-      { name: "Ratnadeep Mukherjee", email: "ratnadeep.mukherjee@adityabirla.com", department: "IT / PMO", role: "Admin", assignedVertical: "All" },
-      { name: "Sachin", email: "sachin@adityabirla.com", department: "Retail POS", role: "Level 1", assignedVertical: "All" },
-      { name: "Neha", email: "neha@adityabirla.com", department: "Retail commercial", role: "Level 2", assignedVertical: "Retail commercial" },
-      { name: "Hrishik", email: "hrishik@adityabirla.com", department: "Finance", role: "Level 2", assignedVertical: "Finance" },
-      { name: "Suraj", email: "suraj@adityabirla.com", department: "Merchandising", role: "Level 2", assignedVertical: "Merchandising" },
-      { name: "Yash", email: "yash@adityabirla.com", department: "ERP & Tech", role: "Level 1", assignedVertical: "All" },
-      { name: "Sneha", email: "sneha@adityabirla.com", department: "Finance", role: "Read-Only", assignedVertical: "All" },
-      { name: "Kunal", email: "kunal@adityabirla.com", department: "Supply Chain", role: "Read-Only", assignedVertical: "All" }
-    ];
 
-    let currentUser = JSON.parse(localStorage.getItem('portal_current_user')) || userMaster[0];
+    // =======================================
+// SUPABASE CONFIGURATION
+// =======================================
 
-    // --- PERMISSION HELPERS ---
-    function isVerticalAllowed(vertical) {
-      if (currentUser.role === 'Admin' || currentUser.role === 'Level 1' || currentUser.role === 'Read-Only') return true;
-      if (currentUser.role === 'Level 2') return vertical === currentUser.assignedVertical;
-      return false;
-    }
+const SUPABASE_URL =
+'https://otlhaooswjapgtdzehdo.supabase.co';
 
-    function canCreateInitiative() {
-      return currentUser.role === 'Admin' || currentUser.role === 'Level 1';
-    }
+const SUPABASE_KEY =
+'sb_publishable_MXRm80MJHADD-zmkWV7H5g_NhgihXHp';
 
-    function canEditInitiative(project) {
-      if (currentUser.role === 'Admin' || currentUser.role === 'Level 1') return true;
-      if (currentUser.role === 'Level 2') return project.vertical === currentUser.assignedVertical;
-      return false;
-    }
+const supabaseClient =
+window.supabase.createClient(
+  SUPABASE_URL,
+  SUPABASE_KEY
+);
+    // --- 1. SUPABASE DATA STORE & RBAC STATE ---
 
-    function canDeleteInitiative() {
-      return currentUser.role === 'Admin' || currentUser.role === 'Level 1';
-    }
+let userMaster = [];
+let currentUser = null;
+let projects = [];
 
-    let defaultProjects = [
-      {
-        id: 101,
-        name: "Improve Billing Cycle TAT by optimizing Process & Tech Enablement",
-        type: "Project",
-        crNo: "CH-424",
-        vertical: "Retail commercial",
-        businessOwner: "Ratnadeep Mukherjee",
-        assignedTo: "Sachin",
-        startDate: "2026-08-10",
-        targetEndDate: "2026-09-15",
-        actualEndDate: "",
-        impactCategory: "Efficiency & Control",
-        measurableImpact: "Quantitative",
-        businessBenefit: "Reduces average checkout TAT to < 45 seconds, improving customer store throughput by 15%",
-        collapsed: false,
-        milestones: [
-          {
-            id: 1,
-            title: "Meeting with Stakeholders to finalize actionables",
-            actions: "Meet with POS and Merch team to freeze OTP exceptions",
-            owner: "Ratnadeep Mukherjee",
-            dependency: "Neha",
-            status: "Done",
-            bucket: "Today",
-            startDate: "2026-08-10",
-            endDate: "2026-08-11",
-            deadline: "2026-08-11",
-            completionDate: "2026-08-11",
-            kpi: "Signoff from commercial team",
-            remarks: "Completed on schedule."
-          },
-          {
-            id: 2,
-            title: "API Optimization & Code Freeze",
-            actions: "Refactor OTP validation endpoint to minimize latency",
-            owner: "Sachin",
-            dependency: "Cloud Infra",
-            status: "In Progress",
-            bucket: "Today",
-            startDate: "2026-08-12",
-            endDate: "2026-08-18",
-            deadline: "2026-08-18",
-            completionDate: "",
-            kpi: "Response time < 200ms",
-            remarks: "Load testing underway."
-          }
-        ]
-      },
-      {
-        id: 102,
-        name: "Auto Coin Conversion Customization",
-        type: "CR",
-        crNo: "CH-333",
-        vertical: "Finance",
-        businessOwner: "Sachin",
-        assignedTo: "Hrishik",
-        startDate: "2026-08-01",
-        targetEndDate: "2026-08-25",
-        actualEndDate: "",
-        impactCategory: "Revenue Enablement",
-        measurableImpact: "Quantitative",
-        businessBenefit: "Eliminates duplicate redemption incidents and automates ledger balancing for loyalty points",
-        collapsed: false,
-        milestones: [
-          {
-            id: 3,
-            title: "CR Prioritization & Action Plan",
-            actions: "Discussion & query clarification with vendor on duplicate serial validation",
-            owner: "Sachin",
-            dependency: "Hrishik",
-            status: "In Progress",
-            bucket: "Today",
-            startDate: "2026-08-15",
-            endDate: "2026-08-20",
-            deadline: "2026-08-18",
-            completionDate: "",
-            kpi: "Zero sync loss",
-            remarks: "Trace logs shared with Microsoft."
-          },
-          {
-            id: 4,
-            title: "UAT Signoff in Staging",
-            actions: "Conduct 50 mock transactions in staging environment",
-            owner: "Hrishik",
-            dependency: "QA Team",
-            status: "Delay",
-            bucket: "Sprint 1",
-            startDate: "2026-08-01",
-            endDate: "2026-08-08",
-            deadline: "2026-08-08",
-            completionDate: "",
-            kpi: "100% test pass rate",
-            remarks: "Delayed by 6 days due to test server outage."
-          }
-        ]
-      }
-    ];
+// --- PERMISSION HELPERS ---
 
-    let projects = JSON.parse(localStorage.getItem('portal_projects_master')) || defaultProjects;
+function isVerticalAllowed(vertical) {
+  if (!currentUser) return false;
+
+  if (
+    currentUser.role === 'Admin' ||
+    currentUser.role === 'Level 1' ||
+    currentUser.role === 'Read-Only'
+  ) {
+    return true;
+  }
+
+  return (
+    currentUser.role === 'Level 2' &&
+    vertical === currentUser.assignedVertical
+  );
+}
+
+function canCreateInitiative() {
+  return Boolean(
+    currentUser &&
+    (
+      currentUser.role === 'Admin' ||
+      currentUser.role === 'Level 1'
+    )
+  );
+}
+
+function canEditInitiative(project) {
+  if (!currentUser) return false;
+
+  if (
+    currentUser.role === 'Admin' ||
+    currentUser.role === 'Level 1'
+  ) {
+    return true;
+  }
+
+  return (
+    currentUser.role === 'Level 2' &&
+    project.vertical === currentUser.assignedVertical
+  );
+}
+
+function canDeleteInitiative() {
+  return Boolean(
+    currentUser &&
+    (
+      currentUser.role === 'Admin' ||
+      currentUser.role === 'Level 1'
+    )
+  );
+}
+
+// --- LOAD USERS FROM SUPABASE ---
+
+async function loadUsersFromSupabase() {
+  const { data, error } = await supabaseClient
+    .from('user_master')
+    .select('*')
+    .eq('is_active', true)
+    .order('full_name', { ascending: true });
+
+  if (error) {
+    console.error('User loading failed:', error);
+    alert(`Unable to load users: ${error.message}`);
+    return false;
+  }
+
+  userMaster = (data || []).map(row => ({
+    id: Number(row.id),
+    name: row.full_name || '',
+    email: row.email || '',
+    department: row.department || '',
+    role: row.role || '',
+    assignedVertical: row.assigned_vertical || ''
+  }));
+
+  /*
+    Temporary current-user selection until Supabase
+    Authentication is connected.
+  */
+  const previousCurrentUserId =
+  currentUser?.id || null;
+
+currentUser =
+  userMaster.find(
+    user => user.id === previousCurrentUserId
+  ) ||
+  userMaster.find(
+    user => user.role === 'Admin'
+  ) ||
+  userMaster[0] ||
+  null;
+
+  populateUserDropdowns();
+
+  const userDisplay =
+  document.getElementById('current-user-display');
+
+if (userDisplay && currentUser) {
+  userDisplay.innerText =
+    `${currentUser.name} (${currentUser.role})`;
+}
+
+  return true;
+}
+
+// --- LOAD INITIATIVES AND MILESTONES FROM SUPABASE ---
+
+async function loadInitiativesFromSupabase() {
+  const initiativeResult = await supabaseClient
+    .from('initiatives')
+    .select('*')
+    .order('id', { ascending: false });
+
+  if (initiativeResult.error) {
+    console.error(
+      'Initiative loading failed:',
+      initiativeResult.error
+    );
+
+    alert(
+      `Unable to load initiatives: ` +
+      initiativeResult.error.message
+    );
+
+    projects = [];
+    renderProjects();
+
+    return false;
+  }
+
+  const milestoneResult = await supabaseClient
+    .from('milestones')
+    .select('*')
+    .order('id', { ascending: true });
+
+  if (milestoneResult.error) {
+    console.error(
+      'Milestone loading failed:',
+      milestoneResult.error
+    );
+
+    alert(
+      `Unable to load milestones: ` +
+      milestoneResult.error.message
+    );
+
+    return false;
+  }
+
+  const initiativeRows = initiativeResult.data || [];
+  const milestoneRows = milestoneResult.data || [];
+
+  projects = initiativeRows.map(row => ({
+    id: Number(row.id),
+    name: row.title || '',
+    type: row.initiative_type || '',
+    crNo: row.cr_no || '',
+    vertical: row.vertical || '',
+    businessOwner: row.business_owner || '',
+    assignedTo: row.assigned_to || '',
+    startDate: row.start_date || '',
+    targetEndDate: row.target_end_date || '',
+    actualEndDate: row.actual_end_date || '',
+    impactCategory: row.impact_category || '',
+    measurableImpact: row.measurable_impact || '',
+    businessBenefit: row.business_benefit || '',
+    collapsed: false,
+
+    milestones: milestoneRows
+      .filter(
+        milestone =>
+          Number(milestone.initiative_id) ===
+          Number(row.id)
+      )
+      .map(milestone => ({
+        id: Number(milestone.id),
+        title: milestone.milestone_title || '',
+        actions: milestone.actions || '',
+        owner: milestone.owner || '',
+        dependency: milestone.dependency || '',
+        status: milestone.status || '',
+        bucket: milestone.bucket || '',
+        startDate: milestone.start_date || '',
+        endDate: milestone.end_date || '',
+        deadline: milestone.deadline || '',
+        completionDate:
+          milestone.completion_date || '',
+        kpi: milestone.kpi || '',
+        remarks: milestone.remarks || ''
+      }))
+  }));
+
+  renderProjects();
+
+  return true;
+}
 
     // --- 2. SIDEBAR TOGGLE & PERSISTENCE ---
     function toggleSidebar() {
@@ -822,22 +918,97 @@
       return diff > 0 ? diff : 0;
     }
 
-    // --- 4. USER MASTER & UNIVERSAL DROPDOWNS ---
-    function populateUserDropdowns() {
-      document.querySelectorAll('.resource-lov').forEach(sel => {
-        const currentVal = sel.value;
-        sel.innerHTML = '<option value="">-- Select User --</option>' + 
-          userMaster.map(u => {
-            return `<option value="${u.name}">${u.name} (${u.department || 'General'}) - ${u.email}</option>`;
-          }).join('');
-        sel.value = currentVal;
-      });
+    
 
-      const sidebarBadge = document.getElementById('sidebar-user-badge');
-      if (sidebarBadge) {
-        sidebarBadge.innerText = userMaster.length;
-      }
-    }
+    // --- 4. USER MASTER & UNIVERSAL DROPDOWNS ---
+
+    function populateUserDropdowns() {
+  document.querySelectorAll('.resource-lov').forEach(select => {
+    const selectedValue = select.value;
+
+    select.innerHTML =
+      '<option value="">-- Select User --</option>' +
+      userMaster
+        .map(user => `
+          <option value="${user.name}">
+            ${user.name} (${user.department || 'General'})
+            - ${user.email}
+          </option>
+        `)
+        .join('');
+
+    select.value = selectedValue;
+  });
+
+  const sidebarBadge =
+    document.getElementById('sidebar-user-badge');
+
+  if (sidebarBadge) {
+    sidebarBadge.innerText = userMaster.length;
+  }
+}
+
+    async function addUser(e) {
+  e.preventDefault();
+
+  const email = document
+    .getElementById('new-user-email')
+    .value.trim()
+    .toLowerCase();
+
+  const duplicateUser = userMaster.some(
+    user => user.email.toLowerCase() === email
+  );
+
+  if (duplicateUser) {
+    alert('A user with this email already exists.');
+    return;
+  }
+
+  const record = {
+    full_name:
+      document
+        .getElementById('new-user-name')
+        .value.trim(),
+
+    email,
+
+    department:
+      document
+        .getElementById('new-user-dept')
+        .value.trim(),
+
+    role:
+      document
+        .getElementById('new-user-role')
+        .value,
+
+    assigned_vertical:
+      document
+        .getElementById('new-user-vertical')
+        .value,
+
+    is_active: true
+  };
+
+  const { error } = await supabaseClient
+    .from('user_master')
+    .insert(record);
+
+  if (error) {
+    console.error('User creation failed:', error);
+    alert(`Unable to create user: ${error.message}`);
+    return;
+  }
+
+  e.target.reset();
+
+  await loadUsersFromSupabase();
+
+  renderUserMasterList();
+  renderUserRoleManagement();
+  renderProjects();
+}
 
     function renderUserMasterList() {
       const container = document.getElementById('user-list');
@@ -858,39 +1029,37 @@
       lucide.createIcons();
     }
 
-    function addUser(e) {
-      e.preventDefault();
-      const name = document.getElementById('new-user-name').value.trim();
-      const email = document.getElementById('new-user-email').value.trim().toLowerCase();
-      const dept = document.getElementById('new-user-dept').value.trim() || 'General';
-      const role = document.getElementById('new-user-role').value;
-      const vertical = document.getElementById('new-user-vertical').value;
 
-      if (name && email && !userMaster.some(u => u.email === email)) {
-        userMaster.push({ name, email, department: dept, role, assignedVertical: vertical });
-        userMaster.sort((a, b) => a.name.localeCompare(b.name));
-        localStorage.setItem('portal_user_master', JSON.stringify(userMaster));
-        
-        document.getElementById('new-user-name').value = '';
-        document.getElementById('new-user-email').value = '';
-        document.getElementById('new-user-dept').value = '';
-        
-        renderUserMasterList();
-        populateUserDropdowns();
-        renderUserRoleManagement();
-      }
-    }
+    async function removeUser(index) {
+  const user = userMaster[index];
 
-    function removeUser(index) {
-      const u = userMaster[index];
-      if (confirm(`Remove ${u.name} (${u.email}) from User Master?`)) {
-        userMaster.splice(index, 1);
-        localStorage.setItem('portal_user_master', JSON.stringify(userMaster));
-        renderUserMasterList();
-        populateUserDropdowns();
-        renderUserRoleManagement();
-      }
-    }
+  if (!user) return;
+
+  const confirmed = confirm(
+    `Deactivate ${user.name} (${user.email})?`
+  );
+
+  if (!confirmed) return;
+
+  const { error } = await supabaseClient
+    .from('user_master')
+    .update({
+      is_active: false
+    })
+    .eq('id', Number(user.id));
+
+  if (error) {
+    console.error('User deactivation failed:', error);
+    alert(`Unable to deactivate user: ${error.message}`);
+    return;
+  }
+
+  await loadUsersFromSupabase();
+
+  renderUserMasterList();
+  renderUserRoleManagement();
+  renderProjects();
+}
 
     function openUserModal() {
       renderUserMasterList();
@@ -940,9 +1109,8 @@
 
     // --- 6. MAIN RENDER ENGINE ---
     function saveToStorage() {
-      localStorage.setItem('portal_projects_master', JSON.stringify(projects));
-      renderProjects();
-    }
+  renderProjects();
+}
 
     function renderKPIs(visibleRecords = []) {
       let projectCount = 0;
@@ -1336,163 +1504,509 @@
       renderKPIs(visibleRecords);
       lucide.createIcons();
     }
-
-    // --- 7. MODAL ACTIONS: PROJECT ---
     function openProjectModal(editId = null) {
-      populateUserDropdowns();
-      document.getElementById('project-form').reset();
-      document.getElementById('project-id').value = '';
-      document.getElementById('project-modal-title').innerText = editId ? 'Edit Project / Epic' : 'New Project / Epic';
-      if (editId) {
-        const p = projects.find(x => x.id === editId);
-        if (p) {
-          document.getElementById('project-id').value = p.id;
-          document.getElementById('p-name').value = p.name || '';
-          document.getElementById('p-type').value = p.type || 'Project';
-          document.getElementById('p-cr').value = p.crNo || '';
-          document.getElementById('p-vertical').value = p.vertical || 'Retail commercial';
-          document.getElementById('p-business-owner').value = p.businessOwner || '';
-          document.getElementById('p-assigned-to').value = p.assignedTo || '';
-          document.getElementById('p-start-date').value = p.startDate || '';
-          document.getElementById('p-target-end-date').value = p.targetEndDate || '';
-          document.getElementById('p-actual-end-date').value = p.actualEndDate || '';
-          document.getElementById('p-impact-category').value = p.impactCategory || 'Revenue Enablement';
-          document.getElementById('p-measurable-impact').value = p.measurableImpact || 'Quantitative';
-          document.getElementById('p-business-benefit').value = p.businessBenefit || '';
-        }
-      }
-      document.getElementById('project-modal').classList.remove('hidden');
-    }
+  populateUserDropdowns();
+
+  document.getElementById('project-form').reset();
+  document.getElementById('project-id').value = '';
+
+  document.getElementById('project-modal-title').innerText =
+    editId
+      ? 'Edit Project / Epic'
+      : 'New Project / Epic';
+
+  if (editId) {
+    const project = projects.find(
+      item => Number(item.id) === Number(editId)
+    );
+
+    if (!project) return;
+
+    document.getElementById('project-id').value =
+      project.id;
+
+    document.getElementById('p-name').value =
+      project.name || '';
+
+    document.getElementById('p-type').value =
+      project.type || 'Project';
+
+    document.getElementById('p-cr').value =
+      project.crNo || '';
+
+    document.getElementById('p-vertical').value =
+      project.vertical || '';
+
+    document.getElementById('p-business-owner').value =
+      project.businessOwner || '';
+
+    document.getElementById('p-assigned-to').value =
+      project.assignedTo || '';
+
+    document.getElementById('p-start-date').value =
+      project.startDate || '';
+
+    document.getElementById('p-target-end-date').value =
+      project.targetEndDate || '';
+
+    document.getElementById('p-actual-end-date').value =
+      project.actualEndDate || '';
+
+    document.getElementById('p-impact-category').value =
+      project.impactCategory || '';
+
+    document.getElementById('p-measurable-impact').value =
+      project.measurableImpact || '';
+
+    document.getElementById('p-business-benefit').value =
+      project.businessBenefit || '';
+  }
+
+  document
+    .getElementById('project-modal')
+    .classList.remove('hidden');
+}
+
+function editProject(projectId) {
+  openProjectModal(projectId);
+}
+
+    async function saveProject(e) {
+  e.preventDefault();
+
+  const projectId =
+    document.getElementById('project-id').value;
+
+  const name =
+    document.getElementById('p-name').value.trim();
+
+  const startDate =
+    document.getElementById('p-start-date').value;
+
+  const targetEndDate =
+    document.getElementById('p-target-end-date').value;
+
+  const actualEndDate =
+    document.getElementById('p-actual-end-date').value;
+
+  const projectAge =
+    calculateProjectAge(
+      startDate,
+      targetEndDate
+    );
+
+  const countdownDays =
+    calculateCountdown(
+      targetEndDate,
+      startDate,
+      actualEndDate
+    );
+
+  const databaseRecord = {
+    title: name,
+
+    initiative_type:
+      document.getElementById('p-type').value,
+
+    cr_no:
+      document
+        .getElementById('p-cr')
+        .value.trim() || null,
+
+    vertical:
+      document.getElementById('p-vertical').value,
+
+    business_owner:
+      document
+        .getElementById('p-business-owner')
+        .value,
+
+    assigned_to:
+      document
+        .getElementById('p-assigned-to')
+        .value,
+
+    start_date:
+      startDate || null,
+
+    target_end_date:
+      targetEndDate || null,
+
+    actual_end_date:
+      actualEndDate || null,
+
+    impact_category:
+      document
+        .getElementById('p-impact-category')
+        .value,
+
+    measurable_impact:
+      document
+        .getElementById('p-measurable-impact')
+        .value,
+
+    business_benefit:
+      document
+        .getElementById('p-business-benefit')
+        .value.trim(),
+
+    initiative_status:
+      evaluateProjectStatus(
+        name,
+        startDate,
+        targetEndDate,
+        actualEndDate
+      ),
+
+    initiative_age:
+      projectAge === '-' ? null : projectAge,
+
+    countdown_days:
+      countdownDays === '-' ? null : countdownDays
+  };
+
+  let result;
+
+  if (projectId) {
+    result = await supabaseClient
+      .from('initiatives')
+      .update(databaseRecord)
+      .eq('id', Number(projectId));
+  } else {
+    result = await supabaseClient
+      .from('initiatives')
+      .insert(databaseRecord);
+  }
+
+  if (result.error) {
+    console.error(
+      'Initiative saving failed:',
+      result.error
+    );
+
+    alert(
+      `Unable to save initiative: ` +
+      result.error.message
+    );
+
+    return;
+  }
+
+  closeProjectModal();
+
+  await loadInitiativesFromSupabase();
+}
 
     function closeProjectModal() {
       document.getElementById('project-modal').classList.add('hidden');
     }
 
-    function saveProject(e) {
-      e.preventDefault();
-      const id = document.getElementById('project-id').value;
-      const data = {
-        name: document.getElementById('p-name').value.trim(),
-        type: document.getElementById('p-type').value,
-        crNo: document.getElementById('p-cr').value.trim(),
-        vertical: document.getElementById('p-vertical').value,
-        businessOwner: document.getElementById('p-business-owner').value,
-        assignedTo: document.getElementById('p-assigned-to').value,
-        startDate: document.getElementById('p-start-date').value,
-        targetEndDate: document.getElementById('p-target-end-date').value,
-        actualEndDate: document.getElementById('p-actual-end-date').value,
-        impactCategory: document.getElementById('p-impact-category').value,
-        measurableImpact: document.getElementById('p-measurable-impact').value,
-        businessBenefit: document.getElementById('p-business-benefit').value.trim()
-      };
 
-      if (id) {
-        const idx = projects.findIndex(x => x.id === parseInt(id));
-        if (idx !== -1) projects[idx] = { ...projects[idx], ...data };
-      } else {
-        projects.unshift({
-          id: Date.now(),
-          ...data,
-          collapsed: false,
-          milestones: []
-        });
-      }
-      closeProjectModal();
-      saveToStorage();
+
+    async function deleteProject(projectId) {
+  const confirmed = confirm(
+    'Delete this initiative and all its milestones?'
+  );
+
+  if (!confirmed) return;
+
+  const milestoneResult = await supabaseClient
+    .from('milestones')
+    .delete()
+    .eq('initiative_id', Number(projectId));
+
+  if (milestoneResult.error) {
+    console.error(
+      'Milestone deletion failed:',
+      milestoneResult.error
+    );
+
+    alert(milestoneResult.error.message);
+    return;
+  }
+
+  const projectResult = await supabaseClient
+    .from('initiatives')
+    .delete()
+    .eq('id', Number(projectId));
+
+  if (projectResult.error) {
+    console.error(
+      'Initiative deletion failed:',
+      projectResult.error
+    );
+
+    alert(projectResult.error.message);
+    return;
+  }
+
+  await loadInitiativesFromSupabase();
+}
+
+function openMilestoneModal(
+  projectId,
+  editMilestoneId = null
+) {
+  populateUserDropdowns();
+
+  const form =
+    document.getElementById('milestone-form');
+
+  form.reset();
+
+  document.getElementById('m-id').value = '';
+  document.getElementById('m-project-id').value =
+    projectId;
+
+  const project = projects.find(
+    item => Number(item.id) === Number(projectId)
+  );
+
+  if (!project) {
+    alert('Parent initiative was not found.');
+    return;
+  }
+
+  document.getElementById(
+    'milestone-modal-subtitle'
+  ).innerText = `Project: ${project.name}`;
+
+  document.getElementById(
+    'milestone-modal-title'
+  ).innerText = editMilestoneId
+    ? 'Edit Milestone'
+    : 'Add Milestone Deliverable';
+
+  if (editMilestoneId) {
+    const milestone = (project.milestones || []).find(
+      item =>
+        Number(item.id) === Number(editMilestoneId)
+    );
+
+    if (!milestone) {
+      alert('Milestone was not found.');
+      return;
     }
 
-    function editProject(id) {
-      openProjectModal(id);
-    }
+    document.getElementById('m-id').value =
+      milestone.id;
 
-    function deleteProject(id) {
-      if (confirm('Are you sure you want to delete this Project and all its milestones?')) {
-        projects = projects.filter(x => x.id !== id);
-        saveToStorage();
-      }
-    }
+    document.getElementById('m-title').value =
+      milestone.title || '';
 
-    // --- 8. MODAL ACTIONS: MILESTONE ---
-    function openMilestoneModal(projectId, editMilestoneId = null) {
-      populateUserDropdowns();
-      document.getElementById('milestone-form').reset();
-      document.getElementById('m-id').value = '';
-      document.getElementById('m-project-id').value = projectId;
-      const p = projects.find(x => x.id === projectId);
-      document.getElementById('milestone-modal-subtitle').innerText = p ? `Project: ${p.name}` : '';
-      document.getElementById('milestone-modal-title').innerText = editMilestoneId ? 'Edit Milestone' : 'Add Milestone Deliverable';
-      if (editMilestoneId) {
-        const m = (p.milestones || []).find(x => x.id === editMilestoneId);
-        if (m) {
-          document.getElementById('m-id').value = m.id;
-          document.getElementById('m-title').value = m.title || '';
-          document.getElementById('m-actions').value = m.actions || '';
-          document.getElementById('m-owner').value = m.owner || '';
-          document.getElementById('m-dependency').value = m.dependency || '';
-          document.getElementById('m-status').value = m.status || 'Auto';
-          document.getElementById('m-bucket').value = m.bucket || 'Today';
-          document.getElementById('m-start-date').value = m.startDate || '';
-          document.getElementById('m-end-date').value = m.endDate || '';
-          document.getElementById('m-deadline').value = m.deadline || '';
-          document.getElementById('m-completion-date').value = m.completionDate || '';
-          document.getElementById('m-kpi').value = m.kpi || '';
-          document.getElementById('m-remarks').value = m.remarks || '';
-        }
-      }
-      document.getElementById('milestone-modal').classList.remove('hidden');
-    }
+    document.getElementById('m-actions').value =
+      milestone.actions || '';
+
+    document.getElementById('m-owner').value =
+      milestone.owner || '';
+
+    document.getElementById('m-dependency').value =
+      milestone.dependency || '';
+
+    document.getElementById('m-status').value =
+      milestone.status || 'Auto';
+
+    document.getElementById('m-bucket').value =
+      milestone.bucket || 'Today';
+
+    document.getElementById('m-start-date').value =
+      milestone.startDate || '';
+
+    document.getElementById('m-end-date').value =
+      milestone.endDate || '';
+
+    document.getElementById('m-deadline').value =
+      milestone.deadline || '';
+
+    document.getElementById('m-completion-date').value =
+      milestone.completionDate || '';
+
+    document.getElementById('m-kpi').value =
+      milestone.kpi || '';
+
+    document.getElementById('m-remarks').value =
+      milestone.remarks || '';
+  }
+
+  document
+    .getElementById('milestone-modal')
+    .classList.remove('hidden');
+}
+
+function editMilestone(projectId, milestoneId) {
+  openMilestoneModal(projectId, milestoneId);
+}
+
+    async function saveMilestone(e) {
+  e.preventDefault();
+
+  const initiativeId = Number(
+    document.getElementById('m-project-id').value
+  );
+
+  const milestoneId =
+    document.getElementById('m-id').value;
+
+  const initiative = projects.find(
+    project =>
+      Number(project.id) === initiativeId
+  );
+
+  if (!initiative) {
+    alert('Parent initiative was not found.');
+    return;
+  }
+
+  const title =
+    document.getElementById('m-title').value.trim();
+
+  const startDate =
+    document.getElementById('m-start-date').value;
+
+  const endDate =
+    document.getElementById('m-end-date').value;
+
+  const deadline =
+    document.getElementById('m-deadline').value;
+
+  const completionDate =
+    document.getElementById('m-completion-date').value;
+
+  const selectedStatus =
+    document.getElementById('m-status').value;
+
+  const finalStatus =
+    selectedStatus === 'Auto'
+      ? evaluateMilestoneStatus(
+          title,
+          startDate,
+          deadline,
+          completionDate
+        )
+      : selectedStatus;
+
+  const databaseRecord = {
+    initiative_id: initiativeId,
+
+    initiative_name: initiative.name,
+
+    milestone_title: title,
+
+    actions:
+      document
+        .getElementById('m-actions')
+        .value.trim(),
+
+    owner:
+      document.getElementById('m-owner').value,
+
+    dependency:
+      document
+        .getElementById('m-dependency')
+        .value.trim(),
+
+    status: finalStatus,
+
+    bucket:
+      document.getElementById('m-bucket').value,
+
+    start_date:
+      startDate || null,
+
+    end_date:
+      endDate || null,
+
+    deadline:
+      deadline || null,
+
+    completion_date:
+      completionDate || null,
+
+    kpi:
+      document
+        .getElementById('m-kpi')
+        .value.trim(),
+
+    remarks:
+      document
+        .getElementById('m-remarks')
+        .value.trim(),
+
+    deviation_days:
+      calculateDeviation(
+        deadline,
+        completionDate,
+        finalStatus
+      )
+  };
+
+  let result;
+
+  if (milestoneId) {
+    result = await supabaseClient
+      .from('milestones')
+      .update(databaseRecord)
+      .eq('id', Number(milestoneId));
+  } else {
+    result = await supabaseClient
+      .from('milestones')
+      .insert(databaseRecord);
+  }
+
+  if (result.error) {
+    console.error(
+      'Milestone saving failed:',
+      result.error
+    );
+
+    alert(
+      `Unable to save milestone: ` +
+      result.error.message
+    );
+
+    return;
+  }
+
+  closeMilestoneModal();
+
+  await loadInitiativesFromSupabase();
+}
 
     function closeMilestoneModal() {
       document.getElementById('milestone-modal').classList.add('hidden');
     }
 
-    function saveMilestone(e) {
-      e.preventDefault();
-      const pId = parseInt(document.getElementById('m-project-id').value);
-      const mId = document.getElementById('m-id').value;
-      const p = projects.find(x => x.id === pId);
-      if (!p) return;
+  
 
-      const milestoneData = {
-        id: mId ? parseInt(mId) : Date.now(),
-        title: document.getElementById('m-title').value.trim(),
-        actions: document.getElementById('m-actions').value.trim(),
-        owner: document.getElementById('m-owner').value.trim(),
-        dependency: document.getElementById('m-dependency').value.trim(),
-        status: document.getElementById('m-status').value,
-        bucket: document.getElementById('m-bucket').value,
-        startDate: document.getElementById('m-start-date').value,
-        endDate: document.getElementById('m-end-date').value,
-        deadline: document.getElementById('m-deadline').value,
-        completionDate: document.getElementById('m-completion-date').value,
-        kpi: document.getElementById('m-kpi').value.trim(),
-        remarks: document.getElementById('m-remarks').value.trim()
-      };
+    async function deleteMilestone(
+  projectId,
+  milestoneId
+) {
+  const confirmed =
+    confirm('Delete this milestone?');
 
-      if (!p.milestones) p.milestones = [];
-      if (mId) {
-        const idx = p.milestones.findIndex(x => x.id === parseInt(mId));
-        if (idx !== -1) p.milestones[idx] = milestoneData;
-      } else {
-        p.milestones.push(milestoneData);
-      }
-      closeMilestoneModal();
-      saveToStorage();
-    }
+  if (!confirmed) return;
 
-    function editMilestone(projectId, milestoneId) {
-      openMilestoneModal(projectId, milestoneId);
-    }
+  const { error } = await supabaseClient
+    .from('milestones')
+    .delete()
+    .eq('id', Number(milestoneId));
 
-    function deleteMilestone(projectId, milestoneId) {
-      if (confirm('Delete this milestone?')) {
-        const p = projects.find(x => x.id === projectId);
-        if (p && p.milestones) {
-          p.milestones = p.milestones.filter(x => x.id !== milestoneId);
-          saveToStorage();
-        }
-      }
-    }
+  if (error) {
+    console.error(
+      'Milestone deletion failed:',
+      error
+    );
+
+    alert(
+      `Unable to delete milestone: ${error.message}`
+    );
+
+    return;
+  }
+
+  await loadInitiativesFromSupabase();
+}
 
     // --- 9. EXPORT CSV ---
     function exportToCSV() {
@@ -1605,12 +2119,47 @@
       `).join('');
     }
 
-    function updateUserRole(index, field, value) {
-      userMaster[index][field] = value;
-      localStorage.setItem('portal_user_master', JSON.stringify(userMaster));
-      renderUserRoleManagement();
-      renderProjects();
-    }
+    async function updateUserRole(
+  index,
+  field,
+  value
+) {
+  const user = userMaster[index];
+
+  if (!user) return;
+
+  const updateRecord =
+    field === 'assignedVertical'
+      ? {
+          assigned_vertical: value
+        }
+      : {
+          role: value
+        };
+
+  const { error } = await supabaseClient
+    .from('user_master')
+    .update(updateRecord)
+    .eq('id', Number(user.id));
+
+  if (error) {
+    console.error(
+      'User permission update failed:',
+      error
+    );
+
+    alert(
+      `Unable to update user: ${error.message}`
+    );
+
+    return;
+  }
+
+  await loadUsersFromSupabase();
+
+  renderUserRoleManagement();
+  renderProjects();
+}
 
     function openAdminModal() {
       renderUserRoleManagement();
@@ -1622,26 +2171,65 @@
       renderProjects();
     }
 
-    // --- 10. INITIALIZATION ---
-    document.addEventListener('DOMContentLoaded', () => {
-      initSidebar();
-      populateUserDropdowns();
-      updateKpiSlicerUI();
-      const userDisplay = document.getElementById('current-user-display');
-      if (userDisplay) {
-        userDisplay.innerText = `${currentUser.name} (${currentUser.role})`;
-      }
-      const adminBtn = document.getElementById('btn-admin-roles');
-      if (adminBtn && currentUser.role !== 'Admin') {
-        adminBtn.style.display = 'none';
-      }
-      const newProjBtn = document.getElementById('btn-new-project');
-      if (newProjBtn && !canCreateInitiative()) {
-        newProjBtn.style.display = 'none';
-      }
-      renderProjects();
-      lucide.createIcons();
-    });
+    document.addEventListener(
+  'DOMContentLoaded',
+  async () => {
+    initSidebar();
+    updateKpiSlicerUI();
+
+    const usersLoaded =
+      await loadUsersFromSupabase();
+
+    if (!usersLoaded || !currentUser) {
+      alert(
+        'No active user is available in User Master.'
+      );
+
+      return;
+    }
+
+    const projectsLoaded =
+      await loadInitiativesFromSupabase();
+
+    if (!projectsLoaded) return;
+
+    const userDisplay =
+      document.getElementById(
+        'current-user-display'
+      );
+
+    if (userDisplay) {
+      userDisplay.innerText =
+        `${currentUser.name} (${currentUser.role})`;
+    }
+
+    const adminButton =
+      document.getElementById(
+        'btn-admin-roles'
+      );
+
+    if (adminButton) {
+      adminButton.style.display =
+        currentUser.role === 'Admin'
+          ? ''
+          : 'none';
+    }
+
+    const newProjectButton =
+      document.getElementById(
+        'btn-new-project'
+      );
+
+    if (newProjectButton) {
+      newProjectButton.style.display =
+        canCreateInitiative()
+          ? ''
+          : 'none';
+    }
+
+    lucide.createIcons();
+  }
+);
   </script>
 </body>
 </html>
