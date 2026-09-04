@@ -491,70 +491,208 @@
   </div>
 
   <!-- Modal 3: User Master Directory (Unified Master Data) -->
-  <div id="user-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
-      <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-        <div>
-          <h2 class="text-sm font-bold text-slate-800">Master Data — User Master</h2>
-          <p class="text-xs text-slate-500">Manage all team members, corporate emails, departments, and default roles</p>
-        </div>
-        <button onclick="closeUserModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+  <!-- Modal 3: User Master Directory (Unified Master Data) -->
+<div
+  id="user-modal"
+  class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
+>
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+
+    <!-- User Master Header -->
+    <div class="px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-slate-50">
+
+      <div class="min-w-0">
+        <h2 class="text-sm font-bold text-slate-800">
+          Master Data — User Master
+        </h2>
+
+        <p class="text-xs text-slate-500 mt-0.5">
+          Manage team members, corporate emails, departments, and default roles
+        </p>
       </div>
 
-      <div class="p-6 space-y-4 flex-1 overflow-y-auto custom-scrollbar text-xs">
-        <!-- Add New User Form -->
-        <form onsubmit="addUser(event)" class="grid grid-cols-1 sm:grid-cols-6 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
-          <div class="sm:col-span-2">
-            <label class="block font-semibold text-slate-700 mb-1">Full Name *</label>
-            <input type="text" id="new-user-name" required placeholder="e.g. Ratnadeep Mukherjee" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          </div>
-          <div class="sm:col-span-2">
-            <label class="block font-semibold text-slate-700 mb-1">Email *</label>
-            <input type="email" id="new-user-email" required placeholder="user@adityabirla.com" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          </div>
-          <div class="sm:col-span-2">
-            <label class="block font-semibold text-slate-700 mb-1">Department *</label>
-            <input type="text" id="new-user-dept" required placeholder="e.g. Retail commercial" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-          </div>
-          <div class="sm:col-span-3">
-            <label class="block font-semibold text-slate-700 mb-1">Role Tier</label>
-            <select id="new-user-role" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none">
-              <option value="Level 1">Level 1 (Full CRUD)</option>
-              <option value="Level 2">Level 2 (Vertical Scoped)</option>
-              <option value="Admin">Admin</option>
-              <option value="Read-Only">Read-Only</option>
-            </select>
-          </div>
-          <div class="sm:col-span-3">
-            <label class="block font-semibold text-slate-700 mb-1">Assigned Vertical</label>
-            <select id="new-user-vertical" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none">
-              <option value="All">All Verticals</option>
-              <option value="Retail commercial">Retail commercial</option>
-              <option value="Finance">Finance</option>
-              <option value="Merchandising">Merchandising</option>
-            </select>
-          </div>
-          <div class="sm:col-span-6 flex justify-end pt-2">
-            <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow-sm transition">
-              + Add to User Master
-            </button>
-          </div>
-        </form>
+      <!-- User Import Actions -->
+      <div class="flex items-center gap-2 flex-shrink-0">
 
-        <!-- User List Table -->
-        <div>
-          <div class="flex items-center justify-between mb-2">
-            <h3 class="font-semibold text-slate-700 uppercase text-[11px]">Active Master Users (<span id="user-count">0</span>)</h3>
-          </div>
-          <div id="user-list" class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1"></div>
-        </div>
-      </div>
+        <button
+          type="button"
+          onclick="downloadUserTemplate()"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+          title="Download User Master Import Template"
+        >
+          <i data-lucide="file-down" class="w-4 h-4"></i>
 
-      <div class="p-4 border-t bg-slate-50 flex justify-end">
-        <button onclick="closeUserModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold">Done</button>
+          <span class="hidden sm:inline">
+            Download Template
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onclick="document.getElementById('user-import-file').click()"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+          title="Import Users from Excel"
+        >
+          <i data-lucide="upload" class="w-4 h-4"></i>
+
+          <span class="hidden sm:inline">
+            Import Users
+          </span>
+        </button>
+
+        <input
+          type="file"
+          id="user-import-file"
+          accept=".xlsx"
+          hidden
+          onchange="importUsers(event)"
+        >
+
+        <button
+          type="button"
+          onclick="closeUserModal()"
+          class="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200 transition"
+          title="Close User Master"
+        >
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+
       </div>
     </div>
+
+    <!-- User Master Content -->
+    <div class="p-6 space-y-4 flex-1 overflow-y-auto custom-scrollbar text-xs">
+
+      <!-- Add New User Form -->
+      <form
+        onsubmit="addUser(event)"
+        class="grid grid-cols-1 sm:grid-cols-6 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200"
+      >
+        <div class="sm:col-span-2">
+          <label class="block font-semibold text-slate-700 mb-1">
+            Full Name *
+          </label>
+
+          <input
+            type="text"
+            id="new-user-name"
+            required
+            placeholder="e.g. Ratnadeep Mukherjee"
+            class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="block font-semibold text-slate-700 mb-1">
+            Email *
+          </label>
+
+          <input
+            type="email"
+            id="new-user-email"
+            required
+            placeholder="user@adityabirla.com"
+            class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="block font-semibold text-slate-700 mb-1">
+            Department *
+          </label>
+
+          <input
+            type="text"
+            id="new-user-dept"
+            required
+            placeholder="e.g. Retail commercial"
+            class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+        </div>
+
+        <div class="sm:col-span-3">
+          <label class="block font-semibold text-slate-700 mb-1">
+            Role Tier
+          </label>
+
+          <select
+            id="new-user-role"
+            class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none"
+          >
+            <option value="Level 1">
+              Level 1 (Full CRUD)
+            </option>
+
+            <option value="Level 2">
+              Level 2 (Vertical Scoped)
+            </option>
+
+            <option value="Admin">
+              Admin
+            </option>
+
+            <option value="Read-Only">
+              Read-Only
+            </option>
+          </select>
+        </div>
+
+        <div class="sm:col-span-3">
+          <label class="block font-semibold text-slate-700 mb-1">
+            Assigned Vertical
+          </label>
+
+          <select
+            id="new-user-vertical"
+            class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none"
+          >
+            <option value="All">All Verticals</option>
+            <option value="Retail commercial">Retail commercial</option>
+            <option value="Finance">Finance</option>
+            <option value="Merchandising">Merchandising</option>
+          </select>
+        </div>
+
+        <div class="sm:col-span-6 flex justify-end pt-2">
+          <button
+            type="submit"
+            class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow-sm transition"
+          >
+            + Add to User Master
+          </button>
+        </div>
+      </form>
+
+      <!-- Active User List -->
+      <div>
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold text-slate-700 uppercase text-[11px]">
+            Active Master Users
+            (<span id="user-count">0</span>)
+          </h3>
+        </div>
+
+        <div
+          id="user-list"
+          class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1"
+        ></div>
+      </div>
+
+    </div>
+
+    <!-- User Master Footer -->
+    <div class="p-4 border-t bg-slate-50 flex justify-end">
+      <button
+        type="button"
+        onclick="closeUserModal()"
+        class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold"
+      >
+        Done
+      </button>
+    </div>
+
   </div>
+</div>
 
   <!-- Modal 5: Import Center -->
 
@@ -1143,9 +1281,14 @@ async function loadInitiativesFromSupabase() {
 }
 
     function openUserModal() {
-      renderUserMasterList();
-      document.getElementById('user-modal').classList.remove('hidden');
-    }
+  renderUserMasterList();
+
+  document
+    .getElementById('user-modal')
+    .classList.remove('hidden');
+
+  lucide.createIcons();
+}
 
     function closeUserModal() {
       document.getElementById('user-modal').classList.add('hidden');
@@ -2279,6 +2422,92 @@ XLSX.utils.book_append_sheet(
   closeImportModal();
 }
 
+function downloadUserTemplate() {
+  if (typeof XLSX === 'undefined') {
+    alert(
+      'Excel library is not available. Check the XLSX script reference.'
+    );
+
+    return;
+  }
+
+  const workbook = XLSX.utils.book_new();
+
+  const instructions = [
+    ["USER MASTER IMPORT INSTRUCTIONS"],
+    [""],
+    ["1. Do not rename the Users sheet."],
+    ["2. Do not rename or delete column headers."],
+    ["3. All fields in the Users sheet are mandatory."],
+    ["4. Email must be unique."],
+    ["5. Allowed roles: Admin, Level 1, Level 2, Read-Only."],
+    ["6. Assigned Vertical is mandatory for Level 2 users."],
+    ["7. Use All for Admin, Level 1, and Read-Only users unless a specific vertical is required."],
+    ["8. Allowed verticals: All, Retail commercial, Finance, Merchandising."],
+    ["9. Imported users are automatically created as active."],
+    ["10. Delete or replace sample rows before production import."]
+  ];
+
+  const sampleUsers = [
+    [
+      "Full Name*",
+      "Email*",
+      "Department*",
+      "Role*",
+      "Assigned Vertical*"
+    ],
+    [
+      "Sample Admin User",
+      "sample.admin@example.com",
+      "IT",
+      "Admin",
+      "All"
+    ],
+    [
+      "Sample Finance User",
+      "sample.finance@example.com",
+      "Finance",
+      "Level 2",
+      "Finance"
+    ]
+  ];
+
+  const instructionSheet =
+    XLSX.utils.aoa_to_sheet(instructions);
+
+  const userSheet =
+    XLSX.utils.aoa_to_sheet(sampleUsers);
+
+  instructionSheet['!cols'] = [
+    { wch: 100 }
+  ];
+
+  userSheet['!cols'] = [
+    { wch: 28 },
+    { wch: 36 },
+    { wch: 24 },
+    { wch: 20 },
+    { wch: 24 }
+  ];
+
+  XLSX.utils.book_append_sheet(
+    workbook,
+    instructionSheet,
+    'Instructions'
+  );
+
+  XLSX.utils.book_append_sheet(
+    workbook,
+    userSheet,
+    'Users'
+  );
+
+  XLSX.writeFile(
+    workbook,
+    'User_Master_Import_Template.xlsx'
+  );
+}
+
     // --- 9. EXPORT CSV ---
     function exportToCSV() {
       const headers = [
@@ -3125,6 +3354,104 @@ XLSX.utils.book_append_sheet(
       document.getElementById('admin-modal').classList.add('hidden');
       renderProjects();
     }
+
+    async function importUsers(event) {
+
+  const file = event.target.files[0];
+
+  if (!file) return;
+
+  const reader = new FileReader();
+
+  reader.onload = async function(e) {
+
+    const workbook =
+      XLSX.read(
+        e.target.result,
+        { type: 'binary' }
+      );
+
+    const userSheet =
+      workbook.Sheets['Users'];
+
+    if (!userSheet) {
+
+      alert(
+        'Users sheet not found.'
+      );
+
+      return;
+    }
+
+    const users =
+      XLSX.utils.sheet_to_json(
+        userSheet
+      );
+
+    let importedCount = 0;
+    let skippedCount = 0;
+
+    for (const row of users) {
+
+      const email =
+        (row["Email"] || '')
+          .trim()
+          .toLowerCase();
+
+      if (!email) {
+        skippedCount++;
+        continue;
+      }
+
+      const existingUser =
+        userMaster.find(
+          u =>
+            u.email.toLowerCase() ===
+            email
+        );
+
+      if (existingUser) {
+        skippedCount++;
+        continue;
+      }
+
+      const { error } =
+        await supabaseClient
+          .from('user_master')
+          .insert({
+            full_name:
+              row["Full Name"],
+
+            email,
+
+            department:
+              row["Department"],
+
+            role:
+              row["Role"],
+
+            assigned_vertical:
+              row["Assigned Vertical"],
+
+            is_active: true
+          });
+
+      if (!error) {
+        importedCount++;
+      }
+    }
+
+    await loadUsersFromSupabase();
+
+    renderUserMasterList();
+
+    alert(
+      `Users Imported: ${importedCount}\nDuplicates Skipped: ${skippedCount}`
+    );
+  };
+
+  reader.readAsBinaryString(file);
+}
 
     function openImportModal() {
 
