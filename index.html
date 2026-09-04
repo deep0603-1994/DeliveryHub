@@ -12,6 +12,7 @@
 
 <!-- Supabase JavaScript Client -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
   <style>
     .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -175,6 +176,17 @@
           <button id="btn-admin-roles" onclick="openAdminModal()" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg shadow-sm transition" title="RBAC Directory">
             <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> <span class="hidden md:inline">User Roles</span>
           </button>
+
+          <button
+  onclick="openImportModal()"
+  class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+>
+  <i data-lucide="upload" class="w-4 h-4"></i>
+  <span class="hidden sm:inline">
+      Import
+  </span>
+</button>
+
 
           <button onclick="exportToCSV()" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 transition">
             <i data-lucide="download" class="w-4 h-4"></i> <span class="hidden sm:inline">Export CSV</span>
@@ -543,6 +555,75 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal 5: Import Center -->
+
+<div
+  id="import-modal"
+  class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
+>
+
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
+
+    <div class="p-5 border-b flex items-center justify-between">
+  <div>
+    <h2 class="text-sm font-bold text-slate-800">
+      Initiative Import Center
+    </h2>
+
+    <p class="text-xs text-slate-500 mt-1">
+      Download the template or import completed initiative and milestone data.
+    </p>
+  </div>
+
+  <button
+    type="button"
+    onclick="closeImportModal()"
+    class="text-slate-400 hover:text-slate-700"
+    title="Close"
+  >
+    <i data-lucide="x" class="w-5 h-5"></i>
+  </button>
+</div>
+
+
+
+    <div class="p-5 space-y-3">
+
+      <button
+        onclick="downloadImportTemplate()"
+        class="w-full px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium"
+      >
+        Download Template
+      </button>
+
+      <button
+        onclick="document.getElementById('import-file').click()"
+        class="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg font-medium"
+      >
+        Import File
+      </button>
+
+      <input
+        type="file"
+        id="import-file"
+        accept=".xlsx"
+        hidden
+        onchange="importExcel(event)"
+      >
+
+      <div class="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+  <p class="text-[11px] text-amber-800 leading-relaxed">
+    The sample rows are importable. Delete or replace the sample rows
+    before uploading production data.
+  </p>
+</div>
+
+    </div>
+
+  </div>
+
+</div>
 
   <!-- Modal 4: Admin RBAC User & Permission Manager -->
   <div id="admin-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
@@ -1326,7 +1407,15 @@ async function loadInitiativesFromSupabase() {
                   <i data-lucide="${p.collapsed ? 'chevron-right' : 'chevron-down'}" class="w-5 h-5"></i>
                 </button>
                 <div class="flex flex-wrap items-center gap-2">
-                  <span class="text-xs font-mono font-bold text-slate-400">#${pIndex + 1}</span>
+                  <div class="flex flex-col">
+  <span class="text-xs font-mono font-bold text-slate-400">
+      #${pIndex + 1}
+  </span>
+
+  <span class="text-[10px] font-mono font-bold text-indigo-600">
+      Initiative ID: ${p.id}
+  </span>
+</div>
                   <h3 class="text-sm font-bold text-slate-900">${p.name}</h3>
                   <!-- Tag 1: Initiative Type -->
                   ${getTypeBadge(p.type || 'Project')}
@@ -1438,6 +1527,9 @@ async function loadInitiativesFromSupabase() {
                   <thead class="bg-slate-100/75 text-slate-600 uppercase font-semibold border-b border-slate-200 text-[10px]">
                     <tr>
                       <th class="py-2.5 px-3 w-8 text-center">#</th>
+                      <th class="py-2.5 px-3 min-w-[90px]">
+                        Milestone ID
+                      </th>
                       <th class="py-2.5 px-3 min-w-[260px]">Milestone<br><span class="font-normal normal-case">Track - User Story</span></th>
                       <th class="py-2.5 px-3 min-w-[220px]">Milestone - Actions</th>
                       <th class="py-2.5 px-3 min-w-[140px]">Milestone Owner</th>
@@ -1462,6 +1554,9 @@ async function loadInitiativesFromSupabase() {
                       return `
                         <tr class="hover:bg-slate-50/80 transition-colors group">
                           <td class="py-2.5 px-3 text-center text-slate-400 font-mono text-[10px]">${mIdx + 1}</td>
+                          <td class="py-2.5 px-3 font-mono text-indigo-700 font-semibold">
+                          ${m.id}
+                          </td>                 
                           <td class="py-2.5 px-3 font-semibold text-slate-900">${m.title}</td>
                           <td class="py-2.5 px-3 text-slate-700 font-normal leading-relaxed">${m.actions}</td>
                           <td class="py-2.5 px-3">
@@ -1768,8 +1863,9 @@ function openMilestoneModal(
   }
 
   document.getElementById(
-    'milestone-modal-subtitle'
-  ).innerText = `Project: ${project.name}`;
+  'milestone-modal-subtitle'
+).innerText =
+`Initiative ID: ${project.id} | ${project.name}`;
 
   document.getElementById(
     'milestone-modal-title'
@@ -2007,15 +2103,216 @@ function editMilestone(projectId, milestoneId) {
 
   await loadInitiativesFromSupabase();
 }
+function normalizeExcelDate(value) {
+  if (
+    value === undefined ||
+    value === null ||
+    value === ''
+  ) {
+    return '';
+  }
+
+  if (typeof value === 'number') {
+    const parsedDate = XLSX.SSF.parse_date_code(value);
+
+    if (!parsedDate) return '';
+
+    const year = String(parsedDate.y);
+    const month = String(parsedDate.m).padStart(2, '0');
+    const day = String(parsedDate.d).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  const rawValue = String(value).trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) {
+    return rawValue;
+  }
+
+  const parsed = new Date(rawValue);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(
+    parsed.getMonth() + 1
+  ).padStart(2, '0');
+  const day = String(
+    parsed.getDate()
+  ).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function downloadImportTemplate() {
+
+  const wb = XLSX.utils.book_new();
+
+  const instructions = [
+  ["INITIATIVE AND MILESTONE IMPORT INSTRUCTIONS"],
+  [""],
+  ["1. Do not rename the Initiatives or Milestones sheets."],
+  ["2. Do not rename or delete any column headers."],
+  ["3. Fields marked with * are mandatory."],
+  ["4. Initiative Name must be unique within the uploaded file."],
+  ["5. Initiative Name in the Milestones sheet must exactly match the Initiatives sheet."],
+  ["6. Business Owner, Assigned To and Owner should exist in User Master."],
+  ["7. Use date format YYYY-MM-DD."],
+  ["8. Do not enter Initiative ID or Milestone ID."],
+  ["9. Initiative ID and Milestone ID are generated by Supabase."],
+  ["10. Initiative Status is calculated automatically."],
+  ["11. Initiative Age is calculated automatically."],
+  ["12. Countdown Days is calculated automatically."],
+  ["13. Milestone Status is calculated automatically."],
+  ["14. Deviation Days is calculated automatically."],
+  ["15. Delete or replace the sample rows before production import."],
+  [""],
+  ["Allowed Initiative Types: Project, CR, Task"],
+  ["Allowed Verticals: Retail commercial, Finance, Merchandising"],
+  ["Allowed Measurable Impact: Quantitative, Qualitative"],
+  ["Allowed Buckets: Today, Tomorrow, This Week, Next Week, Pending, On Track, At Risk"]
+];
+  const initiatives = [
+ [
+  "Initiative Name*",
+  "Type*",
+  "CR No",
+  "Vertical*",
+  "Business Owner*",
+  "Assigned To*",
+  "Start Date",
+  "Target End Date",
+  "Actual End Date",
+  "Impact Category*",
+  "Measurable Impact*",
+  "Business Benefit*"
+ ],
+ [
+  "Retail Express",
+  "Project",
+  "CR-1001",
+  "Finance",
+  "Rohit Sharma",
+  "Amit Kumar",
+  "2026-09-01",
+  "2026-10-15",
+  "",
+  "Efficiency & Control",
+  "Quantitative",
+  "Reduce month-end closing cycle by 30%"
+ ]
+];
+
+  const milestones = [
+ [
+  "Initiative Name*",
+  "Milestone Title*",
+  "Actions*",
+  "Owner*",
+  "Dependency",
+  "Start Date",
+  "End Date",
+  "Deadline",
+  "Completion Date",
+  "Bucket",
+  "KPI",
+  "Remarks"
+ ],
+
+ [
+  "Retail Express",
+  "Requirement Signoff",
+  "Finalize BRD and stakeholder signoff",
+  "Amit Kumar",
+  "",
+  "2026-09-01",
+  "2026-09-05",
+  "2026-09-05",
+  "",
+  "This Week",
+  "100% BRD Signoff",
+  "Sample milestone"
+ ],
+
+ [
+  "Retail Express",
+  "UAT Signoff",
+  "Complete SIT/UAT and receive signoff",
+  "Amit Kumar",
+  "Requirement Signoff",
+  "2026-09-20",
+  "2026-10-05",
+  "2026-10-05",
+  "",
+  "Next Week",
+  "100% Test Case Pass",
+  "Sample milestone"
+ ]
+];
+
+  XLSX.utils.book_append_sheet(
+  wb,
+  XLSX.utils.aoa_to_sheet(instructions),
+  "Instructions"
+);
+
+XLSX.utils.book_append_sheet(
+  wb,
+  XLSX.utils.aoa_to_sheet(initiatives),
+  "Initiatives"
+);
+
+XLSX.utils.book_append_sheet(
+  wb,
+  XLSX.utils.aoa_to_sheet(milestones),
+  "Milestones"
+);
+
+  XLSX.writeFile(
+    wb,
+    "Initiative_Import_Template.xlsx"
+  );
+
+  closeImportModal();
+}
 
     // --- 9. EXPORT CSV ---
     function exportToCSV() {
       const headers = [
-        "Sl No","Project Name - Epic","Type","CR No","Vertical","Business Owner","Assigned To",
-        "Project Status","Project Start Date","Target End Date","Actual End Date","Project Age (Working Days)","Countdown (Days)",
-        "Business Impact Category","Measurable Business Impact","Business Benefit",
-        "Milestone Title","Milestone Actions","Milestone Owner","Dependency","Milestone Status","Bucket",
-        "Milestone Start Date","Milestone End Date","Deadline","Completion Date","Deviation Days","Milestone KPI","Milestone Remarks"
+        "Sl No",
+        "Initiative ID",
+        "Milestone ID",
+        "Project Name - Epic",
+        "Type",
+        "CR No",
+        "Vertical",
+        "Business Owner",
+        "Assigned To",
+        "Project Status",
+        "Project Start Date",
+        "Target End Date",
+        "Actual End Date",
+        "Project Age (Working Days)",
+        "Countdown (Days)",
+        "Business Impact Category",
+        "Measurable Business Impact",
+        "Business Benefit",
+        "Milestone Title",
+        "Milestone Actions",
+        "Milestone Owner",
+        "Dependency",
+        "Milestone Status",
+        "Bucket",
+        "Milestone Start Date",
+        "Milestone End Date",
+        "Deadline",
+        "Completion Date",
+        "Deviation Days",
+        "Milestone KPI",
+        "Milestone Remarks"
       ];
       let rows = [];
       let counter = 1;
@@ -2025,7 +2322,9 @@ function editMilestone(projectId, milestoneId) {
         const pCountdown = calculateCountdown(p.targetEndDate, p.startDate, p.actualEndDate);
         if (!p.milestones || p.milestones.length === 0) {
           rows.push([
-            counter++,
+          counter++,
+          p.id,
+          '',
             `"${(p.name || '').replace(/"/g, '""')}"`,
             `"${p.type}"`,
             `"${(p.crNo || '').replace(/"/g, '""')}"`,
@@ -2047,8 +2346,10 @@ function editMilestone(projectId, milestoneId) {
           p.milestones.forEach(m => {
             const mStat = m.status === 'Auto' ? evaluateMilestoneStatus(m.title, m.startDate, m.deadline, m.completionDate) : m.status;
             rows.push([
-              counter++,
-              `"${(p.name || '').replace(/"/g, '""')}"`,
+            counter++,
+            p.id,
+            m.id,
+            `"${(p.name || '').replace(/"/g, '""')}"`,
               `"${p.type}"`,
               `"${(p.crNo || '').replace(/"/g, '""')}"`,
               `"${p.vertical}"`,
@@ -2089,6 +2390,660 @@ function editMilestone(projectId, milestoneId) {
       link.click();
       document.body.removeChild(link);
     }
+
+    async function importExcel(event) {
+  const input = event.target;
+  const file = input.files?.[0];
+
+  if (!file) return;
+
+  if (!canCreateInitiative()) {
+    alert(
+      'You do not have permission to import initiatives.'
+    );
+
+    input.value = '';
+    return;
+  }
+
+  if (typeof XLSX === 'undefined') {
+    alert(
+      'Excel library is not available. Check the XLSX script reference.'
+    );
+
+    input.value = '';
+    return;
+  }
+
+  try {
+    const fileBuffer = await file.arrayBuffer();
+
+    const workbook = XLSX.read(
+      fileBuffer,
+      {
+        type: 'array',
+        cellDates: false
+      }
+    );
+
+    const initiativeSheet =
+      workbook.Sheets['Initiatives'];
+
+    const milestoneSheet =
+      workbook.Sheets['Milestones'];
+
+    if (!initiativeSheet || !milestoneSheet) {
+      throw new Error(
+        'Workbook must contain Initiatives and Milestones sheets.'
+      );
+    }
+
+    const initiativeRows =
+      XLSX.utils.sheet_to_json(
+        initiativeSheet,
+        {
+          defval: '',
+          raw: true
+        }
+      );
+
+    const milestoneRows =
+      XLSX.utils.sheet_to_json(
+        milestoneSheet,
+        {
+          defval: '',
+          raw: true
+        }
+      );
+
+    if (initiativeRows.length === 0) {
+      throw new Error(
+        'The Initiatives sheet does not contain any data rows.'
+      );
+    }
+
+    const errors = [];
+    const initiativeNameKeys = new Set();
+
+    const allowedTypes = [
+      'Project',
+      'CR',
+      'Task'
+    ];
+
+    const allowedVerticals = [
+      'Retail commercial',
+      'Finance',
+      'Merchandising'
+    ];
+
+    const allowedMeasurableImpact = [
+      'Quantitative',
+      'Qualitative'
+    ];
+
+    const allowedBuckets = [
+      'Today',
+      'Tomorrow',
+      'This Week',
+      'Next Week',
+      'Pending',
+      'On Track',
+      'At Risk'
+    ];
+
+    const activeUserNames = new Set(
+      userMaster.map(
+        user => user.name.trim().toLowerCase()
+      )
+    );
+
+    const preparedInitiatives =
+      initiativeRows.map((row, index) => {
+        const excelRowNumber = index + 2;
+
+        const initiativeName = String(
+          row['Initiative Name*'] || ''
+        ).trim();
+
+        const initiativeType = String(
+          row['Type*'] || ''
+        ).trim();
+
+        const crNo = String(
+          row['CR No'] || ''
+        ).trim();
+
+        const vertical = String(
+          row['Vertical*'] || ''
+        ).trim();
+
+        const businessOwner = String(
+          row['Business Owner*'] || ''
+        ).trim();
+
+        const assignedTo = String(
+          row['Assigned To*'] || ''
+        ).trim();
+
+        const startDate = normalizeExcelDate(
+          row['Start Date']
+        );
+
+        const targetEndDate = normalizeExcelDate(
+          row['Target End Date']
+        );
+
+        const actualEndDate = normalizeExcelDate(
+          row['Actual End Date']
+        );
+
+        const impactCategory = String(
+          row['Impact Category*'] || ''
+        ).trim();
+
+        const measurableImpact = String(
+          row['Measurable Impact*'] || ''
+        ).trim();
+
+        const businessBenefit = String(
+          row['Business Benefit*'] || ''
+        ).trim();
+
+        if (!initiativeName) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Initiative Name is required.`
+          );
+        }
+
+        if (!initiativeType) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Type is required.`
+          );
+        } else if (
+          !allowedTypes.includes(initiativeType)
+        ) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Type must be Project, CR or Task.`
+          );
+        }
+
+        if (!vertical) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Vertical is required.`
+          );
+        } else if (
+          !allowedVerticals.includes(vertical)
+        ) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Invalid Vertical "${vertical}".`
+          );
+        }
+
+        if (!businessOwner) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Business Owner is required.`
+          );
+        } else if (
+          !activeUserNames.has(
+            businessOwner.toLowerCase()
+          )
+        ) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Business Owner "${businessOwner}" is not in active User Master.`
+          );
+        }
+
+        if (!assignedTo) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Assigned To is required.`
+          );
+        } else if (
+          !activeUserNames.has(
+            assignedTo.toLowerCase()
+          )
+        ) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Assigned To "${assignedTo}" is not in active User Master.`
+          );
+        }
+
+        if (!impactCategory) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Impact Category is required.`
+          );
+        }
+
+        if (!measurableImpact) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Measurable Impact is required.`
+          );
+        } else if (
+          !allowedMeasurableImpact.includes(
+            measurableImpact
+          )
+        ) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Measurable Impact must be Quantitative or Qualitative.`
+          );
+        }
+
+        if (!businessBenefit) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Business Benefit is required.`
+          );
+        }
+
+        if (
+          startDate &&
+          targetEndDate &&
+          startDate > targetEndDate
+        ) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Start Date cannot be after Target End Date.`
+          );
+        }
+
+        const initiativeKey =
+          initiativeName.toLowerCase();
+
+        if (
+          initiativeNameKeys.has(initiativeKey)
+        ) {
+          errors.push(
+            `Initiatives row ${excelRowNumber}: Duplicate Initiative Name "${initiativeName}".`
+          );
+        } else if (initiativeName) {
+          initiativeNameKeys.add(initiativeKey);
+        }
+
+        const initiativeAge =
+          calculateProjectAge(
+            startDate,
+            targetEndDate
+          );
+
+        const countdownDays =
+          calculateCountdown(
+            targetEndDate,
+            startDate,
+            actualEndDate
+          );
+
+        return {
+          excelRowNumber,
+          initiativeKey,
+          initiativeName,
+
+          databaseRecord: {
+            title: initiativeName,
+            initiative_type: initiativeType,
+            cr_no: crNo || null,
+            vertical,
+            business_owner: businessOwner,
+            assigned_to: assignedTo,
+            start_date: startDate || null,
+            target_end_date:
+              targetEndDate || null,
+            actual_end_date:
+              actualEndDate || null,
+            impact_category: impactCategory,
+            measurable_impact:
+              measurableImpact,
+            business_benefit:
+              businessBenefit,
+
+            initiative_status:
+              evaluateProjectStatus(
+                initiativeName,
+                startDate,
+                targetEndDate,
+                actualEndDate
+              ),
+
+            initiative_age:
+              initiativeAge === '-'
+                ? null
+                : initiativeAge,
+
+            countdown_days:
+              countdownDays === '-'
+                ? null
+                : countdownDays
+          }
+        };
+      });
+
+    const preparedMilestones =
+      milestoneRows.map((row, index) => {
+        const excelRowNumber = index + 2;
+
+        const initiativeName = String(
+          row['Initiative Name*'] || ''
+        ).trim();
+
+        const milestoneTitle = String(
+          row['Milestone Title*'] || ''
+        ).trim();
+
+        const actions = String(
+          row['Actions*'] || ''
+        ).trim();
+
+        const owner = String(
+          row['Owner*'] || ''
+        ).trim();
+
+        const dependency = String(
+          row['Dependency'] || ''
+        ).trim();
+
+        const startDate = normalizeExcelDate(
+          row['Start Date']
+        );
+
+        const endDate = normalizeExcelDate(
+          row['End Date']
+        );
+
+        const deadline = normalizeExcelDate(
+          row['Deadline']
+        );
+
+        const completionDate =
+          normalizeExcelDate(
+            row['Completion Date']
+          );
+
+        const bucket = String(
+          row['Bucket'] || 'Pending'
+        ).trim() || 'Pending';
+
+        const kpi = String(
+          row['KPI'] || ''
+        ).trim();
+
+        const remarks = String(
+          row['Remarks'] || ''
+        ).trim();
+
+        const initiativeKey =
+          initiativeName.toLowerCase();
+
+        if (!initiativeName) {
+          errors.push(
+            `Milestones row ${excelRowNumber}: Initiative Name is required.`
+          );
+        } else if (
+          !initiativeNameKeys.has(initiativeKey)
+        ) {
+          errors.push(
+            `Milestones row ${excelRowNumber}: Initiative "${initiativeName}" is not present in the Initiatives sheet.`
+          );
+        }
+
+        if (!milestoneTitle) {
+          errors.push(
+            `Milestones row ${excelRowNumber}: Milestone Title is required.`
+          );
+        }
+
+        if (!actions) {
+          errors.push(
+            `Milestones row ${excelRowNumber}: Actions is required.`
+          );
+        }
+
+        if (!owner) {
+          errors.push(
+            `Milestones row ${excelRowNumber}: Owner is required.`
+          );
+        } else if (
+          !activeUserNames.has(
+            owner.toLowerCase()
+          )
+        ) {
+          errors.push(
+            `Milestones row ${excelRowNumber}: Owner "${owner}" is not in active User Master.`
+          );
+        }
+
+        if (
+          bucket &&
+          !allowedBuckets.includes(bucket)
+        ) {
+          errors.push(
+            `Milestones row ${excelRowNumber}: Invalid Bucket "${bucket}".`
+          );
+        }
+
+        if (
+          startDate &&
+          endDate &&
+          startDate > endDate
+        ) {
+          errors.push(
+            `Milestones row ${excelRowNumber}: Start Date cannot be after End Date.`
+          );
+        }
+
+        const milestoneStatus =
+          evaluateMilestoneStatus(
+            milestoneTitle,
+            startDate,
+            deadline,
+            completionDate
+          );
+
+        return {
+          excelRowNumber,
+          initiativeKey,
+          initiativeName,
+          milestoneTitle,
+          actions,
+          owner,
+          dependency,
+          startDate,
+          endDate,
+          deadline,
+          completionDate,
+          bucket,
+          kpi,
+          remarks,
+          milestoneStatus
+        };
+      });
+
+    if (errors.length > 0) {
+      const errorPreview =
+        errors.slice(0, 15).join('\n');
+
+      const moreErrors =
+        errors.length > 15
+          ? `\n\nPlus ${errors.length - 15} more validation error(s).`
+          : '';
+
+      throw new Error(
+        `Import validation failed:\n\n${errorPreview}${moreErrors}`
+      );
+    }
+
+    const confirmed = confirm(
+      `Import ${preparedInitiatives.length} initiative(s) and ${preparedMilestones.length} milestone(s)?`
+    );
+
+    if (!confirmed) {
+      input.value = '';
+      return;
+    }
+
+    const initiativeMap = new Map();
+    const createdInitiativeIds = [];
+    let importedInitiatives = 0;
+    let importedMilestones = 0;
+
+    for (
+      const preparedInitiative
+      of preparedInitiatives
+    ) {
+      const { data, error } =
+        await supabaseClient
+          .from('initiatives')
+          .insert(
+            preparedInitiative.databaseRecord
+          )
+          .select('id, title')
+          .single();
+
+      if (error) {
+        throw new Error(
+          `Initiatives row ${preparedInitiative.excelRowNumber}: ${error.message}`
+        );
+      }
+
+      initiativeMap.set(
+        preparedInitiative.initiativeKey,
+        {
+          id: Number(data.id),
+          name: data.title
+        }
+      );
+
+      createdInitiativeIds.push(
+        Number(data.id)
+      );
+
+      importedInitiatives++;
+    }
+
+    try {
+      for (
+        const preparedMilestone
+        of preparedMilestones
+      ) {
+        const parentInitiative =
+          initiativeMap.get(
+            preparedMilestone.initiativeKey
+          );
+
+        if (!parentInitiative) {
+          throw new Error(
+            `Milestones row ${preparedMilestone.excelRowNumber}: Parent Initiative was not found.`
+          );
+        }
+
+        const databaseRecord = {
+          initiative_id:
+            parentInitiative.id,
+
+          initiative_name:
+            parentInitiative.name,
+
+          milestone_title:
+            preparedMilestone.milestoneTitle,
+
+          actions:
+            preparedMilestone.actions,
+
+          owner:
+            preparedMilestone.owner,
+
+          dependency:
+            preparedMilestone.dependency,
+
+          status:
+            preparedMilestone.milestoneStatus,
+
+          bucket:
+            preparedMilestone.bucket,
+
+          start_date:
+            preparedMilestone.startDate ||
+            null,
+
+          end_date:
+            preparedMilestone.endDate ||
+            null,
+
+          deadline:
+            preparedMilestone.deadline ||
+            null,
+
+          completion_date:
+            preparedMilestone.completionDate ||
+            null,
+
+          kpi:
+            preparedMilestone.kpi,
+
+          remarks:
+            preparedMilestone.remarks,
+
+          deviation_days:
+            calculateDeviation(
+              preparedMilestone.deadline,
+              preparedMilestone.completionDate,
+              preparedMilestone.milestoneStatus
+            )
+        };
+
+        const { error } =
+          await supabaseClient
+            .from('milestones')
+            .insert(databaseRecord);
+
+        if (error) {
+          throw new Error(
+            `Milestones row ${preparedMilestone.excelRowNumber}: ${error.message}`
+          );
+        }
+
+        importedMilestones++;
+      }
+    } catch (milestoneError) {
+      if (createdInitiativeIds.length > 0) {
+        await supabaseClient
+          .from('milestones')
+          .delete()
+          .in(
+            'initiative_id',
+            createdInitiativeIds
+          );
+
+        await supabaseClient
+          .from('initiatives')
+          .delete()
+          .in(
+            'id',
+            createdInitiativeIds
+          );
+      }
+
+      throw milestoneError;
+    }
+
+    await loadInitiativesFromSupabase();
+
+    closeImportModal();
+
+    alert(
+      `Import completed successfully.\n\n` +
+      `Initiatives imported: ${importedInitiatives}\n` +
+      `Milestones imported: ${importedMilestones}`
+    );
+  } catch (error) {
+    console.error(
+      'Excel import failed:',
+      error
+    );
+
+    alert(
+      `Import failed:\n\n${error.message}`
+    );
+  } finally {
+    input.value = '';
+  }
+}
 
     // --- 9.5. ADMIN RBAC FUNCTIONS ---
     function renderUserRoleManagement() {
@@ -2170,6 +3125,20 @@ function editMilestone(projectId, milestoneId) {
       document.getElementById('admin-modal').classList.add('hidden');
       renderProjects();
     }
+
+    function openImportModal() {
+
+  document
+    .getElementById('import-modal')
+    .classList.remove('hidden');
+}
+
+function closeImportModal() {
+
+  document
+    .getElementById('import-modal')
+    .classList.add('hidden');
+}
 
     document.addEventListener(
   'DOMContentLoaded',
