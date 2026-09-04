@@ -1,0 +1,10 @@
+[
+  { "name": "Ratnadeep Mukherjee", "email": "ratnadeep.mukherjee@adityabirla.com", "department": "IT / PMO", "role": "Admin", "assignedVertical": "All" },
+  { "name": "Sachin", "email": "sachin@adityabirla.com", "department": "Retail POS", "role": "Level 1", "assignedVertical": "All" },
+  { "name": "Neha", "email": "neha@adityabirla.com", "department": "Retail commercial", "role": "Level 2", "assignedVertical": "Retail commercial" },
+  { "name": "Hrishik", "email": "hrishik@adityabirla.com", "department": "Finance", "role": "Level 2", "assignedVertical": "Finance" },
+  { "name": "Suraj", "email": "suraj@adityabirla.com", "department": "Merchandising", "role": "Level 2", "assignedVertical": "Merchandising" },
+  { "name": "Yash", "email": "yash@adityabirla.com", "department": "ERP & Tech", "role": "Level 1", "assignedVertical": "All" },
+  { "name": "Sneha", "email": "sneha@adityabirla.com", "department": "Finance", "role": "Read-Only", "assignedVertical": "All" },
+  { "name": "Kunal", "email": "kunal@adityabirla.com", "department": "Supply Chain", "role": "Read-Only", "assignedVertical": "All" }
+]

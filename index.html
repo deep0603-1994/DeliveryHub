@@ -1,0 +1,1647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Milestone Delivery Hub</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f8fafc; }
+
+    /* Clickable KPI slicers */
+    .kpi-slicer {
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    }
+    .kpi-slicer:hover {
+      border-color: #818cf8;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 14px rgba(15, 23, 42, 0.08);
+    }
+    .kpi-slicer:focus {
+      outline: none;
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+    }
+    .kpi-slicer-active {
+      border-color: #4f46e5 !important;
+      background-color: #eef2ff !important;
+      box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.18) !important;
+    }
+    .kpi-slicer-active[data-kpi-filter="delay"] {
+      border-color: #f59e0b !important;
+      background-color: #fffbeb !important;
+      box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18) !important;
+    }
+    .kpi-slicer-active[data-kpi-filter="deviation"] {
+      border-color: #f43f5e !important;
+      background-color: #fff1f2 !important;
+      box-shadow: 0 0 0 2px rgba(244, 63, 94, 0.18) !important;
+    }
+    .kpi-slicer-active[data-kpi-filter="completed"] {
+      border-color: #10b981 !important;
+      background-color: #ecfdf5 !important;
+      box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.18) !important;
+    }
+
+    /* Smooth transitions for sidebar toggle */
+    #sidebar { transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+    #main-content { transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+
+    /* Expanded Sidebar State */
+    .sidebar-expanded { width: 16rem; }
+    .main-expanded { margin-left: 16rem; }
+
+    /* Collapsed Sidebar State (Icons Only) */
+    .sidebar-collapsed { width: 4.5rem !important; }
+    .main-collapsed { margin-left: 4.5rem !important; }
+
+    /* Hide text & badges when collapsed */
+    .sidebar-collapsed .sidebar-text,
+    .sidebar-collapsed .sidebar-brand-text,
+    .sidebar-collapsed .sidebar-badge,
+    .sidebar-collapsed .sidebar-heading {
+      display: none !important;
+    }
+
+    /* Center align items when collapsed */
+    .sidebar-collapsed .sidebar-brand-box {
+      justify-content: center !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+    .sidebar-collapsed .sidebar-link {
+      justify-content: center !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+    .sidebar-collapsed .sidebar-footer {
+      justify-content: center !important;
+      padding-left: 0 !important;
+      padding-right: 0 !important;
+    }
+  </style>
+</head>
+
+<body class="bg-slate-100 text-slate-800 antialiased font-sans flex min-h-screen">
+
+  <!-- Left Sidebar Navigation Panel -->
+  <aside id="sidebar" class="sidebar-expanded bg-slate-900 text-slate-300 flex flex-col fixed top-0 left-0 h-full z-40 border-r border-slate-800 shadow-xl overflow-hidden select-none">
+    
+    <!-- Brand Header: Click Layers Icon to Collapse / Expand -->
+    <div class="sidebar-brand-box flex items-center gap-3 h-16 px-4 border-b border-slate-800 bg-slate-950/60 flex-shrink-0">
+      <button onclick="toggleSidebar()" class="p-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-inner flex-shrink-0 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer" title="Click to Collapse / Expand Sidebar">
+        <i data-lucide="layers" class="w-5 h-5 text-white"></i>
+      </button>
+      <div class="sidebar-brand-text min-w-0">
+        <h1 class="text-sm font-bold tracking-tight text-white truncate">Delivery Hub</h1>
+        <p class="text-[10px] text-slate-400 truncate">Enterprise PMO Portal</p>
+      </div>
+    </div>
+
+    <!-- Navigation Menus -->
+    <nav class="flex-1 px-2.5 py-5 space-y-6 overflow-y-auto custom-scrollbar text-xs">
+      <!-- Workspace Section -->
+      <div>
+        <span class="sidebar-heading px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-2">Workspace</span>
+        <div class="space-y-1">
+          <a href="#" class="sidebar-link flex items-center gap-3 px-3 py-2 rounded-lg bg-indigo-600 text-white font-semibold shadow-sm transition" title="Project & Task Tracker">
+            <i data-lucide="layout-dashboard" class="w-5 h-5 flex-shrink-0"></i>
+            <span class="sidebar-text truncate">Project & Task Tracker</span>
+          </a>
+        </div>
+      </div>
+
+      <!-- Master Data Section -->
+      <div>
+        <span class="sidebar-heading px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-2">Master Data</span>
+        <div class="space-y-1">
+          <button onclick="openUserModal()" class="sidebar-link w-full flex items-center justify-between px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition group" title="User Master">
+            <div class="flex items-center gap-3 min-w-0">
+              <i data-lucide="users" class="w-5 h-5 text-indigo-400 group-hover:text-indigo-300 flex-shrink-0"></i>
+              <span class="sidebar-text font-medium truncate">User Master</span>
+            </div>
+            <span id="sidebar-user-badge" class="sidebar-badge px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded text-[10px] font-mono">0</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Sidebar Footer -->
+    <div class="sidebar-footer p-3.5 border-t border-slate-800/80 bg-slate-950/40 text-[11px] text-slate-400 flex items-center justify-between flex-shrink-0">
+      <div class="sidebar-text flex items-center gap-2 truncate">
+        <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0"></div>
+        <span class="truncate">Status Engine Active</span>
+      </div>
+      <span class="sidebar-badge font-mono text-[10px] text-slate-500">v4.0</span>
+    </div>
+  </aside>
+
+  <!-- Main Content Area -->
+  <div id="main-content" class="main-expanded flex-1 flex flex-col min-w-0">
+
+    <!-- Top Sticky Header -->
+    <header class="bg-white text-slate-800 sticky top-0 z-30 shadow-sm border-b border-slate-200">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-bold text-slate-900">Project & Milestone Hub</span>
+          <span class="text-slate-300 hidden sm:inline">|</span>
+          <span class="text-xs text-slate-500 hidden sm:inline">Epic-to-Milestone Delivery & Automated Status Engine</span>
+        </div>
+
+        <div class="flex items-center gap-2 sm:gap-3">
+          <!-- Logged-in User Profile Badge -->
+          <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs">
+            <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
+            <span class="font-semibold text-slate-700" id="current-user-display">Ratnadeep (Admin)</span>
+          </div>
+
+          <!-- Admin User Management (Visible to Admin only) -->
+          <button id="btn-admin-roles" onclick="openAdminModal()" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg shadow-sm transition" title="RBAC Directory">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> <span class="hidden md:inline">User Roles</span>
+          </button>
+
+          <button onclick="exportToCSV()" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 transition">
+            <i data-lucide="download" class="w-4 h-4"></i> <span class="hidden sm:inline">Export CSV</span>
+          </button>
+
+          <button id="btn-new-project" onclick="openProjectModal()" class="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
+            <i data-lucide="folder-plus" class="w-4 h-4"></i> New Project / Epic
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Workspace Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+      <!-- KPI Summary Row — Clickable Slicers -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
+        <!-- All Milestones -->
+        <div class="kpi-slicer bg-white p-4 rounded-xl border border-slate-200 shadow-sm" data-kpi-filter="milestones" onclick="setKpiFilter('milestones')" onkeydown="handleKpiKeydown(event, 'milestones')" role="button" tabindex="0" aria-pressed="false" title="Show projects containing milestones">
+          <span class="text-[11px] font-semibold text-slate-500 uppercase">Total Initiatives</span>
+          <div class="mt-1 text-2xl font-bold text-slate-900" id="kpi-milestones">0</div>
+        </div>
+
+        <!-- All Projects -->
+        <div class="kpi-slicer kpi-slicer-active bg-white p-4 rounded-xl border border-slate-200 shadow-sm" data-kpi-filter="projects" onclick="setKpiFilter('projects')" onkeydown="handleKpiKeydown(event, 'projects')" role="button" tabindex="0" aria-pressed="false" title="Show Project-type records with all their milestones">
+          <span class="text-[11px] font-semibold text-slate-500 uppercase">Projects (Epics)</span>
+          <div class="mt-1 text-2xl font-bold text-slate-900" id="kpi-projects">0</div>
+        </div>
+        
+        <!-- WIP -->
+        <div class="kpi-slicer bg-white p-4 rounded-xl border border-slate-200 shadow-sm" data-kpi-filter="wip" onclick="setKpiFilter('wip')" onkeydown="handleKpiKeydown(event, 'wip')" role="button" tabindex="0" aria-pressed="false" title="Show projects and milestones in progress">
+          <span class="text-[11px] font-semibold text-blue-600 uppercase">In Progress (WIP)</span>
+          <div class="mt-1 text-2xl font-bold text-blue-600" id="kpi-wip">0</div>
+        </div>
+
+        <!-- Delays -->
+        <div class="kpi-slicer bg-white p-4 rounded-xl border border-slate-200 shadow-sm" data-kpi-filter="delay" onclick="setKpiFilter('delay')" onkeydown="handleKpiKeydown(event, 'delay')" role="button" tabindex="0" aria-pressed="false" title="Show projects containing delayed milestones">
+          <span class="text-[11px] font-semibold text-amber-600 uppercase">Delays (Milestones)</span>
+          <div class="mt-1 text-2xl font-bold text-amber-600" id="kpi-delays">0</div>
+        </div>
+
+        <!-- Deviations -->
+        <div class="kpi-slicer bg-white p-4 rounded-xl border border-slate-200 shadow-sm" data-kpi-filter="deviation" onclick="setKpiFilter('deviation')" onkeydown="handleKpiKeydown(event, 'deviation')" role="button" tabindex="0" aria-pressed="false" title="Show deviated projects">
+          <span class="text-[11px] font-semibold text-rose-600 uppercase">Deviations (Project)</span>
+          <div class="mt-1 text-2xl font-bold text-rose-600" id="kpi-deviations">0</div>
+        </div>
+
+        <!-- Completed -->
+        <div class="kpi-slicer bg-white p-4 rounded-xl border border-slate-200 shadow-sm" data-kpi-filter="completed" onclick="setKpiFilter('completed')" onkeydown="handleKpiKeydown(event, 'completed')" role="button" tabindex="0" aria-pressed="false" title="Show completed projects and milestones">
+          <span class="text-[11px] font-semibold text-emerald-600 uppercase">Completed</span>
+          <div class="mt-1 text-2xl font-bold text-emerald-600" id="kpi-completed">0</div>
+        </div>
+      </div>
+
+      <!-- Filter Toolbar -->
+      <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-wrap gap-3 items-center justify-between">
+        <div class="flex-1 min-w-[220px] relative">
+          <i data-lucide="search" class="w-4 h-4 absolute left-3 top-2.5 text-slate-400"></i>
+          <input type="text" id="filter-search" oninput="renderProjects()" placeholder="Search project, CR, owner, vertical, impact, milestone..." 
+            class="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <select id="filter-type" onchange="renderProjects()" class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">All Types (LOV)</option>
+            <option value="Project">Project</option>
+            <option value="CR">CR</option>
+            <option value="Task">Task</option>
+          </select>
+          <select id="filter-vertical" onchange="renderProjects()" class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">All Verticals (LOV)</option>
+            <option value="Retail commercial">Retail commercial</option>
+            <option value="Finance">Finance</option>
+            <option value="Merchandising">Merchandising</option>
+          </select>
+          <select id="filter-impact" onchange="renderProjects()" class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">All Impact Categories</option>
+            <option value="Revenue Enablement">Revenue Enablement</option>
+            <option value="Efficiency & Control">Efficiency & Control</option>
+            <option value="Cost Optimization">Cost Optimization</option>
+            <option value="Experience & CX">Experience & CX</option>
+            <option value="Cost Savings">Cost Savings</option>
+            <option value="Cost Avoidance">Cost Avoidance</option>
+            <option value="Qualitative Impact">Qualitative Impact</option>
+          </select>
+          <select id="filter-status" onchange="renderProjects()" class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">All Statuses</option>
+            <option value="WIP">WIP</option>
+            <option value="Delay">Delay</option>
+            <option value="Deviation">Deviation</option>
+            <option value="Done">Done</option>
+            <option value="In-Queue">In-Queue</option>
+            <option value="On-Hold">On-Hold</option>
+            <option value="Pending">Pending</option>
+          </select>
+          <button onclick="toggleAllAccordions(true)" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg bg-slate-50">Expand All</button>
+          <button onclick="toggleAllAccordions(false)" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg bg-slate-50">Collapse All</button>
+        </div>
+      </div>
+
+      <!-- Projects Container -->
+      <div id="projects-container" class="space-y-4"></div>
+
+      <!-- Empty State -->
+      <div id="empty-state" class="hidden bg-white p-12 rounded-xl border border-dashed border-slate-300 text-center text-slate-400 space-y-3">
+        <i data-lucide="folder-open" class="w-10 h-10 mx-auto text-slate-300"></i>
+        <p class="text-sm font-medium">No projects found. Click <strong>"New Project / Epic"</strong> above to get started.</p>
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal 1: Project Creation / Edit -->
+  <div id="project-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+        <h2 id="project-modal-title" class="text-sm font-bold text-slate-800">New Project / Epic</h2>
+        <button onclick="closeProjectModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="project-form" onsubmit="saveProject(event)" class="p-6 overflow-y-auto custom-scrollbar space-y-4 text-xs">
+        <input type="hidden" id="project-id">
+        
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Project Name - Epic *</label>
+          <input type="text" id="p-name" required placeholder="e.g. Optimize Billing Cycle TAT by optimizing Process & Tech Enablement" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Type (LOV) *</label>
+            <select id="p-type" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white">
+              <option value="Project">Project</option>
+              <option value="CR">CR</option>
+              <option value="Task">Task</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">CR No</label>
+            <input type="text" id="p-cr" placeholder="e.g. CH-424" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Vertical (LOV) *</label>
+            <select id="p-vertical" required class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white">
+              <option value="Retail commercial">Retail commercial</option>
+              <option value="Finance">Finance</option>
+              <option value="Merchandising">Merchandising</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Business Owner (User Master) *</label>
+            <select id="p-business-owner" required class="resource-lov w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"></select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Assigned To (User Master) *</label>
+            <select id="p-assigned-to" required class="resource-lov w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"></select>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Project Start Date</label>
+            <input type="date" id="p-start-date" class="w-full px-2 py-1.5 bg-white border rounded">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Target End Date</label>
+            <input type="date" id="p-target-end-date" class="w-full px-2 py-1.5 bg-white border rounded">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-700 mb-1">Actual End Date</label>
+            <input type="date" id="p-actual-end-date" class="w-full px-2 py-1.5 bg-white border rounded">
+          </div>
+        </div>
+        <!-- Business Impact Category, Measurable Impact & Business Benefit -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 p-3 rounded-lg border border-indigo-100">
+          <div>
+            <label class="block font-semibold text-indigo-950 mb-1">Business Impact Category (LOV) *</label>
+            <select id="p-impact-category" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white">
+              <option value="Revenue Enablement">Revenue Enablement</option>
+              <option value="Efficiency & Control">Efficiency & Control</option>
+              <option value="Cost Optimization">Cost Optimization</option>
+              <option value="Experience & CX">Experience & CX</option>
+              <option value="Cost Savings">Cost Savings</option>
+              <option value="Cost Avoidance">Cost Avoidance</option>
+              <option value="Qualitative Impact">Qualitative Impact</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-indigo-950 mb-1">Measurable Business Impact (LOV) *</label>
+            <select id="p-measurable-impact" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white">
+              <option value="Quantitative">Quantitative</option>
+              <option value="Qualitative">Qualitative</option>
+            </select>
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block font-semibold text-indigo-950 mb-1">Business Benefit (Text Description) *</label>
+            <input type="text" id="p-business-benefit" required placeholder="e.g. Reduces average checkout TAT to < 45 seconds, improving billing throughput by 15%" class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white">
+          </div>
+        </div>
+        <div class="pt-4 border-t flex justify-end gap-2">
+          <button type="button" onclick="closeProjectModal()" class="px-4 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium rounded-lg">Cancel</button>
+          <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow-sm">Save Project</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 2: Milestone Creation / Edit -->
+  <div id="milestone-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+        <div>
+          <h2 id="milestone-modal-title" class="text-sm font-bold text-slate-800">Add Milestone Deliverable</h2>
+          <p id="milestone-modal-subtitle" class="text-xs text-indigo-600 font-medium"></p>
+        </div>
+        <button onclick="closeMilestoneModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="milestone-form" onsubmit="saveMilestone(event)" class="p-6 overflow-y-auto custom-scrollbar space-y-4 text-xs">
+        <input type="hidden" id="m-id">
+        <input type="hidden" id="m-project-id">
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Milestone Title *</label>
+          <input type="text" id="m-title" required placeholder="e.g. Stakeholder meeting to finalize actionables" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Milestone - Actions / Deliverables *</label>
+          <textarea id="m-actions" rows="2" required placeholder="Specific concrete steps to execute this milestone..." class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"></textarea>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Owner / Assigned To (User Master) *</label>
+            <select id="m-owner" required class="resource-lov w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"></select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Dependency</label>
+            <input type="text" id="m-dependency" placeholder="e.g. Neha / Vendor Team" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Status</label>
+            <select id="m-status" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white">
+              <option value="Auto">Automatic (Calculated from Dates)</option>
+              <option value="In Progress">In Progress (WIP)</option>
+              <option value="Done">Done</option>
+              <option value="Delay">Delay</option>
+              <option value="On-Hold">On-Hold</option>
+              <option value="Not Started">Not Started</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Status Tracker (Bucket)</label>
+            <select id="m-bucket" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white">
+              <option value="Today">Today</option>
+              <option value="Tomorrow">Tomorrow</option>
+              <option value="This Week">This Week</option>
+              <option value="Next Week">Next Week</option>
+              <option value="Pending">Pending</option>
+              <option value="On Track">On Track</option>
+              <option value="At Risk">At Risk</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200">
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">Start Date</label>
+            <input type="date" id="m-start-date" class="w-full px-2 py-1.5 bg-white border rounded">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">End Date</label>
+            <input type="date" id="m-end-date" class="w-full px-2 py-1.5 bg-white border rounded">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">Deadline *</label>
+            <input type="date" id="m-deadline" required class="w-full px-2 py-1.5 bg-white border rounded">
+          </div>
+          <div>
+            <label class="block font-medium text-slate-600 mb-1">Completion Date</label>
+            <input type="date" id="m-completion-date" class="w-full px-2 py-1.5 bg-white border rounded">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Target Milestone KPI</label>
+            <input type="text" id="m-kpi" placeholder="e.g. 100% test pass rate" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Remarks & Links</label>
+            <input type="text" id="m-remarks" placeholder="Blocker reasons, PRD/FRD links..." class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+          </div>
+        </div>
+
+        <div class="pt-4 border-t flex justify-end gap-2">
+          <button type="button" onclick="closeMilestoneModal()" class="px-4 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium rounded-lg">Cancel</button>
+          <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow-sm">Save Milestone</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 3: User Master Directory (Unified Master Data) -->
+  <div id="user-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+        <div>
+          <h2 class="text-sm font-bold text-slate-800">Master Data — User Master</h2>
+          <p class="text-xs text-slate-500">Manage all team members, corporate emails, departments, and default roles</p>
+        </div>
+        <button onclick="closeUserModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <div class="p-6 space-y-4 flex-1 overflow-y-auto custom-scrollbar text-xs">
+        <!-- Add New User Form -->
+        <form onsubmit="addUser(event)" class="grid grid-cols-1 sm:grid-cols-6 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+          <div class="sm:col-span-2">
+            <label class="block font-semibold text-slate-700 mb-1">Full Name *</label>
+            <input type="text" id="new-user-name" required placeholder="e.g. Ratnadeep Mukherjee" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block font-semibold text-slate-700 mb-1">Email *</label>
+            <input type="email" id="new-user-email" required placeholder="user@adityabirla.com" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div class="sm:col-span-2">
+            <label class="block font-semibold text-slate-700 mb-1">Department *</label>
+            <input type="text" id="new-user-dept" required placeholder="e.g. Retail commercial" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+          </div>
+          <div class="sm:col-span-3">
+            <label class="block font-semibold text-slate-700 mb-1">Role Tier</label>
+            <select id="new-user-role" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none">
+              <option value="Level 1">Level 1 (Full CRUD)</option>
+              <option value="Level 2">Level 2 (Vertical Scoped)</option>
+              <option value="Admin">Admin</option>
+              <option value="Read-Only">Read-Only</option>
+            </select>
+          </div>
+          <div class="sm:col-span-3">
+            <label class="block font-semibold text-slate-700 mb-1">Assigned Vertical</label>
+            <select id="new-user-vertical" class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none">
+              <option value="All">All Verticals</option>
+              <option value="Retail commercial">Retail commercial</option>
+              <option value="Finance">Finance</option>
+              <option value="Merchandising">Merchandising</option>
+            </select>
+          </div>
+          <div class="sm:col-span-6 flex justify-end pt-2">
+            <button type="submit" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow-sm transition">
+              + Add to User Master
+            </button>
+          </div>
+        </form>
+
+        <!-- User List Table -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-semibold text-slate-700 uppercase text-[11px]">Active Master Users (<span id="user-count">0</span>)</h3>
+          </div>
+          <div id="user-list" class="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1"></div>
+        </div>
+      </div>
+
+      <div class="p-4 border-t bg-slate-50 flex justify-end">
+        <button onclick="closeUserModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal 4: Admin RBAC User & Permission Manager -->
+  <div id="admin-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+      <div class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+        <div>
+          <h2 class="text-sm font-bold text-slate-800">RBAC User Directory & Permissions</h2>
+          <p class="text-xs text-slate-500 font-medium">Assign access tiers and restrict verticals for Level 2 leads</p>
+        </div>
+        <button onclick="closeAdminModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      
+      <div class="p-6 space-y-3 flex-1 overflow-y-auto custom-scrollbar text-xs">
+        <div id="user-role-table" class="space-y-2"></div>
+      </div>
+      
+      <div class="p-4 border-t bg-slate-50 flex justify-end gap-2">
+        <button onclick="closeAdminModal()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold">Save & Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- 1. UNIFIED USER MASTER DATA STORE & RBAC STATE ---
+    let userMaster = JSON.parse(localStorage.getItem('portal_user_master')) || [
+      { name: "Ratnadeep Mukherjee", email: "ratnadeep.mukherjee@adityabirla.com", department: "IT / PMO", role: "Admin", assignedVertical: "All" },
+      { name: "Sachin", email: "sachin@adityabirla.com", department: "Retail POS", role: "Level 1", assignedVertical: "All" },
+      { name: "Neha", email: "neha@adityabirla.com", department: "Retail commercial", role: "Level 2", assignedVertical: "Retail commercial" },
+      { name: "Hrishik", email: "hrishik@adityabirla.com", department: "Finance", role: "Level 2", assignedVertical: "Finance" },
+      { name: "Suraj", email: "suraj@adityabirla.com", department: "Merchandising", role: "Level 2", assignedVertical: "Merchandising" },
+      { name: "Yash", email: "yash@adityabirla.com", department: "ERP & Tech", role: "Level 1", assignedVertical: "All" },
+      { name: "Sneha", email: "sneha@adityabirla.com", department: "Finance", role: "Read-Only", assignedVertical: "All" },
+      { name: "Kunal", email: "kunal@adityabirla.com", department: "Supply Chain", role: "Read-Only", assignedVertical: "All" }
+    ];
+
+    let currentUser = JSON.parse(localStorage.getItem('portal_current_user')) || userMaster[0];
+
+    // --- PERMISSION HELPERS ---
+    function isVerticalAllowed(vertical) {
+      if (currentUser.role === 'Admin' || currentUser.role === 'Level 1' || currentUser.role === 'Read-Only') return true;
+      if (currentUser.role === 'Level 2') return vertical === currentUser.assignedVertical;
+      return false;
+    }
+
+    function canCreateInitiative() {
+      return currentUser.role === 'Admin' || currentUser.role === 'Level 1';
+    }
+
+    function canEditInitiative(project) {
+      if (currentUser.role === 'Admin' || currentUser.role === 'Level 1') return true;
+      if (currentUser.role === 'Level 2') return project.vertical === currentUser.assignedVertical;
+      return false;
+    }
+
+    function canDeleteInitiative() {
+      return currentUser.role === 'Admin' || currentUser.role === 'Level 1';
+    }
+
+    let defaultProjects = [
+      {
+        id: 101,
+        name: "Improve Billing Cycle TAT by optimizing Process & Tech Enablement",
+        type: "Project",
+        crNo: "CH-424",
+        vertical: "Retail commercial",
+        businessOwner: "Ratnadeep Mukherjee",
+        assignedTo: "Sachin",
+        startDate: "2026-08-10",
+        targetEndDate: "2026-09-15",
+        actualEndDate: "",
+        impactCategory: "Efficiency & Control",
+        measurableImpact: "Quantitative",
+        businessBenefit: "Reduces average checkout TAT to < 45 seconds, improving customer store throughput by 15%",
+        collapsed: false,
+        milestones: [
+          {
+            id: 1,
+            title: "Meeting with Stakeholders to finalize actionables",
+            actions: "Meet with POS and Merch team to freeze OTP exceptions",
+            owner: "Ratnadeep Mukherjee",
+            dependency: "Neha",
+            status: "Done",
+            bucket: "Today",
+            startDate: "2026-08-10",
+            endDate: "2026-08-11",
+            deadline: "2026-08-11",
+            completionDate: "2026-08-11",
+            kpi: "Signoff from commercial team",
+            remarks: "Completed on schedule."
+          },
+          {
+            id: 2,
+            title: "API Optimization & Code Freeze",
+            actions: "Refactor OTP validation endpoint to minimize latency",
+            owner: "Sachin",
+            dependency: "Cloud Infra",
+            status: "In Progress",
+            bucket: "Today",
+            startDate: "2026-08-12",
+            endDate: "2026-08-18",
+            deadline: "2026-08-18",
+            completionDate: "",
+            kpi: "Response time < 200ms",
+            remarks: "Load testing underway."
+          }
+        ]
+      },
+      {
+        id: 102,
+        name: "Auto Coin Conversion Customization",
+        type: "CR",
+        crNo: "CH-333",
+        vertical: "Finance",
+        businessOwner: "Sachin",
+        assignedTo: "Hrishik",
+        startDate: "2026-08-01",
+        targetEndDate: "2026-08-25",
+        actualEndDate: "",
+        impactCategory: "Revenue Enablement",
+        measurableImpact: "Quantitative",
+        businessBenefit: "Eliminates duplicate redemption incidents and automates ledger balancing for loyalty points",
+        collapsed: false,
+        milestones: [
+          {
+            id: 3,
+            title: "CR Prioritization & Action Plan",
+            actions: "Discussion & query clarification with vendor on duplicate serial validation",
+            owner: "Sachin",
+            dependency: "Hrishik",
+            status: "In Progress",
+            bucket: "Today",
+            startDate: "2026-08-15",
+            endDate: "2026-08-20",
+            deadline: "2026-08-18",
+            completionDate: "",
+            kpi: "Zero sync loss",
+            remarks: "Trace logs shared with Microsoft."
+          },
+          {
+            id: 4,
+            title: "UAT Signoff in Staging",
+            actions: "Conduct 50 mock transactions in staging environment",
+            owner: "Hrishik",
+            dependency: "QA Team",
+            status: "Delay",
+            bucket: "Sprint 1",
+            startDate: "2026-08-01",
+            endDate: "2026-08-08",
+            deadline: "2026-08-08",
+            completionDate: "",
+            kpi: "100% test pass rate",
+            remarks: "Delayed by 6 days due to test server outage."
+          }
+        ]
+      }
+    ];
+
+    let projects = JSON.parse(localStorage.getItem('portal_projects_master')) || defaultProjects;
+
+    // --- 2. SIDEBAR TOGGLE & PERSISTENCE ---
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      const mainContent = document.getElementById('main-content');
+      const isCurrentlyExpanded = sidebar.classList.contains('sidebar-expanded');
+      if (isCurrentlyExpanded) {
+        sidebar.classList.remove('sidebar-expanded');
+        sidebar.classList.add('sidebar-collapsed');
+        mainContent.classList.remove('main-expanded');
+        mainContent.classList.add('main-collapsed');
+        localStorage.setItem('portal_nav_state', 'collapsed');
+      } else {
+        sidebar.classList.remove('sidebar-collapsed');
+        sidebar.classList.add('sidebar-expanded');
+        mainContent.classList.remove('main-collapsed');
+        mainContent.classList.add('main-expanded');
+        localStorage.setItem('portal_nav_state', 'expanded');
+      }
+      lucide.createIcons();
+    }
+
+    function initSidebar() {
+      const savedState = localStorage.getItem('portal_nav_state') || 'expanded';
+      const sidebar = document.getElementById('sidebar');
+      const mainContent = document.getElementById('main-content');
+      if (savedState === 'collapsed') {
+        sidebar.classList.remove('sidebar-expanded');
+        sidebar.classList.add('sidebar-collapsed');
+        mainContent.classList.remove('main-expanded');
+        mainContent.classList.add('main-collapsed');
+      } else {
+        sidebar.classList.remove('sidebar-collapsed');
+        sidebar.classList.add('sidebar-expanded');
+        mainContent.classList.remove('main-collapsed');
+        mainContent.classList.add('main-expanded');
+      }
+    }
+
+    // --- Clean Date Formatter (dd-mmm-yy) ---
+    function formatDate(dateStr) {
+      if (!dateStr || dateStr === '-') return '-';
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return dateStr;
+      const year = parts[0].slice(-2);
+      const monthIdx = parseInt(parts[1], 10) - 1;
+      const day = parts[2].padStart(2, '0');
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      if (isNaN(monthIdx) || monthIdx < 0 || monthIdx > 11) return dateStr;
+      return `${day}-${months[monthIdx]}-${year}`;
+    }
+
+    // --- 3. AUTOMATED STATUS ENGINE ---
+    function evaluateProjectStatus(name, startDateStr, targetEndDateStr, actualEndDateStr) {
+      if (!name) return "";
+      const today = new Date().toISOString().slice(0, 10);
+      if (actualEndDateStr && !targetEndDateStr) return "Done";
+      if (actualEndDateStr && targetEndDateStr && actualEndDateStr <= targetEndDateStr) return "Done";
+      if (actualEndDateStr && targetEndDateStr && actualEndDateStr > targetEndDateStr) return "Deviation";
+      if (!actualEndDateStr && targetEndDateStr && today > targetEndDateStr) return "Deviation";
+      if (!actualEndDateStr && startDateStr && targetEndDateStr === "-") return "On-Hold";
+      if (!actualEndDateStr && startDateStr && targetEndDateStr && today >= startDateStr && today <= targetEndDateStr) return "WIP";
+      if (!actualEndDateStr && startDateStr && today < startDateStr) return "In-Queue";
+      if (!actualEndDateStr && !startDateStr) return "Pending";
+      return "Pending";
+    }
+
+    function evaluateMilestoneStatus(title, startDateStr, deadlineStr, completionDateStr) {
+      if (!title) return "";
+      const today = new Date().toISOString().slice(0, 10);
+      if (completionDateStr && !deadlineStr) return "Done";
+      if (completionDateStr && deadlineStr && completionDateStr <= deadlineStr) return "Done";
+      if (completionDateStr && deadlineStr && completionDateStr > deadlineStr) return "Delay";
+      if (!completionDateStr && deadlineStr && today > deadlineStr) return "Delay";
+      if (!completionDateStr && startDateStr && deadlineStr === "-") return "On-Hold";
+      if (!completionDateStr && startDateStr && deadlineStr && today >= startDateStr && today <= deadlineStr) return "In Progress";
+      if (!completionDateStr && startDateStr && today < startDateStr) return "In-Queue";
+      if (!completionDateStr && !startDateStr) return "Pending";
+      return "Pending";
+    }
+
+    function calculateProjectAge(startDateStr, targetEndDateStr) {
+      if (!startDateStr || !targetEndDateStr || startDateStr === "-" || targetEndDateStr === "-") return "-";
+      let d1 = new Date(startDateStr);
+      let d2 = new Date(targetEndDateStr);
+      if (isNaN(d1) || isNaN(d2)) return "-";
+      if (d1 > d2) return 0;
+      let count = 0;
+      let cur = new Date(d1);
+      while (cur <= d2) {
+        const dayOfWeek = cur.getDay();
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) count++;
+        cur.setDate(cur.getDate() + 1);
+      }
+      return count;
+    }
+
+    function calculateCountdown(targetEndStr, startStr, actualEndStr) {
+      if (!targetEndStr || targetEndStr === "-") return "-";
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const target = new Date(targetEndStr);
+      target.setHours(0, 0, 0, 0);
+      
+      if (!actualEndStr) {
+        return Math.ceil((target - today) / (1000 * 60 * 60 * 24));
+      } else {
+        if (!startStr || startStr === "-") return "-";
+        const start = new Date(startStr);
+        start.setHours(0, 0, 0, 0);
+        return Math.ceil((target - start) / (1000 * 60 * 60 * 24));
+      }
+    }
+
+    function calculateDays(start, end) {
+      if (!start || !end) return '-';
+      const d1 = new Date(start);
+      const d2 = new Date(end);
+      const diff = Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24));
+      return diff >= 0 ? diff + 1 : '-';
+    }
+
+    function calculateDeviation(deadline, completion, status) {
+      if (!deadline) return 0;
+      const target = new Date(deadline);
+      const actual = completion ? new Date(completion) : (status === 'Done' ? target : new Date());
+      const diff = Math.ceil((actual - target) / (1000 * 60 * 60 * 24));
+      return diff > 0 ? diff : 0;
+    }
+
+    // --- 4. USER MASTER & UNIVERSAL DROPDOWNS ---
+    function populateUserDropdowns() {
+      document.querySelectorAll('.resource-lov').forEach(sel => {
+        const currentVal = sel.value;
+        sel.innerHTML = '<option value="">-- Select User --</option>' + 
+          userMaster.map(u => {
+            return `<option value="${u.name}">${u.name} (${u.department || 'General'}) - ${u.email}</option>`;
+          }).join('');
+        sel.value = currentVal;
+      });
+
+      const sidebarBadge = document.getElementById('sidebar-user-badge');
+      if (sidebarBadge) {
+        sidebarBadge.innerText = userMaster.length;
+      }
+    }
+
+    function renderUserMasterList() {
+      const container = document.getElementById('user-list');
+      document.getElementById('user-count').innerText = userMaster.length;
+      container.innerHTML = userMaster.map((u, i) => `
+        <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs gap-2">
+          <div class="min-w-0">
+            <div class="font-semibold text-slate-800 truncate">${u.name} <span class="text-slate-400 font-normal">(${u.email})</span></div>
+            <div class="text-[10px] text-slate-500 mt-0.5 flex flex-wrap gap-1.5">
+              <span class="px-1.5 py-0.2 bg-indigo-50 text-indigo-700 rounded border border-indigo-100 font-medium">${u.department}</span>
+              <span class="px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded font-medium">${u.role}</span>
+              <span class="px-1.5 py-0.2 bg-amber-50 text-amber-700 rounded border border-amber-200 font-medium">${u.assignedVertical}</span>
+            </div>
+          </div>
+          <button onclick="removeUser(${i})" class="text-slate-400 hover:text-rose-600 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function addUser(e) {
+      e.preventDefault();
+      const name = document.getElementById('new-user-name').value.trim();
+      const email = document.getElementById('new-user-email').value.trim().toLowerCase();
+      const dept = document.getElementById('new-user-dept').value.trim() || 'General';
+      const role = document.getElementById('new-user-role').value;
+      const vertical = document.getElementById('new-user-vertical').value;
+
+      if (name && email && !userMaster.some(u => u.email === email)) {
+        userMaster.push({ name, email, department: dept, role, assignedVertical: vertical });
+        userMaster.sort((a, b) => a.name.localeCompare(b.name));
+        localStorage.setItem('portal_user_master', JSON.stringify(userMaster));
+        
+        document.getElementById('new-user-name').value = '';
+        document.getElementById('new-user-email').value = '';
+        document.getElementById('new-user-dept').value = '';
+        
+        renderUserMasterList();
+        populateUserDropdowns();
+        renderUserRoleManagement();
+      }
+    }
+
+    function removeUser(index) {
+      const u = userMaster[index];
+      if (confirm(`Remove ${u.name} (${u.email}) from User Master?`)) {
+        userMaster.splice(index, 1);
+        localStorage.setItem('portal_user_master', JSON.stringify(userMaster));
+        renderUserMasterList();
+        populateUserDropdowns();
+        renderUserRoleManagement();
+      }
+    }
+
+    function openUserModal() {
+      renderUserMasterList();
+      document.getElementById('user-modal').classList.remove('hidden');
+    }
+
+    function closeUserModal() {
+      document.getElementById('user-modal').classList.add('hidden');
+    }
+
+    // --- 5. BADGES ---
+    function getStatusBadge(status) {
+      const map = {
+        'Done': 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold',
+        'WIP': 'bg-blue-100 text-blue-800 border-blue-300 font-bold',
+        'In Progress': 'bg-blue-100 text-blue-800 border-blue-300 font-bold',
+        'Delay': 'bg-amber-100 text-amber-800 border-amber-300 font-bold',
+        'Deviation': 'bg-rose-100 text-rose-800 border-rose-300 font-bold',
+        'In-Queue': 'bg-purple-100 text-purple-800 border-purple-300 font-semibold',
+        'On-Hold': 'bg-slate-100 text-slate-700 border-slate-300 font-medium',
+        'Pending': 'bg-slate-100 text-slate-700 border-slate-300 font-medium',
+        'Not Started': 'bg-slate-100 text-slate-700 border-slate-300 font-medium'
+      };
+      return `<span class="px-2.5 py-0.5 rounded-full text-[11px] border ${map[status] || 'bg-slate-100 text-slate-700'}">${status}</span>`;
+    }
+
+    function getTypeBadge(type) {
+      const map = {
+        'Project': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+        'CR': 'bg-cyan-50 text-cyan-700 border-cyan-200',
+        'Task': 'bg-slate-100 text-slate-700 border-slate-200'
+      };
+      return `<span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${map[type] || 'bg-slate-100 text-slate-700 border-slate-300'}">${type || 'Project'}</span>`;
+    }
+
+    function getBucketBadge(bucket) {
+      const map = {
+        'Today': 'bg-amber-50 text-amber-700 border-amber-300 font-bold',
+        'Tomorrow': 'bg-sky-50 text-sky-700 border-sky-300',
+        'Sprint 1': 'bg-purple-50 text-purple-700 border-purple-200',
+        'Sprint 2': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+        'Sprint 3': 'bg-violet-50 text-violet-700 border-violet-200',
+        'Pending': 'bg-slate-50 text-slate-600 border-slate-300'
+      };
+      return `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium border ${map[bucket] || 'bg-slate-50 text-slate-600'}">${bucket || '-'}</span>`;
+    }
+
+    // --- 6. MAIN RENDER ENGINE ---
+    function saveToStorage() {
+      localStorage.setItem('portal_projects_master', JSON.stringify(projects));
+      renderProjects();
+    }
+
+    function renderKPIs(visibleRecords = []) {
+      let projectCount = 0;
+      let totalInitiatives = 0;
+      let wip = 0;
+      let delays = 0;
+      let deviations = 0;
+      let completed = 0;
+
+      visibleRecords.forEach(record => {
+        const p = record.project;
+        const pStat = record.projectStatus;
+        const visibleMilestones = record.milestones || [];
+
+        totalInitiatives++;
+        if (p.type === 'Project') projectCount++;
+        if (pStat === 'WIP') wip++;
+        if (pStat === 'Deviation') deviations++;
+        if (pStat === 'Done') completed++;
+
+        visibleMilestones.forEach(m => {
+          const mStat = m.status === 'Auto' ? evaluateMilestoneStatus(m.title, m.startDate, m.deadline, m.completionDate) : m.status;
+          if (mStat === 'In Progress' || mStat === 'WIP') wip++;
+          if (mStat === 'Done') completed++;
+          if (mStat === 'Delay') delays++;
+        });
+      });
+
+      document.getElementById('kpi-projects').innerText = projectCount;
+      document.getElementById('kpi-milestones').innerText = totalInitiatives;
+      document.getElementById('kpi-wip').innerText = wip;
+      document.getElementById('kpi-delays').innerText = delays;
+      document.getElementById('kpi-deviations').innerText = deviations;
+      document.getElementById('kpi-completed').innerText = completed;
+    }
+
+    function toggleProjectCollapse(projectId) {
+      const p = projects.find(x => x.id === projectId);
+      if (p) {
+        p.collapsed = !p.collapsed;
+        saveToStorage();
+      }
+    }
+
+    function toggleAllAccordions(expand) {
+      projects.forEach(p => p.collapsed = !expand);
+      saveToStorage();
+    }
+
+    let activeKpiFilter = null;
+    function setKpiFilter(filterType) {
+      activeKpiFilter = activeKpiFilter === filterType ? null : filterType;
+      updateKpiSlicerUI();
+      renderProjects();
+    }
+
+    function handleKpiKeydown(event, filterType) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        setKpiFilter(filterType);
+      }
+    }
+
+    function updateKpiSlicerUI() {
+      document.querySelectorAll('.kpi-slicer').forEach(card => {
+        const active = card.dataset.kpiFilter === activeKpiFilter;
+        card.classList.toggle('kpi-slicer-active', active);
+        card.setAttribute('aria-pressed', String(active));
+      });
+    }
+
+    function renderProjects() {
+      const q = document.getElementById('filter-search').value.trim().toLowerCase();
+      const typeFilter = document.getElementById('filter-type').value;
+      const vertFilter = document.getElementById('filter-vertical').value;
+      const impactFilter = document.getElementById('filter-impact').value;
+      const statFilter = document.getElementById('filter-status').value;
+      const container = document.getElementById('projects-container');
+      container.innerHTML = '';
+      let visibleCount = 0;
+      const visibleRecords = [];
+
+      projects.forEach((p, pIndex) => {
+        // Enforce Level 2 Vertical Scoping
+        if (!isVerticalAllowed(p.vertical)) return;
+
+        const pStatus = evaluateProjectStatus(p.name, p.startDate, p.targetEndDate, p.actualEndDate);
+        const pAge = calculateProjectAge(p.startDate, p.targetEndDate);
+        const pCountdown = calculateCountdown(p.targetEndDate, p.startDate, p.actualEndDate);
+
+        const hasMilestoneDelay = (p.milestones || []).some(m => {
+          const mStat = m.status === 'Auto' ? evaluateMilestoneStatus(m.title, m.startDate, m.deadline, m.completionDate) : m.status;
+          return mStat === 'Delay';
+        });
+
+        // ---------------------------------------------------------
+        // FILTER PROJECT AND CHILD MILESTONES
+        // ---------------------------------------------------------
+        const allMilestones = p.milestones || [];
+        const getMilestoneStatus = (m) => {
+          return m.status === 'Auto' ? evaluateMilestoneStatus(m.title, m.startDate, m.deadline, m.completionDate) : m.status;
+        };
+        const isWipStatus = (status) => status === 'In Progress' || status === 'WIP';
+        const isDelayedMilestone = (m) => getMilestoneStatus(m) === 'Delay';
+
+        const projectSearchText = [p.name, p.crNo, p.vertical, p.businessOwner, p.assignedTo, p.impactCategory, p.measurableImpact, p.businessBenefit]
+          .filter(Boolean).join(' ').toLowerCase();
+        const projectMatchesSearch = !q || projectSearchText.includes(q);
+
+        const anyMilestoneMatchesSearch = allMilestones.some(m => {
+          const milestoneSearchText = [m.title, m.actions, m.owner, m.dependency, m.remarks, m.kpi, m.bucket]
+            .filter(Boolean).join(' ').toLowerCase();
+          return !q || milestoneSearchText.includes(q);
+        });
+
+        const projectHasWipMilestone = allMilestones.some(m => isWipStatus(getMilestoneStatus(m)));
+        const projectHasDelayedMilestone = allMilestones.some(isDelayedMilestone);
+        const projectHasCompletedMilestone = allMilestones.some(m => getMilestoneStatus(m) === 'Done');
+
+        const matchingMilestones = allMilestones.filter(m => {
+          const mStat = getMilestoneStatus(m);
+          const milestoneSearchText = [m.title, m.actions, m.owner, m.dependency, m.remarks, m.kpi, m.bucket]
+            .filter(Boolean).join(' ').toLowerCase();
+          const matchSearch = !q || projectMatchesSearch || milestoneSearchText.includes(q);
+
+          let matchStatus = true;
+          switch (statFilter) {
+            case 'WIP': matchStatus = isWipStatus(mStat); break;
+            case 'Delay': matchStatus = mStat === 'Delay'; break;
+            case 'Deviation': matchStatus = activeKpiFilter === 'delay' || statFilter === 'Delay' ? mStat === 'Delay' : true; break;
+            case 'Done': matchStatus = mStat === 'Done'; break;
+            case 'In-Queue':
+            case 'On-Hold':
+            case 'Pending': matchStatus = mStat === statFilter; break;
+            default: matchStatus = true;
+          }
+
+          let matchKpi = true;
+          switch (activeKpiFilter) {
+            case 'wip': matchKpi = isWipStatus(mStat); break;
+            case 'delay': matchKpi = mStat === 'Delay'; break;
+            case 'deviation': matchKpi = statFilter === 'Delay' ? mStat === 'Delay' : pStatus === 'Deviation'; break;
+            case 'completed': matchKpi = mStat === 'Done'; break;
+            case 'projects':
+            case 'milestones':
+            case 'all':
+            default: matchKpi = true;
+          }
+
+          return matchSearch && matchStatus && matchKpi;
+        });
+
+        // PROJECT-LEVEL DROPDOWN FILTERS
+        const matchProjSearch = projectMatchesSearch || anyMilestoneMatchesSearch;
+        const matchProjType = !typeFilter || p.type === typeFilter;
+        const matchProjVert = !vertFilter || p.vertical === vertFilter;
+        const matchProjImpact = !impactFilter || p.impactCategory === impactFilter;
+        
+        let matchProjStat = true;
+        switch (statFilter) {
+          case 'WIP': matchProjStat = pStatus === 'WIP' || projectHasWipMilestone; break;
+          case 'Delay': matchProjStat = projectHasDelayedMilestone; break;
+          case 'Deviation': matchProjStat = pStatus === 'Deviation'; break;
+          case 'Done': matchProjStat = pStatus === 'Done' || projectHasCompletedMilestone; break;
+          case 'In-Queue':
+          case 'On-Hold':
+          case 'Pending': matchProjStat = pStatus === statFilter || allMilestones.some(m => getMilestoneStatus(m) === statFilter); break;
+          default: matchProjStat = true;
+        }
+
+        // PROJECT-LEVEL KPI FILTER
+        let matchProjKpi = true;
+        switch (activeKpiFilter) {
+          case 'projects': matchProjKpi = p.type === 'Project'; break;
+          case 'milestones': matchProjKpi = allMilestones.length > 0; break;
+          case 'wip': matchProjKpi = pStatus === 'WIP' || projectHasWipMilestone; break;
+          case 'delay': matchProjKpi = projectHasDelayedMilestone; break;
+          case 'deviation': matchProjKpi = pStatus === 'Deviation'; break;
+          case 'completed': matchProjKpi = pStatus === 'Done' || projectHasCompletedMilestone; break;
+          case 'all':
+          default: matchProjKpi = true;
+        }
+
+        if (!matchProjSearch || !matchProjType || !matchProjVert || !matchProjImpact || !matchProjStat || !matchProjKpi) {
+          return;
+        }
+
+        visibleCount++;
+        visibleRecords.push({ project: p, projectStatus: pStatus, milestones: matchingMilestones });
+
+        const totalM = (p.milestones || []).length;
+        const doneM = (p.milestones || []).filter(m => m.status === 'Done' || (m.status === 'Auto' && evaluateMilestoneStatus(m.title, m.startDate, m.deadline, m.completionDate) === 'Done')).length;
+        const progressPct = totalM > 0 ? Math.round((doneM / totalM) * 100) : 0;
+        let countdownDisplay = '-';
+        if (pCountdown !== '-') {
+          countdownDisplay = pCountdown < 0 
+            ? `<span class="text-rose-600 font-bold">${pCountdown}d (Overdue)</span>` 
+            : `<span class="text-slate-800 font-semibold">${pCountdown}d left</span>`;
+        }
+
+        const canEdit = canEditInitiative(p);
+        const canDelete = canDeleteInitiative();
+
+        const projectCard = document.createElement('div');
+        projectCard.className = "bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all";
+        projectCard.innerHTML = `
+          <!-- Structured Project Header -->
+          <div class="px-5 py-4 bg-slate-50/90 border-b border-slate-200">
+            <!-- Row 1: Title, Status, Delay Flag & Action Buttons -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div class="flex items-center gap-2.5 flex-1">
+                <button onclick="toggleProjectCollapse(${p.id})" class="p-1 text-slate-400 hover:text-slate-700 transition">
+                  <i data-lucide="${p.collapsed ? 'chevron-right' : 'chevron-down'}" class="w-5 h-5"></i>
+                </button>
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-xs font-mono font-bold text-slate-400">#${pIndex + 1}</span>
+                  <h3 class="text-sm font-bold text-slate-900">${p.name}</h3>
+                  <!-- Tag 1: Initiative Type -->
+                  ${getTypeBadge(p.type || 'Project')}
+                  <!-- Tag 2: Vertical -->
+                  <span class="px-2.5 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-bold rounded-full border border-slate-300">
+                    ${p.vertical || 'General'}
+                  </span>
+                  <!-- Tag 3: Project Status -->
+                  ${getStatusBadge(pStatus || 'Pending')}
+                  <!-- Tag 4: Milestone Health Delivery -->
+                  ${hasMilestoneDelay 
+                    ? `<span class="px-2.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-bold rounded-full border border-amber-300">Milestones: Delay</span>`
+                    : totalM === 0
+                    ? `<span class="px-2.5 py-0.5 bg-slate-100 text-slate-500 text-[10px] font-semibold rounded-full border border-slate-300">No Milestones</span>`
+                    : doneM === totalM
+                    ? `<span class="px-2.5 py-0.5 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-full border border-emerald-300">Milestones: Done</span>`
+                    : `<span class="px-2.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded-full border border-emerald-200">Milestones: On Track</span>`
+                  }
+                </div>
+              </div>
+
+              <!-- Action Buttons & Progress Bar -->
+              <div class="flex items-center gap-3 self-end md:self-center">
+                <div class="text-right min-w-[90px]">
+                  <div class="text-[11px] font-semibold text-slate-500">${doneM}/${totalM} Done</div>
+                  <div class="w-20 bg-slate-200 rounded-full h-1.5 mt-1 overflow-hidden">
+                    <div class="bg-indigo-600 h-1.5 rounded-full" style="width: ${progressPct}%"></div>
+                  </div>
+                </div>
+
+                ${canEdit ? `
+                  <button onclick="openMilestoneModal(${p.id})" class="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold text-xs rounded-lg border border-indigo-200 transition" title="Add Milestone">
+                    <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add Milestone
+                  </button>
+                  <button onclick="editProject(${p.id})" class="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200" title="Edit Project Details"><i data-lucide="edit" class="w-4 h-4"></i></button>
+                ` : ''}
+                ${canDelete ? `
+                  <button onclick="deleteProject(${p.id})" class="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-200" title="Delete Project"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                ` : ''}
+              </div>
+            </div>
+
+            <!-- Row 2: Project Metadata -->
+            <div class="mt-3 ml-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-0 bg-white rounded-lg border border-slate-200 text-xs shadow-inner overflow-hidden">
+              <div class="min-w-0 p-3 border-b sm:border-r border-slate-100">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Business Owner</span>
+                <span class="font-medium text-slate-800 truncate block mt-0.5" title="${p.businessOwner || '-'}">${p.businessOwner || '-'}</span>
+              </div>
+              <div class="min-w-0 p-3 border-b lg:border-r border-slate-100">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Assigned To</span>
+                <span class="font-medium text-slate-800 truncate block mt-0.5" title="${p.assignedTo || '-'}">${p.assignedTo || '-'}</span>
+              </div>
+              <div class="min-w-0 p-3 border-b sm:border-r border-slate-100">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">CR No</span>
+                <span class="font-mono text-indigo-700 font-semibold block mt-0.5">${p.crNo || '-'}</span>
+              </div>
+              <div class="min-w-0 p-3 border-b xl:border-r border-slate-100">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Start Date</span>
+                <span class="font-mono text-slate-700 block mt-0.5">${formatDate(p.startDate)}</span>
+              </div>
+              <div class="min-w-0 p-3 border-b sm:border-r border-slate-100">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Target End</span>
+                <span class="font-mono text-slate-700 block mt-0.5">${formatDate(p.targetEndDate)}</span>
+              </div>
+              <div class="min-w-0 p-3 border-b lg:border-r border-slate-100">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Actual End</span>
+                <span class="font-mono text-slate-700 block mt-0.5">${formatDate(p.actualEndDate)}</span>
+              </div>
+              <div class="min-w-0 p-3 sm:border-r border-slate-100">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Project Age</span>
+                <span class="font-mono text-slate-800 font-semibold block mt-0.5">${pAge === '-' ? '-' : `${pAge} work days`}</span>
+              </div>
+              <div class="min-w-0 p-3">
+                <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Countdown</span>
+                <span class="font-mono block mt-0.5">${countdownDisplay}</span>
+              </div>
+            </div>
+
+            <!-- Row 3: Business Impact -->
+            <div class="mt-2.5 ml-8 grid grid-cols-1 lg:grid-cols-[minmax(180px,auto)_minmax(160px,auto)_1fr] bg-indigo-50/40 rounded-lg border border-indigo-100/60 overflow-hidden text-xs">
+              <div class="min-w-0 p-3 border-b lg:border-b-0 lg:border-r border-indigo-100">
+                <span class="text-[10px] font-semibold text-indigo-950 uppercase tracking-wider block mb-1">Impact Category</span>
+                <span class="inline-block max-w-full px-2 py-1 bg-indigo-100 text-indigo-800 font-semibold rounded border border-indigo-200 break-words">${p.impactCategory || '-'}</span>
+              </div>
+              <div class="min-w-0 p-3 border-b lg:border-b-0 lg:border-r border-indigo-100">
+                <span class="text-[10px] font-semibold text-indigo-950 uppercase tracking-wider block mb-1">Measurable</span>
+                <span class="inline-block max-w-full px-2 py-1 bg-white text-slate-700 font-medium rounded border border-indigo-200 break-words">${p.measurableImpact || '-'}</span>
+              </div>
+              <div class="min-w-0 p-3">
+                <span class="text-[10px] font-semibold text-indigo-950 uppercase tracking-wider block mb-1">Business Benefit</span>
+                <span class="text-slate-700 leading-relaxed break-words">${p.businessBenefit || '-'}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Child Milestones Table -->
+          <div class="${p.collapsed ? 'hidden' : 'block'}">
+            ${(p.milestones || []).length === 0 ? `
+              <div class="p-6 text-center text-slate-400 text-xs bg-white">
+                No milestones added yet. Click <button onclick="openMilestoneModal(${p.id})" class="text-indigo-600 font-semibold hover:underline">+ Add Milestone</button> to define tasks.
+              </div>
+            ` : matchingMilestones.length === 0 ? `
+              <div class="p-6 text-center text-slate-400 text-xs bg-white">
+                No milestones match current filters.
+              </div>
+            ` : `
+              <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left border-collapse text-xs">
+                  <thead class="bg-slate-100/75 text-slate-600 uppercase font-semibold border-b border-slate-200 text-[10px]">
+                    <tr>
+                      <th class="py-2.5 px-3 w-8 text-center">#</th>
+                      <th class="py-2.5 px-3 min-w-[260px]">Milestone<br><span class="font-normal normal-case">Track - User Story</span></th>
+                      <th class="py-2.5 px-3 min-w-[220px]">Milestone - Actions</th>
+                      <th class="py-2.5 px-3 min-w-[140px]">Milestone Owner</th>
+                      <th class="py-2.5 px-3 min-w-[90px]">Status</th>
+                      <th class="py-2.5 px-3 min-w-[100px]">Day Status</th>
+                      <th class="py-2.5 px-3 min-w-[80px]">Timeline</th>
+                      <th class="py-2.5 px-3 min-w-[90px]">Deadline</th>
+                      <th class="py-2.5 px-3 min-w-[90px]">Completion</th>
+                      <th class="py-2.5 px-3 min-w-[70px] text-center">Deviation</th>
+                      <th class="py-2.5 px-3 min-w-[140px]">Remarks</th>
+                      <th class="py-2.5 px-3 text-center w-16">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-100 text-slate-600 bg-white">
+                    ${matchingMilestones.map((m, mIdx) => {
+                      const days = calculateDays(m.startDate, m.endDate);
+                      const mStat = m.status === 'Auto' ? evaluateMilestoneStatus(m.title, m.startDate, m.deadline, m.completionDate) : m.status;
+                      const dev = calculateDeviation(m.deadline, m.completionDate, mStat);
+                      const devBadge = dev > 0 
+                        ? `<span class="px-1.5 py-0.5 bg-rose-100 text-rose-700 font-bold rounded text-[10px]">+${dev}d</span>` 
+                        : `<span class="text-slate-400 font-medium">0</span>`;
+                      return `
+                        <tr class="hover:bg-slate-50/80 transition-colors group">
+                          <td class="py-2.5 px-3 text-center text-slate-400 font-mono text-[10px]">${mIdx + 1}</td>
+                          <td class="py-2.5 px-3 font-semibold text-slate-900">${m.title}</td>
+                          <td class="py-2.5 px-3 text-slate-700 font-normal leading-relaxed">${m.actions}</td>
+                          <td class="py-2.5 px-3">
+                            <div class="font-medium text-slate-800">${m.owner}</div>
+                            ${m.dependency ? `<div class="text-[10px] text-slate-400">Dep: <span class="text-amber-700 font-medium">${m.dependency}</span></div>` : ''}
+                          </td>
+                          <td class="py-2.5 px-3">${getStatusBadge(mStat)}</td>
+                          <td class="py-2.5 px-3">${m.bucket || '-'}</td>
+                          <td class="py-2.5 px-3 font-mono text-slate-600">${days} ${days !== '-' ? 'days' : ''}</td>
+                          <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(m.deadline)}</td>
+                          <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(m.completionDate)}</td>
+                          <td class="py-2.5 px-3 text-center font-mono">${devBadge}</td>
+                          <td class="py-2.5 px-3 text-slate-500 max-w-xs truncate" title="${m.remarks || ''}">${m.remarks || '-'}</td>
+                          <td class="py-2.5 px-3">
+                            <div class="flex items-center justify-center gap-2">
+                              ${canEdit ? `
+                                <button onclick="editMilestone(${p.id}, ${m.id})" class="p-1 text-slate-400 hover:text-indigo-600" title="Edit Milestone"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                                <button onclick="deleteMilestone(${p.id}, ${m.id})" class="p-1 text-slate-400 hover:text-rose-600" title="Delete Milestone"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                              ` : '-'}
+                            </div>
+                          </td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+              </div>
+            `}
+          </div>
+        `;
+        container.appendChild(projectCard);
+      });
+
+      if (visibleCount === 0) {
+        document.getElementById('empty-state').classList.remove('hidden');
+      } else {
+        document.getElementById('empty-state').classList.add('hidden');
+      }
+
+      renderKPIs(visibleRecords);
+      lucide.createIcons();
+    }
+
+    // --- 7. MODAL ACTIONS: PROJECT ---
+    function openProjectModal(editId = null) {
+      populateUserDropdowns();
+      document.getElementById('project-form').reset();
+      document.getElementById('project-id').value = '';
+      document.getElementById('project-modal-title').innerText = editId ? 'Edit Project / Epic' : 'New Project / Epic';
+      if (editId) {
+        const p = projects.find(x => x.id === editId);
+        if (p) {
+          document.getElementById('project-id').value = p.id;
+          document.getElementById('p-name').value = p.name || '';
+          document.getElementById('p-type').value = p.type || 'Project';
+          document.getElementById('p-cr').value = p.crNo || '';
+          document.getElementById('p-vertical').value = p.vertical || 'Retail commercial';
+          document.getElementById('p-business-owner').value = p.businessOwner || '';
+          document.getElementById('p-assigned-to').value = p.assignedTo || '';
+          document.getElementById('p-start-date').value = p.startDate || '';
+          document.getElementById('p-target-end-date').value = p.targetEndDate || '';
+          document.getElementById('p-actual-end-date').value = p.actualEndDate || '';
+          document.getElementById('p-impact-category').value = p.impactCategory || 'Revenue Enablement';
+          document.getElementById('p-measurable-impact').value = p.measurableImpact || 'Quantitative';
+          document.getElementById('p-business-benefit').value = p.businessBenefit || '';
+        }
+      }
+      document.getElementById('project-modal').classList.remove('hidden');
+    }
+
+    function closeProjectModal() {
+      document.getElementById('project-modal').classList.add('hidden');
+    }
+
+    function saveProject(e) {
+      e.preventDefault();
+      const id = document.getElementById('project-id').value;
+      const data = {
+        name: document.getElementById('p-name').value.trim(),
+        type: document.getElementById('p-type').value,
+        crNo: document.getElementById('p-cr').value.trim(),
+        vertical: document.getElementById('p-vertical').value,
+        businessOwner: document.getElementById('p-business-owner').value,
+        assignedTo: document.getElementById('p-assigned-to').value,
+        startDate: document.getElementById('p-start-date').value,
+        targetEndDate: document.getElementById('p-target-end-date').value,
+        actualEndDate: document.getElementById('p-actual-end-date').value,
+        impactCategory: document.getElementById('p-impact-category').value,
+        measurableImpact: document.getElementById('p-measurable-impact').value,
+        businessBenefit: document.getElementById('p-business-benefit').value.trim()
+      };
+
+      if (id) {
+        const idx = projects.findIndex(x => x.id === parseInt(id));
+        if (idx !== -1) projects[idx] = { ...projects[idx], ...data };
+      } else {
+        projects.unshift({
+          id: Date.now(),
+          ...data,
+          collapsed: false,
+          milestones: []
+        });
+      }
+      closeProjectModal();
+      saveToStorage();
+    }
+
+    function editProject(id) {
+      openProjectModal(id);
+    }
+
+    function deleteProject(id) {
+      if (confirm('Are you sure you want to delete this Project and all its milestones?')) {
+        projects = projects.filter(x => x.id !== id);
+        saveToStorage();
+      }
+    }
+
+    // --- 8. MODAL ACTIONS: MILESTONE ---
+    function openMilestoneModal(projectId, editMilestoneId = null) {
+      populateUserDropdowns();
+      document.getElementById('milestone-form').reset();
+      document.getElementById('m-id').value = '';
+      document.getElementById('m-project-id').value = projectId;
+      const p = projects.find(x => x.id === projectId);
+      document.getElementById('milestone-modal-subtitle').innerText = p ? `Project: ${p.name}` : '';
+      document.getElementById('milestone-modal-title').innerText = editMilestoneId ? 'Edit Milestone' : 'Add Milestone Deliverable';
+      if (editMilestoneId) {
+        const m = (p.milestones || []).find(x => x.id === editMilestoneId);
+        if (m) {
+          document.getElementById('m-id').value = m.id;
+          document.getElementById('m-title').value = m.title || '';
+          document.getElementById('m-actions').value = m.actions || '';
+          document.getElementById('m-owner').value = m.owner || '';
+          document.getElementById('m-dependency').value = m.dependency || '';
+          document.getElementById('m-status').value = m.status || 'Auto';
+          document.getElementById('m-bucket').value = m.bucket || 'Today';
+          document.getElementById('m-start-date').value = m.startDate || '';
+          document.getElementById('m-end-date').value = m.endDate || '';
+          document.getElementById('m-deadline').value = m.deadline || '';
+          document.getElementById('m-completion-date').value = m.completionDate || '';
+          document.getElementById('m-kpi').value = m.kpi || '';
+          document.getElementById('m-remarks').value = m.remarks || '';
+        }
+      }
+      document.getElementById('milestone-modal').classList.remove('hidden');
+    }
+
+    function closeMilestoneModal() {
+      document.getElementById('milestone-modal').classList.add('hidden');
+    }
+
+    function saveMilestone(e) {
+      e.preventDefault();
+      const pId = parseInt(document.getElementById('m-project-id').value);
+      const mId = document.getElementById('m-id').value;
+      const p = projects.find(x => x.id === pId);
+      if (!p) return;
+
+      const milestoneData = {
+        id: mId ? parseInt(mId) : Date.now(),
+        title: document.getElementById('m-title').value.trim(),
+        actions: document.getElementById('m-actions').value.trim(),
+        owner: document.getElementById('m-owner').value.trim(),
+        dependency: document.getElementById('m-dependency').value.trim(),
+        status: document.getElementById('m-status').value,
+        bucket: document.getElementById('m-bucket').value,
+        startDate: document.getElementById('m-start-date').value,
+        endDate: document.getElementById('m-end-date').value,
+        deadline: document.getElementById('m-deadline').value,
+        completionDate: document.getElementById('m-completion-date').value,
+        kpi: document.getElementById('m-kpi').value.trim(),
+        remarks: document.getElementById('m-remarks').value.trim()
+      };
+
+      if (!p.milestones) p.milestones = [];
+      if (mId) {
+        const idx = p.milestones.findIndex(x => x.id === parseInt(mId));
+        if (idx !== -1) p.milestones[idx] = milestoneData;
+      } else {
+        p.milestones.push(milestoneData);
+      }
+      closeMilestoneModal();
+      saveToStorage();
+    }
+
+    function editMilestone(projectId, milestoneId) {
+      openMilestoneModal(projectId, milestoneId);
+    }
+
+    function deleteMilestone(projectId, milestoneId) {
+      if (confirm('Delete this milestone?')) {
+        const p = projects.find(x => x.id === projectId);
+        if (p && p.milestones) {
+          p.milestones = p.milestones.filter(x => x.id !== milestoneId);
+          saveToStorage();
+        }
+      }
+    }
+
+    // --- 9. EXPORT CSV ---
+    function exportToCSV() {
+      const headers = [
+        "Sl No","Project Name - Epic","Type","CR No","Vertical","Business Owner","Assigned To",
+        "Project Status","Project Start Date","Target End Date","Actual End Date","Project Age (Working Days)","Countdown (Days)",
+        "Business Impact Category","Measurable Business Impact","Business Benefit",
+        "Milestone Title","Milestone Actions","Milestone Owner","Dependency","Milestone Status","Bucket",
+        "Milestone Start Date","Milestone End Date","Deadline","Completion Date","Deviation Days","Milestone KPI","Milestone Remarks"
+      ];
+      let rows = [];
+      let counter = 1;
+      projects.forEach(p => {
+        const pStatus = evaluateProjectStatus(p.name, p.startDate, p.targetEndDate, p.actualEndDate);
+        const pAge = calculateProjectAge(p.startDate, p.targetEndDate);
+        const pCountdown = calculateCountdown(p.targetEndDate, p.startDate, p.actualEndDate);
+        if (!p.milestones || p.milestones.length === 0) {
+          rows.push([
+            counter++,
+            `"${(p.name || '').replace(/"/g, '""')}"`,
+            `"${p.type}"`,
+            `"${(p.crNo || '').replace(/"/g, '""')}"`,
+            `"${p.vertical}"`,
+            `"${p.businessOwner}"`,
+            `"${p.assignedTo}"`,
+            `"${pStatus}"`,
+            formatDate(p.startDate),
+            formatDate(p.targetEndDate),
+            formatDate(p.actualEndDate),
+            pAge,
+            pCountdown,
+            `"${p.impactCategory || ''}"`,
+            `"${p.measurableImpact || ''}"`,
+            `"${(p.businessBenefit || '').replace(/"/g, '""')}"`,
+            "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "0", "-", "-"
+          ]);
+        } else {
+          p.milestones.forEach(m => {
+            const mStat = m.status === 'Auto' ? evaluateMilestoneStatus(m.title, m.startDate, m.deadline, m.completionDate) : m.status;
+            rows.push([
+              counter++,
+              `"${(p.name || '').replace(/"/g, '""')}"`,
+              `"${p.type}"`,
+              `"${(p.crNo || '').replace(/"/g, '""')}"`,
+              `"${p.vertical}"`,
+              `"${p.businessOwner}"`,
+              `"${p.assignedTo}"`,
+              `"${pStatus}"`,
+              formatDate(p.startDate),
+              formatDate(p.targetEndDate),
+              formatDate(p.actualEndDate),
+              pAge,
+              pCountdown,
+              `"${p.impactCategory || ''}"`,
+              `"${p.measurableImpact || ''}"`,
+              `"${(p.businessBenefit || '').replace(/"/g, '""')}"`,
+              `"${(m.title || '').replace(/"/g, '""')}"`,
+              `"${(m.actions || '').replace(/"/g, '""')}"`,
+              `"${(m.owner || '').replace(/"/g, '""')}"`,
+              `"${(m.dependency || '').replace(/"/g, '""')}"`,
+              `"${mStat}"`,
+              `"${m.bucket}"`,
+              formatDate(m.startDate),
+              formatDate(m.endDate),
+              formatDate(m.deadline),
+              formatDate(m.completionDate),
+              calculateDeviation(m.deadline, m.completionDate, mStat),
+              `"${(m.kpi || '').replace(/"/g, '""')}"`,
+              `"${(m.remarks || '').replace(/"/g, '""')}"`
+            ]);
+          });
+        }
+      });
+      const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `Project_Milestone_Master_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    // --- 9.5. ADMIN RBAC FUNCTIONS ---
+    function renderUserRoleManagement() {
+      const container = document.getElementById('user-role-table');
+      if (!container) return;
+      container.innerHTML = userMaster.map((u, index) => `
+        <div class="flex items-center justify-between p-3 bg-slate-50 border border-slate-200 rounded-xl gap-3">
+          <div class="min-w-[160px]">
+            <div class="font-bold text-slate-800">${u.name}</div>
+            <div class="text-[10px] text-slate-400">${u.email}</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <select onchange="updateUserRole(${index}, 'role', this.value)" class="px-2 py-1 bg-white border border-slate-300 rounded text-xs">
+              <option value="Admin" ${u.role === 'Admin' ? 'selected' : ''}>Admin</option>
+              <option value="Level 1" ${u.role === 'Level 1' ? 'selected' : ''}>Level 1 (Full CRUD)</option>
+              <option value="Level 2" ${u.role === 'Level 2' ? 'selected' : ''}>Level 2 (Vertical Scoped)</option>
+              <option value="Read-Only" ${u.role === 'Read-Only' ? 'selected' : ''}>Read-Only</option>
+            </select>
+            
+            <select onchange="updateUserRole(${index}, 'assignedVertical', this.value)" ${u.role !== 'Level 2' ? 'disabled' : ''} class="px-2 py-1 bg-white border border-slate-300 rounded text-xs ${u.role !== 'Level 2' ? 'opacity-50' : ''}">
+              <option value="All" ${u.assignedVertical === 'All' ? 'selected' : ''}>All Verticals</option>
+              <option value="Retail commercial" ${u.assignedVertical === 'Retail commercial' ? 'selected' : ''}>Retail commercial</option>
+              <option value="Finance" ${u.assignedVertical === 'Finance' ? 'selected' : ''}>Finance</option>
+              <option value="Merchandising" ${u.assignedVertical === 'Merchandising' ? 'selected' : ''}>Merchandising</option>
+            </select>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function updateUserRole(index, field, value) {
+      userMaster[index][field] = value;
+      localStorage.setItem('portal_user_master', JSON.stringify(userMaster));
+      renderUserRoleManagement();
+      renderProjects();
+    }
+
+    function openAdminModal() {
+      renderUserRoleManagement();
+      document.getElementById('admin-modal').classList.remove('hidden');
+    }
+
+    function closeAdminModal() {
+      document.getElementById('admin-modal').classList.add('hidden');
+      renderProjects();
+    }
+
+    // --- 10. INITIALIZATION ---
+    document.addEventListener('DOMContentLoaded', () => {
+      initSidebar();
+      populateUserDropdowns();
+      updateKpiSlicerUI();
+      const userDisplay = document.getElementById('current-user-display');
+      if (userDisplay) {
+        userDisplay.innerText = `${currentUser.name} (${currentUser.role})`;
+      }
+      const adminBtn = document.getElementById('btn-admin-roles');
+      if (adminBtn && currentUser.role !== 'Admin') {
+        adminBtn.style.display = 'none';
+      }
+      const newProjBtn = document.getElementById('btn-new-project');
+      if (newProjBtn && !canCreateInitiative()) {
+        newProjBtn.style.display = 'none';
+      }
+      renderProjects();
+      lucide.createIcons();
+    });
+  </script>
+</body>
+</html>
