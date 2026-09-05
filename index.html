@@ -94,7 +94,91 @@
   </style>
 </head>
 
-<body class="bg-slate-100 text-slate-800 antialiased font-sans flex min-h-screen">
+<body
+class="bg-slate-100 text-slate-800 antialiased font-sans flex min-h-screen"
+>
+
+<!-- LOGIN SCREEN -->
+
+<div
+id="login-screen"
+style="display:none;"
+class="fixed inset-0 z-[99999] bg-slate-100 flex items-center justify-center p-6"
+>
+
+<div
+class="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden"
+>
+
+<div class="p-6 bg-indigo-600 text-white">
+
+<h1 class="text-xl font-bold">
+Project Milestone Delivery Hub
+</h1>
+
+<p class="text-sm text-indigo-100 mt-1">
+Login using your account
+</p>
+
+</div>
+
+<div class="p-6 space-y-4">
+
+
+<input
+id="auth-email"
+type="email"
+autocomplete="username"
+placeholder="Corporate Email"
+class="w-full px-4 py-3 border rounded-xl"
+/>
+
+<input
+id="auth-password"
+type="password"
+autocomplete="current-password"
+placeholder="Password"
+onkeypress="
+if(event.key==='Enter'){
+loginUser();
+}"
+class="w-full px-4 py-3 border rounded-xl"
+/>
+
+
+<button
+id="btn-login"
+onclick="loginUser()"
+class="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold"
+>
+
+Login
+
+</button>
+
+</div>
+
+</div>
+
+</div>
+
+<div
+  id="app-toast"
+  class="hidden fixed top-4 right-4 z-[999999] min-w-[350px] max-w-md bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden"
+>
+  <div
+    id="toast-header"
+    class="px-4 py-2 bg-indigo-600 text-white font-semibold text-sm"
+  >
+    Notification
+  </div>
+
+  <div
+    id="toast-message"
+    class="px-4 py-3 text-sm text-slate-700"
+  >
+  </div>
+</div>
 
   <!-- Left Sidebar Navigation Panel -->
   <aside id="sidebar" class="sidebar-expanded bg-slate-900 text-slate-300 flex flex-col fixed top-0 left-0 h-full z-40 border-r border-slate-800 shadow-xl overflow-hidden select-none">
@@ -191,6 +275,17 @@
           <button onclick="exportToCSV()" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg border border-slate-300 transition">
             <i data-lucide="download" class="w-4 h-4"></i> <span class="hidden sm:inline">Export</span>
           </button>
+
+          <button
+  id="btn-logout"
+  onclick="logoutUser()"
+  class="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+>
+  <i data-lucide="log-out" class="w-4 h-4"></i>
+  <span class="hidden sm:inline">
+    Logout
+  </span>
+</button>
 
           <button id="btn-new-project" onclick="openProjectModal()" class="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
             <i data-lucide="folder-plus" class="w-4 h-4"></i> New Project / Epic
@@ -494,11 +589,10 @@
   id="user-modal"
   class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
 >
-  <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh]">
+  <div class="bg-white rounded-2xl shadow-xl w-full max-w-5xl overflow-hidden flex flex-col max-h-[85vh]">
 
     <!-- User Master Header -->
-    <div class="px-6 py-4 border-b border-slate-200 flex flex-col md:flex-row md:items-center md:justify-between gap-3 bg-slate-50">
-
+    <div class="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-3 bg-slate-50">
       <div class="min-w-0">
         <h2 class="text-sm font-bold text-slate-800">
           Master Data — User Master
@@ -514,9 +608,9 @@
 
   <!-- Admin-only import controls -->
   <div
-    id="user-import-actions"
-    class="flex items-center gap-2"
-  >
+  id="user-import-actions"
+  class="flex items-center gap-2 whitespace-nowrap"
+>
 
     <button
       type="button"
@@ -565,52 +659,7 @@
   </button>
 
 </div>
->
 
-        <button
-          type="button"
-          onclick="downloadUserTemplate()"
-          class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
-          title="Download User Master Import Template"
-        >
-          <i data-lucide="file-down" class="w-4 h-4"></i>
-
-          <span class="hidden sm:inline">
-            Download Template
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onclick="document.getElementById('user-import-file').click()"
-          class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
-          title="Import Users from Excel"
-        >
-          <i data-lucide="upload" class="w-4 h-4"></i>
-
-          <span class="hidden sm:inline">
-            Import Users
-          </span>
-        </button>
-
-        <input
-          type="file"
-          id="user-import-file"
-          accept=".xlsx"
-          hidden
-          onchange="importUsers(event)"
-        >
-
-        <button
-          type="button"
-          onclick="closeUserModal()"
-          class="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200 transition"
-          title="Close User Master"
-        >
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
-
-      </div>
     </div>
 
     <!-- User Master Content -->
@@ -619,7 +668,7 @@
       <!-- Add New User Form -->
       <form
         onsubmit="addUser(event)"
-        class="grid grid-cols-1 sm:grid-cols-6 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-200"
+        class="grid grid-cols-1 sm:grid-cols-6 gap-4 bg-slate-50 p-3 rounded-xl border border-slate-200"
       >
         <div class="sm:col-span-2">
           <label class="block font-semibold text-slate-700 mb-1">
@@ -663,7 +712,7 @@
           >
         </div>
 
-        <div class="sm:col-span-3">
+        <div class="sm:col-span-2">
           <label class="block font-semibold text-slate-700 mb-1">
             Role Tier
           </label>
@@ -690,7 +739,7 @@
           </select>
         </div>
 
-        <div class="sm:col-span-3">
+        <div class="sm:col-span-2">
           <label class="block font-semibold text-slate-700 mb-1">
             Assigned Vertical
           </label>
@@ -706,7 +755,7 @@
           </select>
         </div>
 
-        <div class="sm:col-span-6 flex justify-end pt-2">
+        <div class="sm:col-span-2 flex justify-end pt-2">
           <button
             type="submit"
             class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-lg shadow-sm transition"
@@ -743,7 +792,6 @@
         Done
       </button>
     </div>
-
   </div>
 </div>
 
@@ -751,7 +799,7 @@
 
 <div
   id="import-modal"
-  class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
+  class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden p-4"
 >
 
   <div class="bg-white rounded-2xl shadow-xl w-full max-w-md">
@@ -940,21 +988,13 @@ async function loadUsersFromSupabase() {
   }));
 
   /*
-    Temporary current-user selection until Supabase
-    Authentication is connected.
-  */
-  const previousCurrentUserId =
-  currentUser?.id || null;
+Current user will come only
+from authentication layer
+*/
 
-currentUser =
-  userMaster.find(
-    user => user.id === previousCurrentUserId
-  ) ||
-  userMaster.find(
-    user => user.role === 'Admin'
-  ) ||
-  userMaster[0] ||
-  null;
+if (!currentUser) {
+  currentUser = null;
+}
 
   populateUserDropdowns();
 
@@ -1221,6 +1261,17 @@ async function loadInitiativesFromSupabase() {
 }
 
     async function addUser(e) {
+
+      if (
+  !currentUser ||
+  currentUser.role !== 'Admin'
+) {
+  alert(
+    'Only Admin can add users.'
+  );
+  return;
+}
+
   e.preventDefault();
 
   const email = document
@@ -1277,6 +1328,8 @@ async function loadInitiativesFromSupabase() {
 
   await loadUsersFromSupabase();
 
+  
+
   renderUserMasterList();
   renderUserRoleManagement();
   renderProjects();
@@ -1303,6 +1356,15 @@ async function loadInitiativesFromSupabase() {
 
 
     async function removeUser(index) {
+      if (
+  !currentUser ||
+  currentUser.role !== 'Admin'
+) {
+  alert(
+    'Only Admin can remove users.'
+  );
+  return;
+}
   const user = userMaster[index];
 
   if (!user) return;
@@ -1334,6 +1396,10 @@ async function loadInitiativesFromSupabase() {
 }
 
     function openUserModal() {
+
+      if (!currentUser) {
+  return;
+}
   renderUserMasterList();
 
   const importActions =
@@ -1348,16 +1414,26 @@ async function loadInitiativesFromSupabase() {
         : 'none';
   }
 
-  document
-    .getElementById('user-modal')
-    .classList.remove('hidden');
+  const modal =
+    document.getElementById('user-modal');
+
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+  modal.classList.add('items-center');
+  modal.classList.add('justify-center');
 
   lucide.createIcons();
 }
 
     function closeUserModal() {
-      document.getElementById('user-modal').classList.add('hidden');
-    }
+  const modal =
+    document.getElementById('user-modal');
+
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+  modal.classList.remove('items-center');
+  modal.classList.remove('justify-center');
+}
 
     // --- 5. BADGES ---
     function getStatusBadge(status) {
@@ -1808,6 +1884,9 @@ async function loadInitiativesFromSupabase() {
       lucide.createIcons();
     }
     function openProjectModal(editId = null) {
+      if (!currentUser) {
+  return;
+}
   populateUserDropdowns();
 
   document.getElementById('project-form').reset();
@@ -2050,6 +2129,9 @@ function openMilestoneModal(
   projectId,
   editMilestoneId = null
 ) {
+  if (!currentUser) {
+  return;
+}
   populateUserDropdowns();
 
   const form =
@@ -3358,7 +3440,7 @@ function downloadUserTemplate() {
             <div class="font-bold text-slate-800">${u.name}</div>
             <div class="text-[10px] text-slate-400">${u.email}</div>
           </div>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-shrink-0">
             <select onchange="updateUserRole(${index}, 'role', this.value)" class="px-2 py-1 bg-white border border-slate-300 rounded text-xs">
               <option value="Admin" ${u.role === 'Admin' ? 'selected' : ''}>Admin</option>
               <option value="Level 1" ${u.role === 'Level 1' ? 'selected' : ''}>Level 1 (Full CRUD)</option>
@@ -3686,36 +3768,185 @@ function closeImportModal() {
     .classList.add('hidden');
 }
 
-    document.addEventListener(
-  'DOMContentLoaded',
-  async () => {
-    initSidebar();
-    updateKpiSlicerUI();
+function showToast(
+  message,
+  type = 'info'
+) {
 
-    const usersLoaded =
-      await loadUsersFromSupabase();
+  const toast =
+    document.getElementById(
+      'app-toast'
+    );
 
-    if (!usersLoaded || !currentUser) {
-      alert(
-        'No active user is available in User Master.'
+  const header =
+    document.getElementById(
+      'toast-header'
+    );
+
+  const body =
+    document.getElementById(
+      'toast-message'
+    );
+
+  body.innerText = message;
+
+  if (type === 'error') {
+
+    header.className =
+      'px-4 py-2 bg-rose-600 text-white font-semibold text-sm';
+
+    header.innerText =
+      'Error';
+
+  } else if (type === 'success') {
+
+    header.className =
+      'px-4 py-2 bg-emerald-600 text-white font-semibold text-sm';
+
+    header.innerText =
+      'Success';
+
+  } else {
+
+    header.className =
+      'px-4 py-2 bg-indigo-600 text-white font-semibold text-sm';
+
+    header.innerText =
+      'Information';
+
+  }
+
+  toast.classList.remove('hidden');
+
+  setTimeout(() => {
+
+    toast.classList.add('hidden');
+
+  }, 3000);
+}
+
+
+async function loginUser() {
+
+  const loginButton =
+    document.getElementById('btn-login');
+
+  loginButton.disabled = true;
+
+  try {
+
+    const email =
+      document
+        .getElementById('auth-email')
+        .value
+        .trim()
+        .toLowerCase();
+
+    const password =
+      document
+        .getElementById('auth-password')
+        .value;
+
+    if (!email || !password) {
+
+      showToast(
+        'Please enter Email and Password.',
+        'error'
       );
 
       return;
     }
 
-    const projectsLoaded =
-      await loadInitiativesFromSupabase();
+    const {
+      data,
+      error
+    } =
+    await supabaseClient.auth
+      .signInWithPassword({
+        email,
+        password
+      });
 
-    if (!projectsLoaded) return;
+    if (error) {
 
-    const userDisplay =
-      document.getElementById(
-        'current-user-display'
+      console.error(error);
+
+      showToast(
+        error.message,
+        'error'
       );
 
-    if (userDisplay) {
-      userDisplay.innerText =
+      return;
+    }
+
+    const {
+      data:userRecord,
+      error:userError
+    }
+    =
+    await supabaseClient
+      .from('user_master')
+      .select('*')
+      .eq('email', email)
+      .single();
+
+    if (userError || !userRecord) {
+
+      showToast(
+        'User Master record not found.',
+        'error'
+      );
+
+      return;
+    }
+
+    currentUser = {
+
+      id:userRecord.id,
+      name:userRecord.full_name,
+      email:userRecord.email,
+      department:userRecord.department,
+      role:userRecord.role,
+      assignedVertical:
+        userRecord.assigned_vertical
+
+    };
+
+    showToast(
+      'Welcome ' + currentUser.name,
+      'success'
+    );
+
+    document
+      .getElementById('login-screen')
+      .style.display = 'none';
+
+    document
+      .getElementById('sidebar')
+      .style.display = '';
+
+    document
+      .getElementById('main-content')
+      .style.display = '';
+
+    document
+      .getElementById(
+        'current-user-display'
+      )
+      .innerText =
         `${currentUser.name} (${currentUser.role})`;
+
+    const userMasterMenu =
+      document.querySelector(
+        '[onclick="openUserModal()"]'
+      );
+
+    if (userMasterMenu) {
+
+      userMasterMenu.style.display =
+        currentUser.role === 'Admin'
+          ? ''
+          : 'none';
     }
 
     const adminButton =
@@ -3724,6 +3955,7 @@ function closeImportModal() {
       );
 
     if (adminButton) {
+
       adminButton.style.display =
         currentUser.role === 'Admin'
           ? ''
@@ -3736,11 +3968,279 @@ function closeImportModal() {
       );
 
     if (newProjectButton) {
+
       newProjectButton.style.display =
         canCreateInitiative()
           ? ''
           : 'none';
     }
+
+    const projectsLoaded =
+      await loadInitiativesFromSupabase();
+
+    if (!projectsLoaded) {
+      return;
+    }
+
+    renderProjects();
+
+    renderUserMasterList();
+
+    renderUserRoleManagement();
+
+    populateUserDropdowns();
+
+    lucide.createIcons();
+
+  }
+  finally {
+
+    loginButton.disabled = false;
+
+  }
+
+}
+
+async function restoreSession() {
+
+  const {
+    data: { session }
+  }
+  =
+  await supabaseClient.auth.getSession();
+
+  if (!session?.user?.email) {
+    return false;
+  }
+
+  const {
+    data:userRecord,
+    error:userError
+  }
+  =
+  await supabaseClient
+    .from('user_master')
+    .select('*')
+    .eq(
+      'email',
+      session.user.email.toLowerCase()
+    )
+    .single();
+
+  if (
+    userError ||
+    !userRecord
+  ) {
+    return false;
+  }
+
+  currentUser = {
+
+    id:userRecord.id,
+    name:userRecord.full_name,
+    email:userRecord.email,
+    department:userRecord.department,
+    role:userRecord.role,
+    assignedVertical:
+      userRecord.assigned_vertical
+
+  };
+
+  document
+    .getElementById('login-screen')
+    .style.display = 'none';
+
+  document
+    .getElementById('sidebar')
+    .style.display = '';
+
+  document
+    .getElementById('main-content')
+    .style.display = '';
+
+  document
+    .getElementById(
+      'current-user-display'
+    )
+    .innerText =
+      `${currentUser.name} (${currentUser.role})`;
+
+      const userMasterMenu =
+  document.querySelector(
+    '[onclick="openUserModal()"]'
+  );
+
+if (userMasterMenu) {
+
+  userMasterMenu.style.display =
+    currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+}
+
+      const adminButton =
+  document.getElementById(
+    'btn-admin-roles'
+  );
+
+if (adminButton) {
+  adminButton.style.display =
+    currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+}
+
+const newProjectButton =
+  document.getElementById(
+    'btn-new-project'
+  );
+
+if (newProjectButton) {
+  newProjectButton.style.display =
+    canCreateInitiative()
+      ? ''
+      : 'none';
+}
+
+populateUserDropdowns();
+
+renderUserMasterList();
+
+renderUserRoleManagement();
+
+return true;
+}
+
+async function logoutUser() {
+
+  const confirmed = confirm(
+    'Are you sure you want to logout?'
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+
+    await supabaseClient.auth.signOut();
+
+    currentUser = null;
+
+    localStorage.removeItem(
+  'loggedInEmail'
+);
+
+    location.reload();
+
+  } catch (error) {
+
+    console.error(
+      'Logout failed:',
+      error
+    );
+
+    alert(
+      'Unable to logout.'
+    );
+
+  }
+
+}
+
+    document.addEventListener(
+  'DOMContentLoaded',
+  async () => {
+    initSidebar();
+    updateKpiSlicerUI();
+
+    const usersLoaded =
+  await loadUsersFromSupabase();
+
+if (!usersLoaded) {
+  return;
+}
+
+const sessionRestored =
+  await restoreSession();
+
+if (sessionRestored) {
+
+  const projectsLoaded =
+    await loadInitiativesFromSupabase();
+
+  if (!projectsLoaded) {
+    return;
+  }
+
+  renderProjects();
+
+  lucide.createIcons();
+
+  return;
+}
+
+/*
+Hide portal initially.
+User must login first.
+*/
+
+document
+  .getElementById('main-content')
+  .style.display = 'none';
+
+document
+  .getElementById('sidebar')
+  .style.display = 'none';
+
+document
+  .getElementById('login-screen')
+  .style.display = 'flex';
+
+    const userDisplay =
+  document.getElementById(
+    'current-user-display'
+  );
+
+if (userDisplay && currentUser) {
+  userDisplay.innerText =
+    `${currentUser.name} (${currentUser.role})`;
+
+    const userMasterMenu =
+  document.querySelector(
+    '[onclick="openUserModal()"]'
+  );
+
+if (userMasterMenu) {
+
+  userMasterMenu.style.display =
+    currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+}
+}
+
+    const adminButton =
+  document.getElementById(
+    'btn-admin-roles'
+  );
+
+if (adminButton) {
+  adminButton.style.display =
+    currentUser &&
+    currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+}
+
+    const newProjectButton =
+  document.getElementById(
+    'btn-new-project'
+  );
+
+if (newProjectButton) {
+  newProjectButton.style.display = 'none';
+}
 
     lucide.createIcons();
   }
