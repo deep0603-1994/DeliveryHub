@@ -489,8 +489,6 @@
       </form>
     </div>
   </div>
-
-  <!-- Modal 3: User Master Directory (Unified Master Data) -->
   <!-- Modal 3: User Master Directory (Unified Master Data) -->
 <div
   id="user-modal"
@@ -511,8 +509,63 @@
         </p>
       </div>
 
-      <!-- User Import Actions -->
-      <div class="flex items-center gap-2 flex-shrink-0">
+      <!-- User Master Header Actions -->
+<div class="flex items-center gap-2 flex-shrink-0">
+
+  <!-- Admin-only import controls -->
+  <div
+    id="user-import-actions"
+    class="flex items-center gap-2"
+  >
+
+    <button
+      type="button"
+      onclick="downloadUserTemplate()"
+      class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+      title="Download User Master Import Template"
+    >
+      <i data-lucide="file-down" class="w-4 h-4"></i>
+
+      <span class="hidden sm:inline">
+        Download Template
+      </span>
+    </button>
+
+    <button
+      type="button"
+      onclick="document.getElementById('user-import-file').click()"
+      class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+      title="Import Users from Excel"
+    >
+      <i data-lucide="upload" class="w-4 h-4"></i>
+
+      <span class="hidden sm:inline">
+        Import Users
+      </span>
+    </button>
+
+    <input
+      type="file"
+      id="user-import-file"
+      accept=".xlsx"
+      hidden
+      onchange="importUsers(event)"
+    >
+
+  </div>
+
+  <!-- Close remains visible to every user -->
+  <button
+    type="button"
+    onclick="closeUserModal()"
+    class="p-1 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-200 transition"
+    title="Close User Master"
+  >
+    <i data-lucide="x" class="w-5 h-5"></i>
+  </button>
+
+</div>
+>
 
         <button
           type="button"
@@ -1282,6 +1335,18 @@ async function loadInitiativesFromSupabase() {
 
     function openUserModal() {
   renderUserMasterList();
+
+  const importActions =
+    document.getElementById(
+      'user-import-actions'
+    );
+
+  if (importActions) {
+    importActions.style.display =
+      currentUser?.role === 'Admin'
+        ? ''
+        : 'none';
+  }
 
   document
     .getElementById('user-modal')
@@ -2626,6 +2691,15 @@ function downloadUserTemplate() {
 
   if (!file) return;
 
+  if (!file.name.toLowerCase().endsWith('.xlsx')) {
+  alert(
+    'Please select the User Master Excel template in .xlsx format.'
+  );
+
+  input.value = '';
+  return;
+}
+
   if (!canCreateInitiative()) {
     alert(
       'You do not have permission to import initiatives.'
@@ -3355,102 +3429,247 @@ function downloadUserTemplate() {
       renderProjects();
     }
 
-    async function importUsers(event) {
-
-  const file = event.target.files[0];
+  async function importUsers(event) {
+  const input = event.target;
+  const file = input.files?.[0];
 
   if (!file) return;
 
-  const reader = new FileReader();
+  if (!currentUser || currentUser.role !== 'Admin') {
+    alert(
+      'Only an Admin user can import User Master records.'
+    );
 
-  reader.onload = async function(e) {
+    input.value = '';
+    return;
+  }
 
-    const workbook =
-      XLSX.read(
-        e.target.result,
-        { type: 'binary' }
-      );
+  if (typeof XLSX === 'undefined') {
+    alert(
+      'Excel library is not available. Check the XLSX script reference.'
+    );
+
+    input.value = '';
+    return;
+  }
+
+  try {
+    const fileBuffer = await file.arrayBuffer();
+
+    const workbook = XLSX.read(
+      fileBuffer,
+      {
+        type: 'array'
+      }
+    );
 
     const userSheet =
       workbook.Sheets['Users'];
 
     if (!userSheet) {
-
-      alert(
-        'Users sheet not found.'
+      throw new Error(
+        'The workbook must contain a sheet named Users.'
       );
-
-      return;
     }
 
-    const users =
+    const userRows =
       XLSX.utils.sheet_to_json(
-        userSheet
+        userSheet,
+        {
+          defval: '',
+          raw: false
+        }
       );
 
-    let importedCount = 0;
-    let skippedCount = 0;
+    if (userRows.length === 0) {
+      throw new Error(
+        'The Users sheet does not contain any data rows.'
+      );
+    }
 
-    for (const row of users) {
+    const allowedRoles = [
+      'Admin',
+      'Level 1',
+      'Level 2',
+      'Read-Only'
+    ];
 
-      const email =
-        (row["Email"] || '')
+    const allowedVerticals = [
+      'All',
+      'Retail commercial',
+      'Finance',
+      'Merchandising'
+    ];
+
+    const errors = [];
+    const uploadedEmails = new Set();
+
+    const existingEmails = new Set(
+      userMaster.map(
+        user =>
+          String(user.email || '')
+            .trim()
+            .toLowerCase()
+      )
+    );
+
+    const preparedUsers =
+      userRows.map((row, index) => {
+        const excelRowNumber = index + 2;
+
+        const fullName = String(
+          row['Full Name*'] || ''
+        ).trim();
+
+        const email = String(
+          row['Email*'] || ''
+        )
           .trim()
           .toLowerCase();
 
-      if (!email) {
-        skippedCount++;
-        continue;
-      }
+        const department = String(
+          row['Department*'] || ''
+        ).trim();
 
-      const existingUser =
-        userMaster.find(
-          u =>
-            u.email.toLowerCase() ===
-            email
-        );
+        const role = String(
+          row['Role*'] || ''
+        ).trim();
 
-      if (existingUser) {
-        skippedCount++;
-        continue;
-      }
+        const assignedVertical = String(
+          row['Assigned Vertical*'] || ''
+        ).trim();
 
-      const { error } =
-        await supabaseClient
-          .from('user_master')
-          .insert({
-            full_name:
-              row["Full Name"],
+        if (!fullName) {
+          errors.push(
+            `Users row ${excelRowNumber}: Full Name is required.`
+          );
+        }
 
-            email,
+        if (!email) {
+          errors.push(
+            `Users row ${excelRowNumber}: Email is required.`
+          );
+        } else if (
+          !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+        ) {
+          errors.push(
+            `Users row ${excelRowNumber}: Invalid Email "${email}".`
+          );
+        }
 
-            department:
-              row["Department"],
+        if (!department) {
+          errors.push(
+            `Users row ${excelRowNumber}: Department is required.`
+          );
+        }
 
-            role:
-              row["Role"],
+        if (!role) {
+          errors.push(
+            `Users row ${excelRowNumber}: Role is required.`
+          );
+        } else if (!allowedRoles.includes(role)) {
+          errors.push(
+            `Users row ${excelRowNumber}: Invalid Role "${role}".`
+          );
+        }
 
-            assigned_vertical:
-              row["Assigned Vertical"],
+        if (!assignedVertical) {
+          errors.push(
+            `Users row ${excelRowNumber}: Assigned Vertical is required.`
+          );
+        } else if (
+          !allowedVerticals.includes(
+            assignedVertical
+          )
+        ) {
+          errors.push(
+            `Users row ${excelRowNumber}: Invalid Assigned Vertical "${assignedVertical}".`
+          );
+        }
 
-            is_active: true
-          });
+        if (
+          role === 'Level 2' &&
+          assignedVertical === 'All'
+        ) {
+          errors.push(
+            `Users row ${excelRowNumber}: Level 2 must have a specific Assigned Vertical.`
+          );
+        }
 
-      if (!error) {
-        importedCount++;
-      }
+        if (email && uploadedEmails.has(email)) {
+          errors.push(
+            `Users row ${excelRowNumber}: Duplicate Email "${email}" in the uploaded file.`
+          );
+        } else if (email) {
+          uploadedEmails.add(email);
+        }
+
+        if (email && existingEmails.has(email)) {
+          errors.push(
+            `Users row ${excelRowNumber}: Email "${email}" already exists in User Master.`
+          );
+        }
+
+        return {
+          full_name: fullName,
+          email,
+          department,
+          role,
+          assigned_vertical: assignedVertical,
+          is_active: true
+        };
+      });
+
+    if (errors.length > 0) {
+      const errorPreview =
+        errors.slice(0, 15).join('\n');
+
+      const additionalErrors =
+        errors.length > 15
+          ? `\n\nPlus ${errors.length - 15} more validation error(s).`
+          : '';
+
+      throw new Error(
+        `User import validation failed:\n\n${errorPreview}${additionalErrors}`
+      );
+    }
+
+    const confirmed = confirm(
+      `Import ${preparedUsers.length} user(s) into User Master?`
+    );
+
+    if (!confirmed) return;
+
+    const { error } = await supabaseClient
+      .from('user_master')
+      .insert(preparedUsers);
+
+    if (error) {
+      throw new Error(error.message);
     }
 
     await loadUsersFromSupabase();
 
     renderUserMasterList();
+    renderUserRoleManagement();
+    renderProjects();
 
     alert(
-      `Users Imported: ${importedCount}\nDuplicates Skipped: ${skippedCount}`
+      `User import completed successfully.\n\n` +
+      `Users imported: ${preparedUsers.length}`
     );
-  };
+  } catch (error) {
+    console.error(
+      'User import failed:',
+      error
+    );
 
-  reader.readAsBinaryString(file);
+    alert(
+      `User import failed:\n\n${error.message}`
+    );
+  } finally {
+    input.value = '';
+  }
 }
 
     function openImportModal() {
