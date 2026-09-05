@@ -3879,6 +3879,11 @@ async function loginUser() {
       return;
     }
 
+    console.log(
+  'Login Email:',
+  email
+);
+
     const {
       data:userRecord,
       error:userError
@@ -3892,13 +3897,19 @@ async function loginUser() {
 
     if (userError || !userRecord) {
 
-      showToast(
-        'User Master record not found.',
-        'error'
-      );
+  console.error(
+    'User Master Error:',
+    userError
+  );
 
-      return;
-    }
+  showToast(
+    'No matching email found in user_master table for: ' +
+    email,
+    'error'
+  );
+
+  return;
+}
 
     currentUser = {
 
