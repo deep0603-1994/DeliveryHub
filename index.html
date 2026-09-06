@@ -218,19 +218,170 @@ Login
         </div>
       </div>
 
-      <!-- Master Data Section -->
-      <div>
-        <span class="sidebar-heading px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-2">Master Data</span>
-        <div class="space-y-1">
-          <button onclick="openUserModal()" class="sidebar-link w-full flex items-center justify-between px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition group" title="User Master">
-            <div class="flex items-center gap-3 min-w-0">
-              <i data-lucide="users" class="w-5 h-5 text-indigo-400 group-hover:text-indigo-300 flex-shrink-0"></i>
-              <span class="sidebar-text font-medium truncate">User Master</span>
-            </div>
-            <span id="sidebar-user-badge" class="sidebar-badge px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded text-[10px] font-mono">0</span>
-          </button>
-        </div>
+      <!-- Users Section -->
+<div id="sidebar-users-section">
+
+  <button
+    type="button"
+    onclick="toggleSidebarGroup('sidebar-users-menu', 'sidebar-users-chevron')"
+    class="sidebar-link w-full flex items-center justify-between px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition group"
+    title="Users"
+  >
+    <div class="flex items-center gap-3 min-w-0">
+      <i
+        data-lucide="users"
+        class="w-5 h-5 text-indigo-400 group-hover:text-indigo-300 flex-shrink-0"
+      ></i>
+
+      <span class="sidebar-text font-medium truncate">
+        Users
+      </span>
+    </div>
+
+    <i
+      id="sidebar-users-chevron"
+      data-lucide="chevron-down"
+      class="sidebar-text w-4 h-4 text-slate-500"
+    ></i>
+  </button>
+
+  <div
+    id="sidebar-users-menu"
+    class="mt-1 ml-4 pl-3 border-l border-slate-700 space-y-1"
+  >
+    <button
+      id="sidebar-user-master"
+      type="button"
+      onclick="openUserModal()"
+      class="sidebar-link w-full flex items-center justify-between px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition group"
+      title="User Master"
+    >
+      <div class="flex items-center gap-3 min-w-0">
+        <i
+          data-lucide="contact"
+          class="w-4 h-4 text-indigo-400 flex-shrink-0"
+        ></i>
+
+        <span class="sidebar-text font-medium truncate">
+          User Master
+        </span>
       </div>
+
+      <span
+        id="sidebar-user-badge"
+        class="sidebar-badge px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded text-[10px] font-mono"
+      >
+        0
+      </span>
+    </button>
+
+    <button
+      id="sidebar-admin-roles"
+      type="button"
+      onclick="openAdminModal()"
+      class="sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition group"
+      title="User Roles"
+    >
+      <i
+        data-lucide="shield-check"
+        class="w-4 h-4 text-indigo-400 flex-shrink-0"
+      ></i>
+
+      <span class="sidebar-text font-medium truncate">
+        User Roles
+      </span>
+    </button>
+  </div>
+</div>
+
+<!-- Master Data Section -->
+<div id="sidebar-master-section">
+
+  <button
+    type="button"
+    onclick="toggleSidebarGroup('sidebar-master-menu', 'sidebar-master-chevron')"
+    class="sidebar-link w-full flex items-center justify-between px-3 py-2 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 transition group"
+    title="Master Data"
+  >
+    <div class="flex items-center gap-3 min-w-0">
+      <i
+        data-lucide="database"
+        class="w-5 h-5 text-cyan-400 group-hover:text-cyan-300 flex-shrink-0"
+      ></i>
+
+      <span class="sidebar-text font-medium truncate">
+        Master Data
+      </span>
+    </div>
+
+    <i
+      id="sidebar-master-chevron"
+      data-lucide="chevron-down"
+      class="sidebar-text w-4 h-4 text-slate-500"
+    ></i>
+  </button>
+
+  <div
+    id="sidebar-master-menu"
+    class="mt-1 ml-4 pl-3 border-l border-slate-700 space-y-1"
+  >
+    <button
+      type="button"
+      onclick="openMasterModal('INITIATIVE_TYPE')"
+      class="sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition"
+    >
+      <i data-lucide="tags" class="w-4 h-4 text-cyan-400"></i>
+      <span class="sidebar-text">Initiative Type</span>
+    </button>
+
+    <button
+      type="button"
+      onclick="openMasterModal('DEPARTMENT')"
+      class="sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition"
+    >
+      <i data-lucide="building-2" class="w-4 h-4 text-cyan-400"></i>
+      <span class="sidebar-text">Departments</span>
+    </button>
+
+    <button
+      type="button"
+      onclick="openMasterModal('BUSINESS_BENEFIT_CATEGORY')"
+      class="sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition"
+    >
+      <i data-lucide="badge-indian-rupee" class="w-4 h-4 text-cyan-400"></i>
+      <span class="sidebar-text">Business Benefit Categories</span>
+    </button>
+
+    <button
+      type="button"
+      onclick="openMasterModal('PROJECT_STATUS')"
+      class="sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/80 transition"
+    >
+      <i data-lucide="circle-dot" class="w-4 h-4 text-cyan-400"></i>
+      <span class="sidebar-text">Project Status</span>
+    </button>
+  </div>
+</div>
+
+<!-- Logout -->
+<div>
+  <button
+    id="sidebar-logout"
+    type="button"
+    onclick="logoutUser()"
+    class="sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-rose-300 hover:text-white hover:bg-rose-900/30 transition group"
+    title="Logout"
+  >
+    <i
+      data-lucide="log-out"
+      class="w-5 h-5 text-rose-400 group-hover:text-rose-300 flex-shrink-0"
+    ></i>
+
+    <span class="sidebar-text font-medium truncate">
+      Logout
+    </span>
+  </button>
+</div>
     </nav>
 
     <!-- Sidebar Footer -->
@@ -248,30 +399,30 @@ Login
 
     <!-- Top Sticky Header -->
     <header class="bg-white text-slate-800 sticky top-0 z-30 shadow-sm border-b border-slate-200">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-bold text-slate-900">Project & Milestone Hub</span>
-          <span class="text-slate-300 hidden sm:inline">|</span>
-          <span class="text-xs text-slate-500 hidden sm:inline">Epic-to-Milestone Delivery & Automated Status Engine</span>
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16">
+
+    <div class="flex items-center justify-between h-full">
+
+      <!-- User Badge -->
+      <div class="flex items-center gap-2">
+
+        <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse">
         </div>
 
-        <div class="flex items-center gap-2 sm:gap-3">
-          <!-- Logged-in User Profile Badge -->
-          <div class="flex items-center gap-2 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-xl text-xs">
-            <div class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span
-  class="font-semibold text-slate-700"
-  id="current-user-display"
->
-  Loading...
-</span>
-          </div>
+        <span
+          id="current-user-display-left"
+          class="font-semibold text-slate-700 text-xs"
+        >
+          Loading...
+        </span>
 
-          <!-- Admin User Management (Visible to Admin only) -->
-          <button id="btn-admin-roles" onclick="openAdminModal()" class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg shadow-sm transition" title="RBAC Directory">
-            <i data-lucide="shield-check" class="w-3.5 h-3.5"></i> <span class="hidden md:inline">User Roles</span>
-          </button>
+      </div>
 
+      <!-- Right Buttons Start -->
+<div class="flex items-center gap-2 sm:gap-3">
+
+<!-- Admin User Management -->
+          
           <button
   onclick="openImportModal()"
   class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
@@ -287,20 +438,21 @@ Login
             <i data-lucide="download" class="w-4 h-4"></i> <span class="hidden sm:inline">Export</span>
           </button>
 
-          <button
-  id="btn-logout"
-  onclick="logoutUser()"
-  class="flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
+          
+<button
+  id="btn-new-program"
+  onclick="openProgramModal()"
+  class="flex items-center gap-1.5 px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold rounded-lg shadow-sm transition"
 >
-  <i data-lucide="log-out" class="w-4 h-4"></i>
-  <span class="hidden sm:inline">
-    Logout
-  </span>
+  <i data-lucide="network" class="w-4 h-4"></i>
+  New Program
 </button>
+        
 
           <button id="btn-new-project" onclick="openProjectModal()" class="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg shadow-sm transition">
             <i data-lucide="folder-plus" class="w-4 h-4"></i> New Project / Epic
           </button>
+          
         </div>
       </div>
     </header>
@@ -355,38 +507,55 @@ Login
             class="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
         </div>
         <div class="flex flex-wrap gap-2">
-          <select id="filter-type" onchange="renderProjects()" class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">All Types (LOV)</option>
-            <option value="Project">Project</option>
-            <option value="CR">CR</option>
-            <option value="Task">Task</option>
-          </select>
-          <select id="filter-vertical" onchange="renderProjects()" class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">All Verticals (LOV)</option>
-            <option value="Retail commercial">Retail commercial</option>
-            <option value="Finance">Finance</option>
-            <option value="Merchandising">Merchandising</option>
-          </select>
-          <select id="filter-impact" onchange="renderProjects()" class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">All Impact Categories</option>
-            <option value="Revenue Enablement">Revenue Enablement</option>
-            <option value="Efficiency & Control">Efficiency & Control</option>
-            <option value="Cost Optimization">Cost Optimization</option>
-            <option value="Experience & CX">Experience & CX</option>
-            <option value="Cost Savings">Cost Savings</option>
-            <option value="Cost Avoidance">Cost Avoidance</option>
-            <option value="Qualitative Impact">Qualitative Impact</option>
-          </select>
-          <select id="filter-status" onchange="renderProjects()" class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
-            <option value="">All Statuses</option>
-            <option value="WIP">WIP</option>
-            <option value="Delay">Delay</option>
-            <option value="Deviation">Deviation</option>
-            <option value="Done">Done</option>
-            <option value="In-Queue">In-Queue</option>
-            <option value="On-Hold">On-Hold</option>
-            <option value="Pending">Pending</option>
-          </select>
+          <select
+  id="filter-type"
+  onchange="renderProjects()"
+  class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+>
+  <option value="">
+    All Types
+  </option>
+</select>
+
+<select
+  id="filter-vertical"
+  onchange="renderProjects()"
+  class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+>
+  <option value="">
+    All Verticals
+  </option>
+
+  <option value="Retail commercial">
+    Retail commercial
+  </option>
+
+  <option value="Finance">
+    Finance
+  </option>
+
+  <option value="Merchandising">
+    Merchandising
+  </option>
+</select>
+          <select
+  id="filter-impact"
+  onchange="renderProjects()"
+  class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+>
+  <option value="">
+    All Business Benefit Categories
+  </option>
+</select>
+          <select
+  id="filter-status"
+  onchange="renderProjects()"
+  class="px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+>
+  <option value="">
+    All Statuses
+  </option>
+</select>
           <button onclick="toggleAllAccordions(true)" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg bg-slate-50">Expand All</button>
           <button onclick="toggleAllAccordions(false)" class="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 border border-slate-300 rounded-lg bg-slate-50">Collapse All</button>
         </div>
@@ -403,6 +572,431 @@ Login
     </main>
   </div>
 
+  <!-- Configurable Master Data Modal -->
+<div
+  id="master-data-modal"
+  class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[70] hidden items-center justify-center p-4"
+>
+  <div
+    class="bg-white rounded-2xl shadow-xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[88vh]"
+  >
+    <div
+      class="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-cyan-50"
+    >
+      <div>
+        <h2
+          id="master-data-modal-title"
+          class="text-sm font-bold text-slate-800"
+        >
+          Master Data
+        </h2>
+
+        <p class="text-xs text-slate-500 mt-0.5">
+          Active values appear in future LOV selections. Deactivated values remain on existing records.
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onclick="closeMasterModal()"
+        class="text-slate-400 hover:text-slate-700"
+      >
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <div class="p-6 space-y-4 overflow-y-auto custom-scrollbar">
+
+      <form
+        id="master-value-form"
+        onsubmit="saveMasterValue(event)"
+        class="grid grid-cols-1 sm:grid-cols-12 gap-3 bg-slate-50 p-4 border border-slate-200 rounded-xl"
+      >
+        <input type="hidden" id="master-value-id">
+        <input type="hidden" id="master-value-type">
+
+        <div class="sm:col-span-4">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Code *
+          </label>
+
+          <input
+            id="master-value-code"
+            type="text"
+            required
+            placeholder="e.g. PROJECT"
+            class="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+          >
+        </div>
+
+        <div class="sm:col-span-5">
+          <label class="block text-xs font-semibold text-slate-700 mb-1">
+            Value Name *
+          </label>
+
+          <input
+            id="master-value-name"
+            type="text"
+            required
+            placeholder="e.g. Project"
+            class="w-full px-3 py-2 text-xs bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-cyan-500"
+          >
+        </div>
+
+        
+
+        <div class="sm:col-span-2 flex items-end">
+          <button
+            id="master-value-save-button"
+            type="submit"
+            class="w-full px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-lg"
+          >
+            Add Value
+          </button>
+        </div>
+
+        <div
+          id="master-value-cancel-area"
+          class="hidden sm:col-span-12 flex justify-end"
+        >
+          <button
+            type="button"
+            onclick="resetMasterValueForm()"
+            class="px-3 py-1.5 bg-white border border-slate-300 text-slate-600 text-xs rounded-lg"
+          >
+            Cancel Edit
+          </button>
+        </div>
+      </form>
+
+      <div
+class="
+flex
+justify-between
+items-center
+mb-3
+"
+>
+
+<div
+class="
+text-xs
+text-slate-500
+"
+>
+ACTIVE VALUES
+(
+<span id="master-record-count">0</span>
+)
+</div>
+
+  <select
+    id="master-sort"
+    onchange="renderMasterValueList()"
+    class="px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+  >
+
+    <option value="name">
+      Sort By Name
+    </option>
+
+    <option value="created">
+      Sort By Created Date
+    </option>
+
+    <option value="updated">
+      Sort By Updated Date
+    </option>
+
+    <option value="status">
+      Sort By Status
+    </option>
+
+  </select>
+
+</div>
+
+      <div
+  id="master-value-list"
+  class="space-y-3"
+></div>
+    </div>
+
+    <div class="px-6 py-4 border-t bg-slate-50 flex justify-end">
+      <button
+        type="button"
+        onclick="closeMasterModal()"
+        class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg"
+      >
+        Done
+      </button>
+    </div>
+  </div>
+</div>
+
+  <!-- Modal 0: Program Creation / Edit -->
+<div
+  id="program-modal"
+  class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4"
+>
+  <div
+    class="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
+  >
+    <div
+      class="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-violet-50"
+    >
+      <div>
+        <h2
+          id="program-modal-title"
+          class="text-sm font-bold text-slate-800"
+        >
+          New Program
+        </h2>
+
+        <p class="text-xs text-violet-600 mt-0.5">
+          Create a parent Program and map multiple Initiatives
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onclick="closeProgramModal()"
+        class="text-slate-400 hover:text-slate-600"
+      >
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <form
+      id="program-form"
+      onsubmit="saveProgram(event)"
+      class="p-6 overflow-y-auto custom-scrollbar space-y-4 text-xs"
+    >
+      <input type="hidden" id="program-id">
+
+      <div>
+        <label class="block font-semibold text-slate-700 mb-1">
+          Program Name *
+        </label>
+
+        <input
+          type="text"
+          id="pg-name"
+          required
+          placeholder="e.g. Retail Express"
+          class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500"
+        >
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">
+            Vertical *
+          </label>
+
+          <select
+            id="pg-vertical"
+            required
+            class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 bg-white"
+          >
+            <option value="">-- Select Vertical --</option>
+            <option value="Retail commercial">Retail commercial</option>
+            <option value="Finance">Finance</option>
+            <option value="Merchandising">Merchandising</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">
+            Program Owner *
+          </label>
+
+          <select
+            id="pg-owner"
+            required
+            class="resource-lov w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 bg-white"
+          ></select>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">
+            Assigned To
+          </label>
+
+          <select
+            id="pg-assigned-to"
+            class="resource-lov w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 bg-white"
+          ></select>
+        </div>
+      </div>
+
+      <div
+        class="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200"
+      >
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">
+            Program Start Date
+          </label>
+
+          <input
+            type="date"
+            id="pg-start-date"
+            class="w-full px-2 py-1.5 bg-white border rounded"
+          >
+        </div>
+
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">
+            Target End Date
+          </label>
+
+          <input
+            type="date"
+            id="pg-target-end-date"
+            class="w-full px-2 py-1.5 bg-white border rounded"
+          >
+        </div>
+
+        <div>
+          <label class="block font-medium text-slate-700 mb-1">
+            Actual End Date
+          </label>
+
+          <input
+            type="date"
+            id="pg-actual-end-date"
+            class="w-full px-2 py-1.5 bg-white border rounded"
+          >
+        </div>
+      </div>
+
+      <div
+        class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-violet-50/60 p-3 rounded-lg border border-violet-100"
+      >
+        <div>
+          <label class="block font-semibold text-violet-950 mb-1">
+            Business Impact Category *
+          </label>
+
+          <select
+  id="pg-impact-category"
+  required
+  class="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-violet-500"
+>
+  <option value="">
+    -- Select Business Benefit Category --
+  </option>
+</select>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-violet-950 mb-1">
+            Measurable Impact *
+          </label>
+
+          <select
+            id="pg-measurable-impact"
+            required
+            class="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-violet-500"
+          >
+            <option value="Quantitative">Quantitative</option>
+            <option value="Qualitative">Qualitative</option>
+          </select>
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="block font-semibold text-violet-950 mb-1">
+            Business Benefit *
+          </label>
+
+          <input
+            type="text"
+            id="pg-business-benefit"
+            required
+            placeholder="Describe the overall business outcome of the Program"
+            class="w-full px-3 py-2 border rounded-lg bg-white focus:ring-2 focus:ring-violet-500"
+          >
+        </div>
+      </div>
+
+      <div>
+        <div>
+  <div
+    class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2"
+  >
+    <div>
+      <label
+        class="block font-semibold text-slate-700"
+      >
+        Map Existing Initiatives
+      </label>
+
+      <p class="text-[10px] text-slate-500 mt-0.5">
+        Select multiple Initiatives to group under this Program.
+      </p>
+    </div>
+
+    <div class="flex gap-2">
+
+      <button
+        type="button"
+        onclick="selectAllProgramInitiatives()"
+        class="px-2.5 py-1 text-[10px] font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg transition"
+      >
+        Select All
+      </button>
+
+      <button
+        type="button"
+        onclick="clearAllProgramInitiatives()"
+        class="px-2.5 py-1 text-[10px] font-semibold text-slate-600 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg transition"
+      >
+        Clear All
+      </button>
+
+    </div>
+  </div>
+
+  <div
+    id="program-initiative-summary"
+    class="mb-2 px-3 py-2 bg-violet-50 border border-violet-100 rounded-lg text-[10px] font-semibold text-violet-700"
+  >
+    0 Initiative(s) selected
+  </div>
+
+  <div
+    id="program-initiative-list"
+    class="max-h-64 overflow-y-auto custom-scrollbar border border-slate-200 rounded-xl p-3 space-y-2 bg-slate-50"
+  >
+  </div>
+
+  <p class="text-[10px] text-amber-700 mt-2">
+    If an Initiative is already assigned to another Program, selecting it here will move it to this Program.
+  </p>
+</div>
+
+      </div>
+
+      <div class="pt-4 border-t flex justify-end gap-2">
+        <button
+          type="button"
+          onclick="closeProgramModal()"
+          class="px-4 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium rounded-lg"
+        >
+          Cancel
+        </button>
+
+        <button
+          type="submit"
+          class="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white font-semibold rounded-lg shadow-sm"
+        >
+          Save Program
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+
   <!-- Modal 1: Project Creation / Edit -->
   <div id="project-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
@@ -412,6 +1006,18 @@ Login
       </div>
       <form id="project-form" onsubmit="saveProject(event)" class="p-6 overflow-y-auto custom-scrollbar space-y-4 text-xs">
         <input type="hidden" id="project-id">
+        <div>
+  <label class="block font-semibold text-slate-700 mb-1">
+    Parent Program
+  </label>
+
+  <select
+    id="p-program-id"
+    class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+  >
+    <option value="">-- Unmapped Initiative --</option>
+  </select>
+</div>
         
         <div>
           <label class="block font-semibold text-slate-700 mb-1">Project Name - Epic *</label>
@@ -467,15 +1073,15 @@ Login
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-indigo-50/50 p-3 rounded-lg border border-indigo-100">
           <div>
             <label class="block font-semibold text-indigo-950 mb-1">Business Impact Category (LOV) *</label>
-            <select id="p-impact-category" required class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white">
-              <option value="Revenue Enablement">Revenue Enablement</option>
-              <option value="Efficiency & Control">Efficiency & Control</option>
-              <option value="Cost Optimization">Cost Optimization</option>
-              <option value="Experience & CX">Experience & CX</option>
-              <option value="Cost Savings">Cost Savings</option>
-              <option value="Cost Avoidance">Cost Avoidance</option>
-              <option value="Qualitative Impact">Qualitative Impact</option>
-            </select>
+            <select
+  id="p-impact-category"
+  required
+  class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+>
+  <option value="">
+    -- Select Business Benefit Category --
+  </option>
+</select>
           </div>
           <div>
             <label class="block font-semibold text-indigo-950 mb-1">Measurable Business Impact (LOV) *</label>
@@ -714,14 +1320,16 @@ Login
             Department *
           </label>
 
-          <input
-            type="text"
-            id="new-user-dept"
-            required
-            placeholder="e.g. Retail commercial"
-            class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-        </div>
+          <select
+  id="new-user-dept"
+  required
+  class="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+>
+  <option value="">
+    -- Select Department --
+  </option>
+</select>
+</div>
 
         <div class="sm:col-span-2">
           <label class="block font-semibold text-slate-700 mb-1">
@@ -916,8 +1524,24 @@ window.supabase.createClient(
     // --- 1. SUPABASE DATA STORE & RBAC STATE ---
 
 let userMaster = [];
+let editingUserMasterId = null;
 let currentUser = null;
+let programs = [];
 let projects = [];
+
+let masterValues = [];
+let currentMasterType = null;
+
+let editingMasterValueId = null;
+
+let pendingDeleteMasterId = null;
+
+const MASTER_TYPE_LABELS = {
+  INITIATIVE_TYPE: 'Initiative Type',
+  DEPARTMENT: 'Departments',
+  BUSINESS_BENEFIT_CATEGORY: 'Business Benefit Categories',
+  PROJECT_STATUS: 'Project Status'
+};
 
 // --- PERMISSION HELPERS ---
 
@@ -1023,93 +1647,271 @@ if (userDisplay && currentUser) {
 // --- LOAD INITIATIVES AND MILESTONES FROM SUPABASE ---
 
 async function loadInitiativesFromSupabase() {
-  const initiativeResult = await supabaseClient
-    .from('initiatives')
-    .select('*')
-    .order('id', { ascending: false });
+
+  const programResult =
+    await supabaseClient
+      .from('programs')
+      .select('*')
+      .eq('is_active', true)
+      .order('id', { ascending: false });
+
+  if (programResult.error) {
+
+    console.error(
+      'Program loading failed:',
+      programResult.error
+    );
+
+    showToast(
+      'Unable to load Programs: ' +
+      programResult.error.message,
+      'error'
+    );
+
+    return false;
+  }
+
+  const initiativeResult =
+    await supabaseClient
+      .from('initiatives')
+      .select('*')
+      .order('id', { ascending: false });
 
   if (initiativeResult.error) {
+
     console.error(
       'Initiative loading failed:',
       initiativeResult.error
     );
 
-    alert(
-      `Unable to load initiatives: ` +
-      initiativeResult.error.message
+    showToast(
+      'Unable to load Initiatives: ' +
+      initiativeResult.error.message,
+      'error'
     );
 
     projects = [];
+    programs = [];
+
     renderProjects();
 
     return false;
   }
 
-  const milestoneResult = await supabaseClient
-    .from('milestones')
-    .select('*')
-    .order('id', { ascending: true });
+  const milestoneResult =
+    await supabaseClient
+      .from('milestones')
+      .select('*')
+      .order('id', { ascending: true });
 
   if (milestoneResult.error) {
+
     console.error(
       'Milestone loading failed:',
       milestoneResult.error
     );
 
-    alert(
-      `Unable to load milestones: ` +
-      milestoneResult.error.message
+    showToast(
+      'Unable to load Milestones: ' +
+      milestoneResult.error.message,
+      'error'
     );
 
     return false;
   }
 
-  const initiativeRows = initiativeResult.data || [];
-  const milestoneRows = milestoneResult.data || [];
+  const programRows =
+    programResult.data || [];
 
-  projects = initiativeRows.map(row => ({
-    id: Number(row.id),
-    name: row.title || '',
-    type: row.initiative_type || '',
-    crNo: row.cr_no || '',
-    vertical: row.vertical || '',
-    businessOwner: row.business_owner || '',
-    assignedTo: row.assigned_to || '',
-    startDate: row.start_date || '',
-    targetEndDate: row.target_end_date || '',
-    actualEndDate: row.actual_end_date || '',
-    impactCategory: row.impact_category || '',
-    measurableImpact: row.measurable_impact || '',
-    businessBenefit: row.business_benefit || '',
-    collapsed: false,
+  const initiativeRows =
+    initiativeResult.data || [];
 
-    milestones: milestoneRows
-      .filter(
-        milestone =>
-          Number(milestone.initiative_id) ===
-          Number(row.id)
-      )
-      .map(milestone => ({
-        id: Number(milestone.id),
-        title: milestone.milestone_title || '',
-        actions: milestone.actions || '',
-        owner: milestone.owner || '',
-        dependency: milestone.dependency || '',
-        status: milestone.status || '',
-        bucket: milestone.bucket || '',
-        startDate: milestone.start_date || '',
-        endDate: milestone.end_date || '',
-        deadline: milestone.deadline || '',
-        completionDate:
-          milestone.completion_date || '',
-        kpi: milestone.kpi || '',
-        remarks: milestone.remarks || ''
-      }))
-  }));
+  const milestoneRows =
+    milestoneResult.data || [];
+
+  programs =
+    programRows.map(row => ({
+
+      id: Number(row.id),
+
+      name:
+        row.program_name || '',
+
+      owner:
+        row.program_owner || '',
+
+      assignedTo:
+        row.assigned_to || '',
+
+      vertical:
+        row.vertical || '',
+
+      startDate:
+        row.start_date || '',
+
+      targetEndDate:
+        row.target_end_date || '',
+
+      actualEndDate:
+        row.actual_end_date || '',
+
+      impactCategory:
+        row.impact_category || '',
+
+      measurableImpact:
+        row.measurable_impact || '',
+
+      businessBenefit:
+        row.business_benefit || '',
+
+      status:
+        row.program_status || '',
+
+      programAge:
+        row.program_age,
+
+      countdownDays:
+        row.countdown_days,
+
+      collapsed: false
+
+    }));
+
+  projects =
+    initiativeRows.map(row => ({
+
+      id: Number(row.id),
+
+      programId:
+        row.program_id
+          ? Number(row.program_id)
+          : null,
+
+      name:
+        row.title || '',
+
+      type:
+        row.initiative_type || '',
+
+      crNo:
+        row.cr_no || '',
+
+      vertical:
+        row.vertical || '',
+
+      businessOwner:
+        row.business_owner || '',
+
+      assignedTo:
+        row.assigned_to || '',
+
+      startDate:
+        row.start_date || '',
+
+      targetEndDate:
+        row.target_end_date || '',
+
+      actualEndDate:
+        row.actual_end_date || '',
+
+      impactCategory:
+        row.impact_category || '',
+
+      measurableImpact:
+        row.measurable_impact || '',
+
+      businessBenefit:
+        row.business_benefit || '',
+
+      collapsed: false,
+
+      milestones:
+        milestoneRows
+          .filter(
+            milestone =>
+              Number(milestone.initiative_id) ===
+              Number(row.id)
+          )
+          .map(milestone => ({
+
+            id:
+              Number(milestone.id),
+
+            title:
+              milestone.milestone_title || '',
+
+            actions:
+              milestone.actions || '',
+
+            owner:
+              milestone.owner || '',
+
+            dependency:
+              milestone.dependency || '',
+
+            status:
+              milestone.status || '',
+
+            bucket:
+              milestone.bucket || '',
+
+            startDate:
+              milestone.start_date || '',
+
+            endDate:
+              milestone.end_date || '',
+
+            deadline:
+              milestone.deadline || '',
+
+            completionDate:
+              milestone.completion_date || '',
+
+            kpi:
+              milestone.kpi || '',
+
+            remarks:
+              milestone.remarks || ''
+
+          }))
+
+    }));
+
+  populateProgramDropdown();
 
   renderProjects();
 
   return true;
+}
+
+function toggleSidebarGroup(
+  menuId,
+  chevronId
+) {
+
+  const menu =
+    document.getElementById(menuId);
+
+  const chevron =
+    document.getElementById(chevronId);
+
+  if (!menu) {
+    return;
+  }
+
+  menu.classList.toggle('hidden');
+
+  if (chevron) {
+
+    chevron.setAttribute(
+      'data-lucide',
+      menu.classList.contains('hidden')
+        ? 'chevron-right'
+        : 'chevron-down'
+    );
+  }
+
+  lucide.createIcons();
 }
 
     // --- 2. SIDEBAR TOGGLE & PERSISTENCE ---
@@ -1347,24 +2149,800 @@ async function loadInitiativesFromSupabase() {
 }
 
     function renderUserMasterList() {
-      const container = document.getElementById('user-list');
-      document.getElementById('user-count').innerText = userMaster.length;
-      container.innerHTML = userMaster.map((u, i) => `
-        <div class="flex items-center justify-between p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs gap-2">
-          <div class="min-w-0">
-            <div class="font-semibold text-slate-800 truncate">${u.name} <span class="text-slate-400 font-normal">(${u.email})</span></div>
-            <div class="text-[10px] text-slate-500 mt-0.5 flex flex-wrap gap-1.5">
-              <span class="px-1.5 py-0.2 bg-indigo-50 text-indigo-700 rounded border border-indigo-100 font-medium">${u.department}</span>
-              <span class="px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded font-medium">${u.role}</span>
-              <span class="px-1.5 py-0.2 bg-amber-50 text-amber-700 rounded border border-amber-200 font-medium">${u.assignedVertical}</span>
-            </div>
+  const container =
+    document.getElementById('user-list');
+
+  const userCount =
+    document.getElementById('user-count');
+
+  if (!container) {
+    return;
+  }
+
+  if (userCount) {
+    userCount.innerText =
+      userMaster.length;
+  }
+
+  const activeDepartments =
+    getMasterValues(
+      'DEPARTMENT'
+    );
+
+  container.innerHTML =
+    userMaster
+      .map((user, index) => {
+        const isEditing =
+          Number(editingUserMasterId) ===
+          Number(user.id);
+
+        const departmentExists =
+          activeDepartments.some(
+            item =>
+              item.value_name ===
+              user.department
+          );
+
+        let departmentOptions = `
+          <option value="">
+            -- Select Department --
+          </option>
+        `;
+
+        departmentOptions +=
+          activeDepartments
+            .map(item => `
+              <option
+                value="${escapeHtml(item.value_name)}"
+                ${
+                  item.value_name === user.department
+                    ? 'selected'
+                    : ''
+                }
+              >
+                ${escapeHtml(item.value_name)}
+              </option>
+            `)
+            .join('');
+
+        if (
+          user.department &&
+          !departmentExists
+        ) {
+          departmentOptions += `
+            <option
+              value="${escapeHtml(user.department)}"
+              selected
+            >
+              ${escapeHtml(user.department)} (Inactive)
+            </option>
+          `;
+        }
+
+        return `
+          <div
+            class="
+              p-3
+              bg-slate-50
+              border
+              ${
+                isEditing
+                  ? 'border-indigo-300 ring-2 ring-indigo-100'
+                  : 'border-slate-200'
+              }
+              rounded-xl
+              text-xs
+            "
+          >
+
+            ${
+              isEditing
+                ? `
+                  <div
+                    class="
+                      grid
+                      grid-cols-1
+                      md:grid-cols-2
+                      xl:grid-cols-[1.2fr_1.5fr_1fr_1fr_auto]
+                      gap-3
+                      items-end
+                    "
+                  >
+
+                    <div>
+                      <label
+                        class="
+                          block
+                          text-[10px]
+                          font-semibold
+                          text-slate-500
+                          uppercase
+                          mb-1
+                        "
+                      >
+                        Full Name
+                      </label>
+
+                      <input
+                        id="edit-user-name-${user.id}"
+                        type="text"
+                        value="${escapeHtml(user.name)}"
+                        class="
+                          w-full
+                          px-3
+                          py-2
+                          bg-white
+                          border
+                          border-indigo-300
+                          rounded-lg
+                          text-xs
+                          focus:outline-none
+                          focus:ring-2
+                          focus:ring-indigo-500
+                        "
+                      >
+                    </div>
+
+                    <div>
+                      <label
+                        class="
+                          block
+                          text-[10px]
+                          font-semibold
+                          text-slate-500
+                          uppercase
+                          mb-1
+                        "
+                      >
+                        Email
+                      </label>
+
+                      <input
+                        id="edit-user-email-${user.id}"
+                        type="email"
+                        value="${escapeHtml(user.email)}"
+                        class="
+                          w-full
+                          px-3
+                          py-2
+                          bg-white
+                          border
+                          border-indigo-300
+                          rounded-lg
+                          text-xs
+                          focus:outline-none
+                          focus:ring-2
+                          focus:ring-indigo-500
+                        "
+                      >
+                    </div>
+
+                    <div>
+                      <label
+                        class="
+                          block
+                          text-[10px]
+                          font-semibold
+                          text-slate-500
+                          uppercase
+                          mb-1
+                        "
+                      >
+                        Department
+                      </label>
+
+                      <select
+                        id="edit-user-department-${user.id}"
+                        class="
+                          w-full
+                          px-3
+                          py-2
+                          bg-white
+                          border
+                          border-indigo-300
+                          rounded-lg
+                          text-xs
+                          focus:outline-none
+                          focus:ring-2
+                          focus:ring-indigo-500
+                        "
+                      >
+                        ${departmentOptions}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label
+                        class="
+                          block
+                          text-[10px]
+                          font-semibold
+                          text-slate-500
+                          uppercase
+                          mb-1
+                        "
+                      >
+                        Assigned Vertical
+                      </label>
+
+                      <select
+                        id="edit-user-vertical-${user.id}"
+                        class="
+                          w-full
+                          px-3
+                          py-2
+                          bg-white
+                          border
+                          border-indigo-300
+                          rounded-lg
+                          text-xs
+                          focus:outline-none
+                          focus:ring-2
+                          focus:ring-indigo-500
+                        "
+                      >
+                        <option
+                          value="All"
+                          ${
+                            user.assignedVertical === 'All'
+                              ? 'selected'
+                              : ''
+                          }
+                        >
+                          All Verticals
+                        </option>
+
+                        <option
+                          value="Retail commercial"
+                          ${
+                            user.assignedVertical ===
+                            'Retail commercial'
+                              ? 'selected'
+                              : ''
+                          }
+                        >
+                          Retail commercial
+                        </option>
+
+                        <option
+                          value="Finance"
+                          ${
+                            user.assignedVertical === 'Finance'
+                              ? 'selected'
+                              : ''
+                          }
+                        >
+                          Finance
+                        </option>
+
+                        <option
+                          value="Merchandising"
+                          ${
+                            user.assignedVertical ===
+                            'Merchandising'
+                              ? 'selected'
+                              : ''
+                          }
+                        >
+                          Merchandising
+                        </option>
+                      </select>
+                    </div>
+
+                    <div
+                      class="
+                        flex
+                        items-center
+                        justify-end
+                        gap-2
+                      "
+                    >
+                      <button
+                        type="button"
+                        onclick="saveUserMasterRow(${user.id})"
+                        class="
+                          inline-flex
+                          items-center
+                          gap-1.5
+                          px-3
+                          py-2
+                          bg-emerald-600
+                          hover:bg-emerald-500
+                          text-white
+                          font-semibold
+                          rounded-lg
+                          transition
+                        "
+                        title="Save User"
+                      >
+                        <i
+                          data-lucide="check"
+                          class="w-4 h-4"
+                        ></i>
+                        Save
+                      </button>
+
+                      <button
+                        type="button"
+                        onclick="cancelUserMasterEdit()"
+                        class="
+                          inline-flex
+                          items-center
+                          gap-1.5
+                          px-3
+                          py-2
+                          bg-white
+                          hover:bg-slate-100
+                          text-slate-600
+                          border
+                          border-slate-300
+                          font-semibold
+                          rounded-lg
+                          transition
+                        "
+                        title="Cancel Edit"
+                      >
+                        <i
+                          data-lucide="x"
+                          class="w-4 h-4"
+                        ></i>
+                        Cancel
+                      </button>
+                    </div>
+
+                  </div>
+
+                  <div
+                    class="
+                      mt-2
+                      pt-2
+                      border-t
+                      border-slate-200
+                      flex
+                      items-center
+                      gap-2
+                      flex-wrap
+                    "
+                  >
+                    <span
+                      class="
+                        text-[10px]
+                        text-slate-500
+                        font-semibold
+                      "
+                    >
+                      Role:
+                    </span>
+
+                    <span
+                      class="
+                        px-1.5
+                        py-0.5
+                        bg-slate-200
+                        text-slate-700
+                        rounded
+                        font-medium
+                      "
+                    >
+                      ${escapeHtml(user.role)}
+                    </span>
+
+                    <span
+                      class="text-[10px] text-slate-400"
+                    >
+                      Role can continue to be maintained from User Roles.
+                    </span>
+                  </div>
+                `
+                : `
+                  <div
+                    class="
+                      flex
+                      items-center
+                      justify-between
+                      gap-3
+                    "
+                  >
+
+                    <div class="min-w-0 flex-1">
+
+                      <div
+                        class="
+                          font-semibold
+                          text-slate-800
+                          truncate
+                        "
+                      >
+                        ${escapeHtml(user.name)}
+
+                        <span
+                          class="
+                            text-slate-400
+                            font-normal
+                          "
+                        >
+                          (${escapeHtml(user.email)})
+                        </span>
+                      </div>
+
+                      <div
+                        class="
+                          text-[10px]
+                          text-slate-500
+                          mt-1
+                          flex
+                          flex-wrap
+                          gap-1.5
+                        "
+                      >
+                        <span
+                          class="
+                            px-1.5
+                            py-0.5
+                            bg-indigo-50
+                            text-indigo-700
+                            rounded
+                            border
+                            border-indigo-100
+                            font-medium
+                          "
+                        >
+                          ${escapeHtml(user.department)}
+                        </span>
+
+                        <span
+                          class="
+                            px-1.5
+                            py-0.5
+                            bg-slate-200
+                            text-slate-700
+                            rounded
+                            font-medium
+                          "
+                        >
+                          ${escapeHtml(user.role)}
+                        </span>
+
+                        <span
+                          class="
+                            px-1.5
+                            py-0.5
+                            bg-amber-50
+                            text-amber-700
+                            rounded
+                            border
+                            border-amber-200
+                            font-medium
+                          "
+                        >
+                          ${escapeHtml(user.assignedVertical)}
+                        </span>
+                      </div>
+
+                    </div>
+
+                    <div
+                      class="
+                        flex
+                        items-center
+                        gap-2
+                        flex-shrink-0
+                      "
+                    >
+                      <button
+                        type="button"
+                        onclick="editUserMasterRow(${user.id})"
+                        class="
+                          p-1.5
+                          text-slate-400
+                          hover:text-indigo-600
+                          hover:bg-indigo-50
+                          rounded-lg
+                          transition
+                        "
+                        title="Edit User"
+                      >
+                        <i
+                          data-lucide="edit-2"
+                          class="w-4 h-4"
+                        ></i>
+                      </button>
+
+                      <button
+                        type="button"
+                        onclick="removeUser(${index})"
+                        class="
+                          p-1.5
+                          text-slate-400
+                          hover:text-rose-600
+                          hover:bg-rose-50
+                          rounded-lg
+                          transition
+                        "
+                        title="Delete User"
+                      >
+                        <i
+                          data-lucide="trash-2"
+                          class="w-4 h-4"
+                        ></i>
+                      </button>
+                    </div>
+
+                  </div>
+                `
+            }
+
           </div>
-          <button onclick="removeUser(${i})" class="text-slate-400 hover:text-rose-600 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-        </div>
-      `).join('');
-      lucide.createIcons();
+        `;
+      })
+      .join('');
+
+  lucide.createIcons();
+}
+
+function editUserMasterRow(userId) {
+  if (
+    !currentUser ||
+    currentUser.role !== 'Admin'
+  ) {
+    showToast(
+      'Only Admin can edit User Master records.',
+      'error'
+    );
+    return;
+  }
+
+  editingUserMasterId =
+    Number(userId);
+
+  renderUserMasterList();
+}
+
+function cancelUserMasterEdit() {
+  editingUserMasterId = null;
+
+  renderUserMasterList();
+}
+
+async function saveUserMasterRow(userId) {
+  if (
+    !currentUser ||
+    currentUser.role !== 'Admin'
+  ) {
+    showToast(
+      'Only Admin can update User Master records.',
+      'error'
+    );
+    return;
+  }
+
+  const user =
+    userMaster.find(
+      item =>
+        Number(item.id) ===
+        Number(userId)
+    );
+
+  if (!user) {
+    showToast(
+      'User record was not found.',
+      'error'
+    );
+    return;
+  }
+
+  const nameInput =
+    document.getElementById(
+      `edit-user-name-${userId}`
+    );
+
+  const emailInput =
+    document.getElementById(
+      `edit-user-email-${userId}`
+    );
+
+  const departmentInput =
+    document.getElementById(
+      `edit-user-department-${userId}`
+    );
+
+  const verticalInput =
+    document.getElementById(
+      `edit-user-vertical-${userId}`
+    );
+
+  if (
+    !nameInput ||
+    !emailInput ||
+    !departmentInput ||
+    !verticalInput
+  ) {
+    showToast(
+      'The inline edit fields were not found.',
+      'error'
+    );
+    return;
+  }
+
+  const fullName =
+    nameInput.value.trim();
+
+  const email =
+    emailInput.value
+      .trim()
+      .toLowerCase();
+
+  const department =
+    departmentInput.value.trim();
+
+  const assignedVertical =
+    verticalInput.value;
+
+  if (!fullName) {
+    showToast(
+      'Full Name is required.',
+      'error'
+    );
+    nameInput.focus();
+    return;
+  }
+
+  if (!email) {
+    showToast(
+      'Email is required.',
+      'error'
+    );
+    emailInput.focus();
+    return;
+  }
+
+  const emailPattern =
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+  if (!emailPattern.test(email)) {
+    showToast(
+      'Enter a valid email address.',
+      'error'
+    );
+    emailInput.focus();
+    return;
+  }
+
+  if (!department) {
+    showToast(
+      'Department is required.',
+      'error'
+    );
+    departmentInput.focus();
+    return;
+  }
+
+  if (!assignedVertical) {
+    showToast(
+      'Assigned Vertical is required.',
+      'error'
+    );
+    verticalInput.focus();
+    return;
+  }
+
+  const duplicateEmail =
+    userMaster.some(
+      item =>
+        Number(item.id) !==
+          Number(userId) &&
+        String(item.email || '')
+          .trim()
+          .toLowerCase() === email
+    );
+
+  if (duplicateEmail) {
+    showToast(
+      'Another user already has this email address.',
+      'error'
+    );
+    emailInput.focus();
+    return;
+  }
+
+  if (
+    user.role === 'Level 2' &&
+    assignedVertical === 'All'
+  ) {
+    showToast(
+      'Level 2 users must have a specific Assigned Vertical.',
+      'error'
+    );
+    verticalInput.focus();
+    return;
+  }
+
+  const payload = {
+    full_name: fullName,
+    email: email,
+    department: department,
+    assigned_vertical:
+      assignedVertical
+  };
+
+  try {
+    const { error } =
+      await supabaseClient
+        .from('user_master')
+        .update(payload)
+        .eq(
+          'id',
+          Number(userId)
+        );
+
+    if (error) {
+      throw error;
     }
 
+    editingUserMasterId = null;
+
+    /*
+      If the Admin updated the currently logged-in
+      user's non-auth profile information, update the
+      badge/session object displayed in the application.
+    */
+    if (
+      currentUser &&
+      Number(currentUser.id) ===
+        Number(userId)
+    ) {
+      currentUser.name =
+        fullName;
+
+      currentUser.email =
+        email;
+
+      currentUser.department =
+        department;
+
+      currentUser.assignedVertical =
+        assignedVertical;
+
+      const leftBadge =
+        document.getElementById(
+          'current-user-display-left'
+        );
+
+      if (leftBadge) {
+        leftBadge.innerText =
+          `${currentUser.name} (${currentUser.role})`;
+      }
+    }
+
+    const usersLoaded =
+      await loadUsersFromSupabase();
+
+    if (!usersLoaded) {
+      return;
+    }
+
+    renderUserMasterList();
+    renderUserRoleManagement();
+    populateUserDropdowns();
+    renderProjects();
+
+    showToast(
+      'User updated successfully.',
+      'success'
+    );
+  } catch (error) {
+    console.error(
+      'User update failed:',
+      error
+    );
+
+    showToast(
+      error.message ||
+        'Unable to update the user.',
+      'error'
+    );
+  }
+}
 
     async function removeUser(index) {
       if (
@@ -1407,10 +2985,12 @@ async function loadInitiativesFromSupabase() {
 }
 
     function openUserModal() {
+  if (!currentUser) {
+    return;
+  }
 
-      if (!currentUser) {
-  return;
-}
+  editingUserMasterId = null;
+
   renderUserMasterList();
 
   const importActions =
@@ -1437,6 +3017,8 @@ async function loadInitiativesFromSupabase() {
 }
 
     function closeUserModal() {
+  editingUserMasterId = null;
+
   const modal =
     document.getElementById('user-modal');
 
@@ -1446,20 +3028,2294 @@ async function loadInitiativesFromSupabase() {
   modal.classList.remove('justify-center');
 }
 
+// =======================================
+// CONFIGURABLE MASTER DATA
+// =======================================
+
+async function loadMasterValues() {
+
+  const {
+    data,
+    error
+  } =
+  await supabaseClient
+    .from('master_values')
+    .select('*')
+    .order(
+      'master_type',
+      {
+        ascending: true
+      }
+    )
+    
+    .order(
+      'value_name',
+      {
+        ascending: true
+      }
+    );
+
+  if (error) {
+
+    console.error(
+      'Master value loading failed:',
+      error
+    );
+
+    showToast(
+      'Unable to load Master Data: ' +
+      error.message,
+      'error'
+    );
+
+    return false;
+  }
+
+  masterValues =
+    data || [];
+
+  populateMasterLOVs();
+
+  return true;
+}
+
+
+function getMasterValues(
+  masterType,
+  includeInactive = false
+) {
+
+  return masterValues.filter(
+    item =>
+      item.master_type === masterType &&
+      (
+        includeInactive ||
+        item.is_active === true
+      )
+  );
+}
+
+function formatMasterDateTime(value) {
+  if (!value) return '-';
+
+  const dt = new Date(value);
+
+  const day = String(dt.getDate()).padStart(2, '0');
+
+  const month = [
+    'Jan','Feb','Mar','Apr','May','Jun',
+    'Jul','Aug','Sep','Oct','Nov','Dec'
+  ][dt.getMonth()];
+
+  const year = String(dt.getFullYear()).slice(-2);
+
+  const hrs = String(dt.getHours()).padStart(2,'0');
+  const mins = String(dt.getMinutes()).padStart(2,'0');
+  const secs = String(dt.getSeconds()).padStart(2,'0');
+
+  return `${day}-${month}-${year} ${hrs}.${mins}.${secs}`;
+}
+
+
+function escapeHtml(value) {
+
+  return String(value ?? '')
+    .replaceAll(
+      '&',
+      '&amp;'
+    )
+    .replaceAll(
+      '<',
+      '&lt;'
+    )
+    .replaceAll(
+      '>',
+      '&gt;'
+    )
+    .replaceAll(
+      '"',
+      '&quot;'
+    )
+    .replaceAll(
+      "'",
+      '&#039;'
+    );
+}
+
+
+function buildMasterOptions(
+  masterType,
+  placeholder,
+  selectedValue = ''
+) {
+
+  const activeValues =
+    getMasterValues(
+      masterType
+    );
+
+  const selectedExists =
+    activeValues.some(
+      item =>
+        item.value_name ===
+        selectedValue
+    );
+
+  let options = `
+    <option value="">
+      ${escapeHtml(placeholder)}
+    </option>
+  `;
+
+  options +=
+    activeValues
+      .map(item => {
+
+        const isSelected =
+          item.value_name ===
+          selectedValue;
+
+        return `
+          <option
+            value="${escapeHtml(item.value_name)}"
+            ${isSelected ? 'selected' : ''}
+          >
+            ${escapeHtml(item.value_name)}
+          </option>
+        `;
+
+      })
+      .join('');
+
+  /*
+    When an existing record contains an inactive
+    master value, show that historical value only
+    while editing the existing record.
+  */
+  if (
+    selectedValue &&
+    !selectedExists
+  ) {
+
+    options += `
+      <option
+        value="${escapeHtml(selectedValue)}"
+        selected
+      >
+        ${escapeHtml(selectedValue)} (Inactive)
+      </option>
+    `;
+  }
+
+  return options;
+}
+
+
+function setMasterSelectOptions(
+  elementId,
+  masterType,
+  placeholder
+) {
+
+  const select =
+    document.getElementById(
+      elementId
+    );
+
+  if (!select) {
+    return;
+  }
+
+  const selectedValue =
+    select.value;
+
+  select.innerHTML =
+    buildMasterOptions(
+      masterType,
+      placeholder,
+      selectedValue
+    );
+}
+
+
+function populateMasterLOVs() {
+
+  setMasterSelectOptions(
+    'p-type',
+    'INITIATIVE_TYPE',
+    '-- Select Initiative Type --'
+  );
+
+  setMasterSelectOptions(
+    'filter-type',
+    'INITIATIVE_TYPE',
+    'All Types'
+  );
+
+  setMasterSelectOptions(
+    'p-impact-category',
+    'BUSINESS_BENEFIT_CATEGORY',
+    '-- Select Business Benefit Category --'
+  );
+
+  setMasterSelectOptions(
+    'pg-impact-category',
+    'BUSINESS_BENEFIT_CATEGORY',
+    '-- Select Business Benefit Category --'
+  );
+
+  setMasterSelectOptions(
+    'filter-impact',
+    'BUSINESS_BENEFIT_CATEGORY',
+    'All Business Benefit Categories'
+  );
+
+  setMasterSelectOptions(
+    'filter-status',
+    'PROJECT_STATUS',
+    'All Statuses'
+  );
+
+  setMasterSelectOptions(
+    'new-user-dept',
+    'DEPARTMENT',
+    '-- Select Department --'
+  );
+}
+
+
+function openMasterModal(
+  masterType
+) {
+
+  if (
+    !currentUser ||
+    currentUser.role !== 'Admin'
+  ) {
+
+    showToast(
+      'Only Admin can manage Master Data.',
+      'error'
+    );
+
+    return;
+  }
+
+  if (
+    !MASTER_TYPE_LABELS[
+      masterType
+    ]
+  ) {
+
+    showToast(
+      'Invalid Master Data type.',
+      'error'
+    );
+
+    return;
+  }
+
+  currentMasterType =
+    masterType;
+
+  const typeInput =
+    document.getElementById(
+      'master-value-type'
+    );
+
+  if (typeInput) {
+
+    typeInput.value =
+      masterType;
+  }
+
+  const title =
+    document.getElementById(
+      'master-data-modal-title'
+    );
+
+  if (title) {
+
+    title.innerText =
+      MASTER_TYPE_LABELS[
+        masterType
+      ];
+  }
+
+  resetMasterValueForm();
+
+  renderMasterValueList();
+
+  const modal =
+    document.getElementById(
+      'master-data-modal'
+    );
+
+  if (!modal) {
+
+    showToast(
+      'Master Data modal was not found.',
+      'error'
+    );
+
+    return;
+  }
+
+  modal.classList.remove(
+    'hidden'
+  );
+
+  modal.classList.add(
+    'flex'
+  );
+
+  lucide.createIcons();
+}
+
+
+function closeMasterModal() {
+
+  const modal =
+    document.getElementById(
+      'master-data-modal'
+    );
+
+  if (modal) {
+
+    modal.classList.add(
+      'hidden'
+    );
+
+    modal.classList.remove(
+      'flex'
+    );
+  }
+
+  currentMasterType =
+    null;
+
+  resetMasterValueForm();
+}
+
+
+function renderMasterValueList() {
+
+  const container =
+    document.getElementById(
+      'master-value-list'
+    );
+
+  if (!container) {
+    return;
+  }
+
+  let records =
+  getMasterValues(
+    currentMasterType,
+    true
+  );
+
+  document.getElementById(
+  'master-record-count'
+).innerText = records.filter(
+  r => r.is_active
+).length;
+
+const sortBy =
+  document.getElementById(
+    'master-sort'
+  )?.value || 'name';
+
+switch (sortBy) {
+
+  case 'created':
+
+    records.sort(
+      (a, b) =>
+        new Date(
+          b.created_at || 0
+        ) -
+        new Date(
+          a.created_at || 0
+        )
+    );
+
+    break;
+
+  case 'updated':
+
+    records.sort(
+      (a, b) =>
+        new Date(
+          b.updated_at || 0
+        ) -
+        new Date(
+          a.updated_at || 0
+        )
+    );
+
+    break;
+
+  case 'status':
+
+    records.sort(
+      (a, b) =>
+        Number(
+          b.is_active
+        ) -
+        Number(
+          a.is_active
+        )
+    );
+
+    break;
+
+  default:
+
+    records.sort(
+      (a, b) =>
+        (a.value_name || '')
+          .localeCompare(
+            b.value_name || ''
+          )
+    );
+
+}
+
+  if (
+    records.length === 0
+  ) {
+
+    container.innerHTML = `
+      <div
+        class="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-300 rounded-xl"
+      >
+        No values created for this Master.
+      </div>
+    `;
+
+    return;
+  }
+
+  container.innerHTML = `
+<div
+  class="
+  border
+  border-slate-200
+  rounded-xl
+  overflow-hidden
+  bg-white
+  "
+>
+
+  <table class="w-full text-xs">
+
+    <thead
+      class="
+      bg-slate-100
+      border-b
+      border-slate-200
+      "
+    >
+      <tr>
+        <th class="px-3 py-2 text-center">
+          Code
+        </th>
+
+        <th class="px-3 py-2 text-center">
+          Value Name
+        </th>
+
+        <th class="px-3 py-2 text-center">
+          Status
+        </th>
+
+        <th class="px-3 py-2 text-center">
+          Updated On
+        </th>
+
+        <th class="px-3 py-2 text-center">
+          Action
+        </th>
+      </tr>
+    </thead>
+
+    <tbody>
+
+      ${records.map(record => {
+
+        const statusLabel =
+          record.is_active
+            ? 'Active'
+            : 'Inactive';
+
+        const badgeClass =
+          record.is_active
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            : 'bg-slate-100 text-slate-600 border-slate-300';
+
+        const actionButton =
+          record.is_active
+            ? `
+                <button
+                  type="button"
+                  onclick="deactivateMasterValue(${record.id})"
+                  class="text-rose-600"
+                >
+                  <i
+                    data-lucide="trash-2"
+                    class="w-4 h-4"
+                  ></i>
+                </button>
+              `
+            : `
+                <button
+                  type="button"
+                  onclick="reactivateMasterValue(${record.id})"
+                  class="text-emerald-600"
+                >
+                  <i
+                    data-lucide="rotate-ccw"
+                    class="w-4 h-4"
+                  ></i>
+                </button>
+              `;
+              const isEditing =
+  editingMasterValueId === record.id;
+
+        return `
+          <tr
+            class="
+            border-b
+            border-slate-100
+            hover:bg-slate-50
+            "
+          >
+
+            <td class="px-3 py-2">
+
+<span
+  class="
+  px-2
+  py-1
+  bg-slate-100
+  border
+  border-slate-200
+  rounded
+  font-mono
+  text-slate-700
+  "
+>
+${escapeHtml(record.value_code)}
+</span>
+
+</td>
+
+              <td class="px-3 py-2 text-center">
+
+  ${isEditing
+    ? `
+      <input
+  id="edit-name-${record.id}"
+  type="text"
+  value="${escapeHtml(record.value_name)}"
+  class="
+  w-full
+  min-w-[220px]
+  border
+  border-indigo-300
+  rounded-lg
+  px-2
+  py-1.5
+  text-xs
+  focus:ring-2
+  focus:ring-indigo-500
+  "
+>
+    `
+    : escapeHtml(record.value_name)
+  }
+
+</td>
+            <td class="px-3 py-2 text-center">
+
+${isEditing
+  ? `
+    <select
+      id="edit-status-${record.id}"
+      class="
+      border
+      border-slate-300
+      rounded
+      px-2
+      py-1
+      text-xs
+      "
+    >
+      <option
+        value="true"
+        ${record.is_active ? 'selected' : ''}
+      >
+        Active
+      </option>
+
+      <option
+        value="false"
+        ${!record.is_active ? 'selected' : ''}
+      >
+        Inactive
+      </option>
+
+    </select>
+  `
+  : `
+    <span
+      class="
+      inline-flex
+      items-center
+      px-2
+      py-0.5
+      rounded-full
+      border
+      text-[10px]
+      ${badgeClass}
+      "
+    >
+      ${statusLabel}
+    </span>
+  `
+}
+
+</td>
+
+            <td class="px-3 py-2 text-center">
+              ${
+                record.updated_at
+                  ? formatMasterDateTime(
+  record.updated_at
+)
+                  : '-'
+              }
+            </td>
+
+            <td class="px-3 py-2 text-center">
+
+${
+isEditing
+? `
+
+<div class="flex items-center justify-center gap-2">
+
+  <button
+    type="button"
+    onclick="saveGridMasterRow(${record.id})"
+    class="
+    px-2
+    py-1
+    text-xs
+    bg-emerald-600
+    text-white
+    rounded
+    hover:bg-emerald-700
+    "
+  >
+    Save
+  </button>
+
+  <button
+    type="button"
+    onclick="cancelGridMasterEdit()"
+    class="
+    px-2
+    py-1
+    text-xs
+    bg-slate-200
+    rounded
+    hover:bg-slate-300
+    "
+  >
+    Cancel
+  </button>
+
+</div>
+
+`
+: `
+
+<div class="flex items-center justify-center gap-3">
+
+  <button
+    type="button"
+    onclick="editGridMasterRow(${record.id})"
+    class="text-indigo-600 hover:text-indigo-800"
+    title="Edit"
+  >
+    <i data-lucide="edit-2" class="w-4 h-4"></i>
+  </button>
+
+
+
+  <button
+    type="button"
+    onclick="confirmDeleteMasterValue(${record.id})"
+    class="text-red-600 hover:text-red-800"
+    title="Delete Permanently"
+  >
+    <i
+      data-lucide="trash-2"
+      class="w-4 h-4"
+    ></i>
+  </button>
+
+</div>
+
+
+`
+}
+
+</td>
+
+          </tr>
+        `;
+      }).join('')}
+
+    </tbody>
+
+  </table>
+
+</div>
+`;
+
+  lucide.createIcons();
+}
+
+
+function editMasterValue(
+  recordId
+) {
+
+  const record =
+    masterValues.find(
+      item =>
+        Number(item.id) ===
+        Number(recordId)
+    );
+
+  if (!record) {
+
+    showToast(
+      'Master value was not found.',
+      'error'
+    );
+
+    return;
+  }
+
+  currentMasterType =
+    record.master_type;
+
+  document
+    .getElementById(
+      'master-value-id'
+    )
+    .value =
+      record.id;
+
+  document
+    .getElementById(
+      'master-value-type'
+    )
+    .value =
+      record.master_type;
+
+  document
+    .getElementById(
+      'master-value-code'
+    )
+    .value =
+      record.value_code || '';
+
+  document
+    .getElementById(
+      'master-value-name'
+    )
+    .value =
+      record.value_name || '';
+
+
+
+  document
+    .getElementById(
+      'master-value-save-button'
+    )
+    .innerText =
+      'Update Value';
+
+  document
+    .getElementById(
+      'master-value-cancel-area'
+    )
+    .classList.remove(
+      'hidden'
+    );
+}
+
+
+function editGridMasterRow(id) {
+
+  editingMasterValueId = id;
+
+  renderMasterValueList();
+
+}
+
+function cancelGridMasterEdit() {
+
+  editingMasterValueId = null;
+
+  renderMasterValueList();
+
+}
+
+function confirmDeleteMasterValue(id) {
+
+  const record =
+    masterValues.find(
+      x => Number(x.id) === Number(id)
+    );
+
+  if (!record) {
+    return;
+  }
+
+  pendingDeleteMasterId = id;
+
+  document.getElementById(
+  'master-delete-message'
+).innerHTML = `
+Are you sure you want to permanently delete
+<strong>${record.value_name}</strong>?
+
+<br><br>
+
+This action cannot be undone and
+the record will be removed from
+the database.
+`;
+
+  document
+    .getElementById(
+      'master-delete-modal'
+    )
+    .classList.remove('hidden');
+
+  lucide.createIcons();
+
+}
+
+function closeMasterDeleteModal() {
+
+  pendingDeleteMasterId = null;
+
+  document
+    .getElementById(
+      'master-delete-modal'
+    )
+    .classList.add('hidden');
+
+}
+
+function resetMasterValueForm() {
+
+  const form =
+    document.getElementById(
+      'master-value-form'
+    );
+
+  if (!form) {
+    return;
+  }
+
+  form.reset();
+
+  const idInput =
+    document.getElementById(
+      'master-value-id'
+    );
+
+  const typeInput =
+    document.getElementById(
+      'master-value-type'
+    );
+
+  const saveButton =
+    document.getElementById(
+      'master-value-save-button'
+    );
+
+  const cancelArea =
+    document.getElementById(
+      'master-value-cancel-area'
+    );
+
+  if (idInput) {
+
+    idInput.value = '';
+  }
+
+  if (typeInput) {
+
+    typeInput.value =
+      currentMasterType || '';
+  }
+
+  if (saveButton) {
+
+    saveButton.innerText =
+      'Add Value';
+  }
+
+  if (cancelArea) {
+
+    cancelArea.classList.add(
+      'hidden'
+    );
+  }
+}
+
+
+async function saveMasterValue(
+  event
+) {
+
+  event.preventDefault();
+
+  if (
+    !currentUser ||
+    currentUser.role !== 'Admin'
+  ) {
+
+    showToast(
+      'Only Admin can update Master Data.',
+      'error'
+    );
+
+    return;
+  }
+
+  const recordId =
+    document
+      .getElementById(
+        'master-value-id'
+      )
+      .value;
+
+  const masterType =
+    document
+      .getElementById(
+        'master-value-type'
+      )
+      .value;
+
+  const valueCode =
+    document
+      .getElementById(
+        'master-value-code'
+      )
+      .value
+      .trim()
+      .toUpperCase()
+      .replace(
+        /[^A-Z0-9]+/g,
+        '_'
+      )
+      .replace(
+        /^_+|_+$/g,
+        ''
+      );
+
+  const valueName =
+    document
+      .getElementById(
+        'master-value-name'
+      )
+      .value
+      .trim();
+
+
+  if (
+    !masterType ||
+    !valueCode ||
+    !valueName
+  ) {
+
+    showToast(
+      'Master Type, Code and Value Name are required.',
+      'error'
+    );
+
+    return;
+  }
+
+  const duplicateName =
+    masterValues.some(
+      item =>
+        item.master_type ===
+          masterType &&
+        item.is_active ===
+          true &&
+        String(
+          item.value_name || ''
+        )
+          .trim()
+          .toLowerCase() ===
+        valueName.toLowerCase() &&
+        Number(item.id) !==
+          Number(recordId || 0)
+    );
+
+  if (duplicateName) {
+
+    showToast(
+      'An active value with this name already exists.',
+      'error'
+    );
+
+    return;
+  }
+
+  const duplicateCode =
+    masterValues.some(
+      item =>
+        item.master_type ===
+          masterType &&
+        item.is_active ===
+          true &&
+        String(
+          item.value_code || ''
+        )
+          .trim()
+          .toUpperCase() ===
+        valueCode &&
+        Number(item.id) !==
+          Number(recordId || 0)
+    );
+
+  if (duplicateCode) {
+
+    showToast(
+      'An active value with this code already exists.',
+      'error'
+    );
+
+    return;
+  }
+
+  const databaseRecord = {
+  master_type: masterType,
+  value_code: valueCode,
+  value_name: valueName,
+  updated_at: new Date().toISOString()
+};
+
+  let result;
+
+  if (recordId) {
+
+    result =
+      await supabaseClient
+        .from(
+          'master_values'
+        )
+        .update(
+          databaseRecord
+        )
+        .eq(
+          'id',
+          Number(recordId)
+        );
+
+  } else {
+
+    result =
+      await supabaseClient
+        .from(
+          'master_values'
+        )
+        .insert({
+          ...databaseRecord,
+          is_active: true
+        });
+  }
+
+  if (result.error) {
+
+    console.error(
+      'Master value save failed:',
+      result.error
+    );
+
+    showToast(
+      'Unable to save Master value: ' +
+      result.error.message,
+      'error'
+    );
+
+    return;
+  }
+
+  const loaded =
+    await loadMasterValues();
+
+  if (!loaded) {
+    return;
+  }
+
+  resetMasterValueForm();
+
+  renderMasterValueList();
+
+  showToast(
+    recordId
+      ? 'Master value updated successfully.'
+      : 'Master value created successfully.',
+    'success'
+  );
+}
+
+async function saveGridMasterRow(id) {
+
+  try {
+
+    const record =
+      masterValues.find(
+        x => x.id === id
+      );
+
+    if (!record) {
+      return;
+    }
+
+    const valueName =
+      document
+        .getElementById(
+          `edit-name-${id}`
+        )
+        .value
+        .trim();
+
+    const statusValue =
+      document.getElementById(
+        `edit-status-${id}`
+      ).value;
+
+    const isActive =
+      statusValue === 'true';
+
+    if (!valueName) {
+
+      showToast(
+        'Value Name is required.',
+        'warning'
+      );
+
+      return;
+    }
+
+    const payload = {
+      value_name: valueName,
+      is_active: isActive,
+      updated_at:
+        new Date().toISOString()
+    };
+
+    const {
+      error
+    } = await supabaseClient
+      .from('master_values')
+      .update(payload)
+      .eq('id', id);
+
+    if (error) {
+      throw error;
+    }
+
+    record.value_name =
+      valueName;
+
+    record.is_active =
+      isActive;
+
+    record.updated_at =
+      payload.updated_at;
+
+    editingMasterValueId =
+      null;
+
+    renderMasterValueList();
+
+    showToast(
+      'Master value updated successfully.',
+      'success'
+    );
+
+  } catch (error) {
+
+    console.error(error);
+
+    showToast(
+      error.message ||
+      'Unable to update master value.',
+      'error'
+    );
+  }
+}
+
+async function deleteMasterValue(id) {
+
+  try {
+
+    const { error } =
+      await supabaseClient
+  .from('master_values')
+  .delete()
+  .eq('id', Number(id));
+
+    if (error) {
+      throw error;
+    }
+
+    await loadMasterValues();
+
+    renderMasterValueList();
+
+    showToast(
+  'Record permanently deleted from database.',
+  'success'
+);
+
+  }
+  catch (error) {
+
+    console.error(error);
+
+    showToast(
+      error.message ||
+      'Unable to delete value.',
+      'error'
+    );
+
+  }
+
+}
+
+
+async function reactivateMasterValue(
+  recordId
+) {
+
+  if (
+    !currentUser ||
+    currentUser.role !== 'Admin'
+  ) {
+
+    showToast(
+      'Only Admin can reactivate Master Data.',
+      'error'
+    );
+
+    return;
+  }
+
+  const record =
+    masterValues.find(
+      item =>
+        Number(item.id) ===
+        Number(recordId)
+    );
+
+  if (!record) {
+
+    showToast(
+      'Master value was not found.',
+      'error'
+    );
+
+    return;
+  }
+
+  const duplicateActiveValue =
+    masterValues.some(
+      item =>
+        item.master_type ===
+          record.master_type &&
+        item.is_active ===
+          true &&
+        Number(item.id) !==
+          Number(recordId) &&
+        (
+          String(
+            item.value_name || ''
+          )
+            .trim()
+            .toLowerCase() ===
+          String(
+            record.value_name || ''
+          )
+            .trim()
+            .toLowerCase() ||
+          String(
+            item.value_code || ''
+          )
+            .trim()
+            .toUpperCase() ===
+          String(
+            record.value_code || ''
+          )
+            .trim()
+            .toUpperCase()
+        )
+    );
+
+  if (duplicateActiveValue) {
+
+    showToast(
+      'This value cannot be reactivated because an active value with the same name or code already exists.',
+      'error'
+    );
+
+    return;
+  }
+
+  const {
+    error
+  } =
+  await supabaseClient
+    .from(
+      'master_values'
+    )
+    .update({
+      is_active: true,
+      updated_at:
+        new Date().toISOString()
+    })
+    .eq(
+      'id',
+      Number(recordId)
+    );
+
+  if (error) {
+
+    console.error(
+      'Master value reactivation failed:',
+      error
+    );
+
+    showToast(
+      'Unable to reactivate value: ' +
+      error.message,
+      'error'
+    );
+
+    return;
+  }
+
+  const loaded =
+    await loadMasterValues();
+
+  if (!loaded) {
+    return;
+  }
+
+  renderMasterValueList();
+
+  showToast(
+    'Master value reactivated successfully.',
+    'success'
+  );
+}
+
+async function deactivateMasterValue(recordId) {
+
+  const { error } =
+    await supabaseClient
+      .from('master_values')
+      .update({
+        is_active:false,
+        updated_at:new Date().toISOString()
+      })
+      .eq('id', Number(recordId));
+
+  if(error){
+    showToast(
+      error.message,
+      'error'
+    );
+    return;
+  }
+
+  await loadMasterValues();
+
+  renderMasterValueList();
+
+  showToast(
+    'Master value deactivated.',
+    'success'
+  );
+}
+// =======================================
+// PROGRAM MANAGEMENT
+// =======================================
+
+function populateProgramDropdown() {
+
+  const select =
+    document.getElementById(
+      'p-program-id'
+    );
+
+  if (!select) return;
+
+  const selectedValue =
+    select.value;
+
+  select.innerHTML =
+    '<option value="">-- Unmapped Initiative --</option>' +
+    programs
+      .map(program => `
+        <option value="${program.id}">
+          ${program.name} - ${program.vertical}
+        </option>
+      `)
+      .join('');
+
+  select.value =
+    selectedValue;
+}
+
+function getProgramInitiatives(programId) {
+
+  return projects.filter(
+    project =>
+      Number(project.programId) ===
+      Number(programId)
+  );
+}
+
+function renderProgramInitiativeSelection(
+  selectedProgramId = null
+) {
+
+  const container =
+    document.getElementById(
+      'program-initiative-list'
+    );
+
+  if (!container) {
+    return;
+  }
+
+  const visibleInitiatives =
+    projects.filter(
+      project =>
+        isVerticalAllowed(
+          project.vertical
+        )
+    );
+
+  if (visibleInitiatives.length === 0) {
+
+    container.innerHTML = `
+      <div
+        class="text-xs text-slate-400 text-center py-5"
+      >
+        No existing Initiatives are available for mapping.
+      </div>
+    `;
+
+    updateProgramInitiativeSummary();
+
+    return;
+  }
+
+  container.innerHTML =
+    visibleInitiatives
+      .map(project => {
+
+        const belongsToCurrentProgram =
+          selectedProgramId &&
+          Number(project.programId) ===
+          Number(selectedProgramId);
+
+        const currentProgram =
+          programs.find(
+            program =>
+              Number(program.id) ===
+              Number(project.programId)
+          );
+
+        const isMappedElsewhere =
+          currentProgram &&
+          !belongsToCurrentProgram;
+
+        return `
+          <label
+            class="program-initiative-option flex items-start gap-3 p-3 bg-white border ${
+              belongsToCurrentProgram
+                ? 'border-violet-400 ring-1 ring-violet-200'
+                : 'border-slate-200'
+            } rounded-xl cursor-pointer hover:border-violet-300 hover:bg-violet-50/30 transition"
+          >
+            <input
+              type="checkbox"
+              class="program-initiative-checkbox mt-1 h-4 w-4 accent-violet-600"
+              value="${project.id}"
+              onchange="updateProgramInitiativeSummary()"
+              ${
+                belongsToCurrentProgram
+                  ? 'checked'
+                  : ''
+              }
+            >
+
+            <div class="min-w-0 flex-1">
+
+              <div
+                class="flex flex-col sm:flex-row sm:items-start justify-between gap-1"
+              >
+                <div
+                  class="font-semibold text-slate-800 break-words"
+                >
+                  ${project.name}
+                </div>
+
+                <span
+                  class="flex-shrink-0 px-2 py-0.5 bg-slate-100 text-slate-600 border border-slate-200 rounded-full text-[9px] font-semibold"
+                >
+                  ${project.type || 'Project'}
+                </span>
+              </div>
+
+              <div
+                class="text-[10px] text-slate-500 mt-1 flex flex-wrap gap-x-2 gap-y-1"
+              >
+                <span>
+                  Initiative ID: ${project.id}
+                </span>
+
+                <span>
+                  Vertical: ${project.vertical || '-'}
+                </span>
+
+                <span>
+                  Owner: ${project.businessOwner || '-'}
+                </span>
+              </div>
+
+              ${
+                belongsToCurrentProgram
+                  ? `
+                    <div
+                      class="inline-flex items-center gap-1 mt-2 px-2 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[10px] font-semibold"
+                    >
+                      Currently mapped to this Program
+                    </div>
+                  `
+                  : ''
+              }
+
+              ${
+                isMappedElsewhere
+                  ? `
+                    <div
+                      class="inline-flex items-center gap-1 mt-2 px-2 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[10px] font-semibold"
+                    >
+                      Currently mapped to: ${currentProgram.name}
+                    </div>
+                  `
+                  : ''
+              }
+
+              ${
+                !currentProgram
+                  ? `
+                    <div
+                      class="inline-flex items-center gap-1 mt-2 px-2 py-1 bg-slate-50 text-slate-600 border border-slate-200 rounded text-[10px] font-semibold"
+                    >
+                      Currently unmapped
+                    </div>
+                  `
+                  : ''
+              }
+
+            </div>
+          </label>
+        `;
+
+      })
+      .join('');
+
+  updateProgramInitiativeSummary();
+}
+
+function updateProgramInitiativeSummary() {
+
+  const summary =
+    document.getElementById(
+      'program-initiative-summary'
+    );
+
+  if (!summary) {
+    return;
+  }
+
+  const selectedCount =
+    document.querySelectorAll(
+      '.program-initiative-checkbox:checked'
+    ).length;
+
+  summary.innerText =
+    `${selectedCount} Initiative(s) selected`;
+}
+
+
+function selectAllProgramInitiatives() {
+
+  document
+    .querySelectorAll(
+      '.program-initiative-checkbox'
+    )
+    .forEach(checkbox => {
+
+      checkbox.checked = true;
+
+    });
+
+  updateProgramInitiativeSummary();
+}
+
+
+function clearAllProgramInitiatives() {
+
+  document
+    .querySelectorAll(
+      '.program-initiative-checkbox'
+    )
+    .forEach(checkbox => {
+
+      checkbox.checked = false;
+
+    });
+
+  updateProgramInitiativeSummary();
+}
+
+function openProgramModal(
+  editId = null
+) {
+
+  if (!currentUser) {
+    return;
+  }
+
+  if (!canCreateInitiative()) {
+
+    showToast(
+      'You do not have permission to manage Programs.',
+      'error'
+    );
+
+    return;
+  }
+
+  populateUserDropdowns();
+
+  populateMasterLOVs();
+
+  const form =
+    document.getElementById(
+      'program-form'
+    );
+
+  form.reset();
+
+  document
+    .getElementById('program-id')
+    .value = '';
+
+  document
+    .getElementById(
+      'program-modal-title'
+    )
+    .innerText =
+      editId
+        ? 'Edit Program'
+        : 'New Program';
+
+  if (editId) {
+
+    const program =
+      programs.find(
+        item =>
+          Number(item.id) ===
+          Number(editId)
+      );
+
+    if (!program) {
+
+      showToast(
+        'Program record was not found.',
+        'error'
+      );
+
+      return;
+    }
+
+    document
+      .getElementById('program-id')
+      .value =
+        program.id;
+
+    document
+      .getElementById('pg-name')
+      .value =
+        program.name || '';
+
+    document
+      .getElementById('pg-owner')
+      .value =
+        program.owner || '';
+
+    document
+      .getElementById('pg-assigned-to')
+      .value =
+        program.assignedTo || '';
+
+    document
+      .getElementById('pg-vertical')
+      .value =
+        program.vertical || '';
+
+    document
+      .getElementById('pg-start-date')
+      .value =
+        program.startDate || '';
+
+    document
+      .getElementById('pg-target-end-date')
+      .value =
+        program.targetEndDate || '';
+
+    document
+      .getElementById('pg-actual-end-date')
+      .value =
+        program.actualEndDate || '';
+
+    document
+  .getElementById(
+    'pg-impact-category'
+  )
+  .innerHTML =
+    buildMasterOptions(
+      'BUSINESS_BENEFIT_CATEGORY',
+      '-- Select Business Benefit Category --',
+      program.impactCategory || ''
+    );
+
+document
+  .getElementById(
+    'pg-impact-category'
+  )
+  .value =
+    program.impactCategory || '';
+
+    document
+      .getElementById('pg-measurable-impact')
+      .value =
+        program.measurableImpact ||
+        'Qualitative';
+
+    document
+      .getElementById('pg-business-benefit')
+      .value =
+        program.businessBenefit || '';
+  }
+
+  renderProgramInitiativeSelection(
+    editId
+  );
+
+  const modal =
+    document.getElementById(
+      'program-modal'
+    );
+
+  modal.classList.remove('hidden');
+
+  lucide.createIcons();
+}
+
+function closeProgramModal() {
+
+  document
+    .getElementById('program-modal')
+    .classList.add('hidden');
+}
+
+async function saveProgram(event) {
+
+  event.preventDefault();
+
+  if (!canCreateInitiative()) {
+
+    showToast(
+      'You do not have permission to save Programs.',
+      'error'
+    );
+
+    return;
+  }
+
+  const programId =
+    document
+      .getElementById('program-id')
+      .value;
+
+  const programName =
+    document
+      .getElementById('pg-name')
+      .value
+      .trim();
+
+  const startDate =
+    document
+      .getElementById('pg-start-date')
+      .value;
+
+  const targetEndDate =
+    document
+      .getElementById('pg-target-end-date')
+      .value;
+
+  const actualEndDate =
+    document
+      .getElementById('pg-actual-end-date')
+      .value;
+
+  if (
+    startDate &&
+    targetEndDate &&
+    startDate > targetEndDate
+  ) {
+
+    showToast(
+      'Program Start Date cannot be after Target End Date.',
+      'error'
+    );
+
+    return;
+  }
+
+  const programAge =
+    calculateProjectAge(
+      startDate,
+      targetEndDate
+    );
+
+  const countdownDays =
+    calculateCountdown(
+      targetEndDate,
+      startDate,
+      actualEndDate
+    );
+
+  const databaseRecord = {
+
+    program_name:
+      programName,
+
+    program_owner:
+      document
+        .getElementById('pg-owner')
+        .value,
+
+    assigned_to:
+      document
+        .getElementById('pg-assigned-to')
+        .value || null,
+
+    vertical:
+      document
+        .getElementById('pg-vertical')
+        .value,
+
+    start_date:
+      startDate || null,
+
+    target_end_date:
+      targetEndDate || null,
+
+    actual_end_date:
+      actualEndDate || null,
+
+    impact_category:
+      document
+        .getElementById('pg-impact-category')
+        .value,
+
+    measurable_impact:
+      document
+        .getElementById('pg-measurable-impact')
+        .value,
+
+    business_benefit:
+      document
+        .getElementById('pg-business-benefit')
+        .value
+        .trim(),
+
+    program_status:
+      evaluateProjectStatus(
+        programName,
+        startDate,
+        targetEndDate,
+        actualEndDate
+      ),
+
+    program_age:
+      programAge === '-'
+        ? null
+        : programAge,
+
+    countdown_days:
+      countdownDays === '-'
+        ? null
+        : countdownDays,
+
+    is_active:
+      true,
+
+    updated_at:
+      new Date().toISOString()
+
+  };
+
+  let savedProgramId;
+
+  if (programId) {
+
+    const {
+      data,
+      error
+    } =
+    await supabaseClient
+      .from('programs')
+      .update(databaseRecord)
+      .eq('id', Number(programId))
+      .select('id')
+      .single();
+
+    if (error) {
+
+      console.error(
+        'Program update failed:',
+        error
+      );
+
+      showToast(
+        'Unable to update Program: ' +
+        error.message,
+        'error'
+      );
+
+      return;
+    }
+
+    savedProgramId =
+      Number(data.id);
+
+  } else {
+
+    const {
+      data,
+      error
+    } =
+    await supabaseClient
+      .from('programs')
+      .insert(databaseRecord)
+      .select('id')
+      .single();
+
+    if (error) {
+
+      console.error(
+        'Program creation failed:',
+        error
+      );
+
+      showToast(
+        'Unable to create Program: ' +
+        error.message,
+        'error'
+      );
+
+      return;
+    }
+
+    savedProgramId =
+      Number(data.id);
+  }
+
+  const selectedInitiativeIds =
+    Array.from(
+      document.querySelectorAll(
+        '.program-initiative-checkbox:checked'
+      )
+    ).map(
+      checkbox =>
+        Number(checkbox.value)
+    );
+
+  const currentlyMappedIds =
+    projects
+      .filter(
+        project =>
+          Number(project.programId) ===
+          Number(savedProgramId)
+      )
+      .map(
+        project =>
+          Number(project.id)
+      );
+
+  const removedInitiativeIds =
+    currentlyMappedIds.filter(
+      initiativeId =>
+        !selectedInitiativeIds.includes(
+          initiativeId
+        )
+    );
+
+  if (removedInitiativeIds.length > 0) {
+
+    const {
+      error:unmapError
+    } =
+    await supabaseClient
+      .from('initiatives')
+      .update({
+        program_id: null
+      })
+      .in(
+        'id',
+        removedInitiativeIds
+      );
+
+    if (unmapError) {
+
+      console.error(
+        'Initiative unmapping failed:',
+        unmapError
+      );
+
+      showToast(
+        'Program saved, but some Initiative mappings could not be removed.',
+        'error'
+      );
+
+      return;
+    }
+  }
+
+  if (selectedInitiativeIds.length > 0) {
+
+    const {
+      error:mapError
+    } =
+    await supabaseClient
+      .from('initiatives')
+      .update({
+        program_id:
+          savedProgramId
+      })
+      .in(
+        'id',
+        selectedInitiativeIds
+      );
+
+    if (mapError) {
+
+      console.error(
+        'Initiative mapping failed:',
+        mapError
+      );
+
+      showToast(
+        'Program saved, but Initiative mapping failed: ' +
+        mapError.message,
+        'error'
+      );
+
+      return;
+    }
+  }
+
+  closeProgramModal();
+
+  await loadInitiativesFromSupabase();
+
+  showToast(
+    programId
+      ? 'Program updated successfully.'
+      : 'Program created successfully.',
+    'success'
+  );
+}
+
+function toggleProgramCollapse(
+  programId
+) {
+
+  const program =
+    programs.find(
+      item =>
+        Number(item.id) ===
+        Number(programId)
+    );
+
+  if (!program) return;
+
+  program.collapsed =
+    !program.collapsed;
+
+  renderProjects();
+}
+
+async function deleteProgram(
+  programId
+) {
+
+  if (!canDeleteInitiative()) {
+
+    showToast(
+      'You do not have permission to delete Programs.',
+      'error'
+    );
+
+    return;
+  }
+
+  const confirmed =
+    confirm(
+      'Delete this Program? Its Initiatives will become unmapped and will not be deleted.'
+    );
+
+  if (!confirmed) return;
+
+  const {
+    error:unmapError
+  } =
+  await supabaseClient
+    .from('initiatives')
+    .update({
+      program_id: null
+    })
+    .eq(
+      'program_id',
+      Number(programId)
+    );
+
+  if (unmapError) {
+
+    showToast(
+      'Unable to unmap Program Initiatives: ' +
+      unmapError.message,
+      'error'
+    );
+
+    return;
+  }
+
+  const {
+    error:programError
+  } =
+  await supabaseClient
+    .from('programs')
+    .update({
+      is_active: false,
+      updated_at:
+        new Date().toISOString()
+    })
+    .eq(
+      'id',
+      Number(programId)
+    );
+
+  if (programError) {
+
+    showToast(
+      'Unable to delete Program: ' +
+      programError.message,
+      'error'
+    );
+
+    return;
+  }
+
+  await loadInitiativesFromSupabase();
+
+  showToast(
+    'Program removed. Its Initiatives are now unmapped.',
+    'success'
+  );
+}
+
     // --- 5. BADGES ---
     function getStatusBadge(status) {
       const map = {
-        'Done': 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold',
-        'WIP': 'bg-blue-100 text-blue-800 border-blue-300 font-bold',
-        'In Progress': 'bg-blue-100 text-blue-800 border-blue-300 font-bold',
-        'Delay': 'bg-amber-100 text-amber-800 border-amber-300 font-bold',
-        'Deviation': 'bg-rose-100 text-rose-800 border-rose-300 font-bold',
-        'In-Queue': 'bg-purple-100 text-purple-800 border-purple-300 font-semibold',
-        'On-Hold': 'bg-slate-100 text-slate-700 border-slate-300 font-medium',
-        'Pending': 'bg-slate-100 text-slate-700 border-slate-300 font-medium',
-        'Not Started': 'bg-slate-100 text-slate-700 border-slate-300 font-medium'
-      };
-      return `<span class="px-2.5 py-0.5 rounded-full text-[11px] border ${map[status] || 'bg-slate-100 text-slate-700'}">${status}</span>`;
+  'Done':
+    'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold',
+
+  'WIP':
+    'bg-yellow-100 text-yellow-800 border-yellow-300 font-bold',
+
+  'In Progress':
+    'bg-yellow-100 text-yellow-800 border-yellow-300 font-bold',
+
+  'Delay':
+    'bg-red-100 text-red-800 border-red-300 font-bold',
+
+  'Deviation':
+    'bg-red-700 text-white border-red-800 font-bold',
+
+  'In-Queue':
+    'bg-sky-100 text-sky-800 border-sky-300 font-semibold',
+
+  'On-Hold':
+    'bg-slate-200 text-slate-700 border-slate-300 font-medium',
+
+  'Pending':
+    'bg-red-50 text-red-600 border-red-200 font-medium',
+
+  'Not Started':
+    'bg-slate-100 text-slate-700 border-slate-300 font-medium'
+};
+      return `
+<span class="
+inline-flex
+items-center
+justify-center
+min-w-[110px]
+px-2.5
+py-0.5
+rounded-full
+text-[11px]
+border
+${map[status]}
+">
+${status}
+</span>
+`;
     }
 
     function getTypeBadge(type) {
@@ -1532,9 +5388,19 @@ async function loadInitiativesFromSupabase() {
     }
 
     function toggleAllAccordions(expand) {
-      projects.forEach(p => p.collapsed = !expand);
-      saveToStorage();
-    }
+
+  programs.forEach(
+    program =>
+      program.collapsed = !expand
+  );
+
+  projects.forEach(
+    project =>
+      project.collapsed = !expand
+  );
+
+  renderProjects();
+}
 
     let activeKpiFilter = null;
     function setKpiFilter(filterType) {
@@ -1558,18 +5424,26 @@ async function loadInitiativesFromSupabase() {
       });
     }
 
-    function renderProjects() {
+    function renderInitiativeCards(
+  initiativesToRender = projects,
+  targetContainer = null
+) {
       const q = document.getElementById('filter-search').value.trim().toLowerCase();
       const typeFilter = document.getElementById('filter-type').value;
       const vertFilter = document.getElementById('filter-vertical').value;
       const impactFilter = document.getElementById('filter-impact').value;
       const statFilter = document.getElementById('filter-status').value;
-      const container = document.getElementById('projects-container');
+      const container =
+  targetContainer ||
+  document.getElementById(
+    'projects-container'
+  );
       container.innerHTML = '';
       let visibleCount = 0;
       const visibleRecords = [];
 
-      projects.forEach((p, pIndex) => {
+      initiativesToRender.forEach(
+  (p, pIndex) => {
         // Enforce Level 2 Vertical Scoping
         if (!isVerticalAllowed(p.vertical)) return;
 
@@ -1690,18 +5564,34 @@ async function loadInitiativesFromSupabase() {
         const canEdit = canEditInitiative(p);
         const canDelete = canDeleteInitiative();
 
-        const projectCard = document.createElement('div');
-        projectCard.className = "bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all";
+        const initiativeDone =
+  pStatus === 'Done';
+
+const projectCard =
+  document.createElement('div');
+
+projectCard.className =
+initiativeDone
+  ? 'bg-emerald-50 rounded-xl border border-emerald-300 shadow-sm overflow-hidden transition-all'
+  : 'bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden transition-all';
         projectCard.innerHTML = `
           <!-- Structured Project Header -->
-          <div class="px-5 py-4 bg-slate-50/90 border-b border-slate-200">
+<div
+  class="px-5 py-4 bg-slate-50/90 border-b border-slate-200 cursor-pointer"
+  ondblclick="openProjectModal(${p.id})"
+  title="Double Click to Edit Initiative"
+>
             <!-- Row 1: Title, Status, Delay Flag & Action Buttons -->
             <div class="flex flex-col md:flex-row md:items-center justify-between gap-3">
               <div class="flex items-center gap-2.5 flex-1">
                 <button onclick="toggleProjectCollapse(${p.id})" class="p-1 text-slate-400 hover:text-slate-700 transition">
                   <i data-lucide="${p.collapsed ? 'chevron-right' : 'chevron-down'}" class="w-5 h-5"></i>
                 </button>
-                <div class="flex flex-wrap items-center gap-2">
+                <div
+  class="flex flex-wrap items-center gap-2 cursor-pointer"
+  ondblclick="openProjectModal(${p.id})"
+  title="Double Click to Edit Initiative"
+>
                   <div class="flex flex-col">
   <span class="text-xs font-mono font-bold text-slate-400">
       #${pIndex + 1}
@@ -1711,7 +5601,13 @@ async function loadInitiativesFromSupabase() {
       Initiative ID: ${p.id}
   </span>
 </div>
-                  <h3 class="text-sm font-bold text-slate-900">${p.name}</h3>
+                  <h3
+  class="text-sm font-bold text-slate-900 cursor-pointer"
+  ondblclick="openProjectModal(${p.id})"
+  title="Double Click to Edit Initiative"
+>
+  ${p.name}
+</h3>
                   <!-- Tag 1: Initiative Type -->
                   ${getTypeBadge(p.type || 'Project')}
                   <!-- Tag 2: Vertical -->
@@ -1754,8 +5650,17 @@ async function loadInitiativesFromSupabase() {
             </div>
 
             <!-- Row 2: Project Metadata -->
-            <div class="mt-3 ml-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-0 bg-white rounded-lg border border-slate-200 text-xs shadow-inner overflow-hidden">
-              <div class="min-w-0 p-3 border-b sm:border-r border-slate-100">
+            <div class="mt-3 ml-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8 gap-0 ${
+  initiativeDone
+    ? 'bg-emerald-100 border border-emerald-300'
+    : 'bg-white border border-slate-200'
+} rounded-lg text-xs shadow-inner overflow-hidden">
+
+              <div class="min-w-0 p-3 border-b sm:border-r ${
+  initiativeDone
+    ? 'border-emerald-200 bg-emerald-100'
+    : 'border-slate-100'
+}">
                 <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Business Owner</span>
                 <span class="font-medium text-slate-800 truncate block mt-0.5" title="${p.businessOwner || '-'}">${p.businessOwner || '-'}</span>
               </div>
@@ -1763,23 +5668,43 @@ async function loadInitiativesFromSupabase() {
                 <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Assigned To</span>
                 <span class="font-medium text-slate-800 truncate block mt-0.5" title="${p.assignedTo || '-'}">${p.assignedTo || '-'}</span>
               </div>
-              <div class="min-w-0 p-3 border-b sm:border-r border-slate-100">
+              <div class="min-w-0 p-3 border-b sm:border-r ${
+  initiativeDone
+    ? 'border-emerald-200 bg-emerald-100'
+    : 'border-slate-100'
+}">
                 <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">CR No</span>
                 <span class="font-mono text-indigo-700 font-semibold block mt-0.5">${p.crNo || '-'}</span>
               </div>
-              <div class="min-w-0 p-3 border-b xl:border-r border-slate-100">
+              <div class="min-w-0 p-3 border-b xl:border-r ${
+  initiativeDone
+    ? 'border-emerald-200 bg-emerald-100'
+    : 'border-slate-100'
+}">
                 <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Start Date</span>
                 <span class="font-mono text-slate-700 block mt-0.5">${formatDate(p.startDate)}</span>
               </div>
-              <div class="min-w-0 p-3 border-b sm:border-r border-slate-100">
+              <div class="min-w-0 p-3 border-b sm:border-r ${
+  initiativeDone
+    ? 'border-emerald-200 bg-emerald-100'
+    : 'border-slate-100'
+}">
                 <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Target End</span>
                 <span class="font-mono text-slate-700 block mt-0.5">${formatDate(p.targetEndDate)}</span>
               </div>
-              <div class="min-w-0 p-3 border-b lg:border-r border-slate-100">
+              <div class="min-w-0 p-3 border-b lg:border-r ${
+  initiativeDone
+    ? 'border-emerald-200 bg-emerald-100'
+    : 'border-slate-100'
+}">
                 <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Actual End</span>
                 <span class="font-mono text-slate-700 block mt-0.5">${formatDate(p.actualEndDate)}</span>
               </div>
-              <div class="min-w-0 p-3 sm:border-r border-slate-100">
+              <div class="min-w-0 p-3 sm:border-r ${
+  initiativeDone
+    ? 'border-emerald-200 bg-emerald-100'
+    : 'border-slate-100'
+}">
                 <span class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Project Age</span>
                 <span class="font-mono text-slate-800 font-semibold block mt-0.5">${pAge === '-' ? '-' : `${pAge} work days`}</span>
               </div>
@@ -1828,7 +5753,10 @@ async function loadInitiativesFromSupabase() {
                       <th class="py-2.5 px-3 min-w-[260px]">Milestone<br><span class="font-normal normal-case">Track - User Story</span></th>
                       <th class="py-2.5 px-3 min-w-[220px]">Milestone - Actions</th>
                       <th class="py-2.5 px-3 min-w-[140px]">Milestone Owner</th>
-                      <th class="py-2.5 px-3 min-w-[90px]">Status</th>
+                      <th class="py-2.5 px-3 min-w-[130px] text-center">
+  Status
+</th>
+
                       <th class="py-2.5 px-3 min-w-[100px]">Day Status</th>
                       <th class="py-2.5 px-3 min-w-[80px]">Timeline</th>
                       <th class="py-2.5 px-3 min-w-[90px]">Deadline</th>
@@ -1847,18 +5775,36 @@ async function loadInitiativesFromSupabase() {
                         ? `<span class="px-1.5 py-0.5 bg-rose-100 text-rose-700 font-bold rounded text-[10px]">+${dev}d</span>` 
                         : `<span class="text-slate-400 font-medium">0</span>`;
                       return `
-                        <tr class="hover:bg-slate-50/80 transition-colors group">
+                        <tr
+class="
+${
+  mStat === 'Done'
+    ? 'bg-emerald-50'
+    : 'hover:bg-slate-50/80'
+}
+transition-colors
+group
+"
+>
                           <td class="py-2.5 px-3 text-center text-slate-400 font-mono text-[10px]">${mIdx + 1}</td>
                           <td class="py-2.5 px-3 font-mono text-indigo-700 font-semibold">
                           ${m.id}
                           </td>                 
-                          <td class="py-2.5 px-3 font-semibold text-slate-900">${m.title}</td>
+                          <td
+  class="py-2.5 px-3 font-semibold text-slate-900 cursor-pointer"
+  ondblclick="editMilestone(${p.id}, ${m.id})"
+  title="Double Click to Edit Milestone"
+>
+  ${m.title}
+</td>
                           <td class="py-2.5 px-3 text-slate-700 font-normal leading-relaxed">${m.actions}</td>
                           <td class="py-2.5 px-3">
                             <div class="font-medium text-slate-800">${m.owner}</div>
                             ${m.dependency ? `<div class="text-[10px] text-slate-400">Dep: <span class="text-amber-700 font-medium">${m.dependency}</span></div>` : ''}
                           </td>
-                          <td class="py-2.5 px-3">${getStatusBadge(mStat)}</td>
+                          <td class="py-2.5 px-3 whitespace-nowrap text-center">
+  ${getStatusBadge(mStat)}
+</td>
                           <td class="py-2.5 px-3">${m.bucket || '-'}</td>
                           <td class="py-2.5 px-3 font-mono text-slate-600">${days} ${days !== '-' ? 'days' : ''}</td>
                           <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(m.deadline)}</td>
@@ -1885,80 +5831,698 @@ async function loadInitiativesFromSupabase() {
         container.appendChild(projectCard);
       });
 
-      if (visibleCount === 0) {
-        document.getElementById('empty-state').classList.remove('hidden');
-      } else {
-        document.getElementById('empty-state').classList.add('hidden');
+            if (!targetContainer) {
+
+        if (visibleCount === 0) {
+
+          document
+            .getElementById('empty-state')
+            .classList.remove('hidden');
+
+        } else {
+
+          document
+            .getElementById('empty-state')
+            .classList.add('hidden');
+        }
+
+        renderKPIs(visibleRecords);
       }
 
-      renderKPIs(visibleRecords);
       lucide.createIcons();
     }
-    function openProjectModal(editId = null) {
-      if (!currentUser) {
-  return;
-}
-  populateUserDropdowns();
 
-  document.getElementById('project-form').reset();
-  document.getElementById('project-id').value = '';
 
-  document.getElementById('project-modal-title').innerText =
-    editId
-      ? 'Edit Project / Epic'
-      : 'New Project / Epic';
+function renderProjects() {
 
-  if (editId) {
-    const project = projects.find(
-      item => Number(item.id) === Number(editId)
+  const masterContainer =
+    document.getElementById(
+      'projects-container'
     );
 
-    if (!project) return;
+  const emptyState =
+    document.getElementById(
+      'empty-state'
+    );
 
-    document.getElementById('project-id').value =
-      project.id;
+  if (!masterContainer) {
+    return;
+  }
 
-    document.getElementById('p-name').value =
-      project.name || '';
+  masterContainer.innerHTML = '';
 
-    document.getElementById('p-type').value =
-      project.type || 'Project';
+  const allowedProjects =
+    projects.filter(
+      project =>
+        isVerticalAllowed(
+          project.vertical
+        )
+    );
 
-    document.getElementById('p-cr').value =
-      project.crNo || '';
+  const allowedPrograms =
+    programs.filter(
+      program =>
+        isVerticalAllowed(
+          program.vertical
+        )
+    );
 
-    document.getElementById('p-vertical').value =
-      project.vertical || '';
+  const kpiRecords =
+    allowedProjects.map(
+      project => ({
 
-    document.getElementById('p-business-owner').value =
-      project.businessOwner || '';
+        project: project,
 
-    document.getElementById('p-assigned-to').value =
-      project.assignedTo || '';
+        projectStatus:
+          evaluateProjectStatus(
+            project.name,
+            project.startDate,
+            project.targetEndDate,
+            project.actualEndDate
+          ),
 
-    document.getElementById('p-start-date').value =
-      project.startDate || '';
+        milestones:
+          project.milestones || []
 
-    document.getElementById('p-target-end-date').value =
-      project.targetEndDate || '';
+      })
+    );
 
-    document.getElementById('p-actual-end-date').value =
-      project.actualEndDate || '';
+  renderKPIs(kpiRecords);
 
-    document.getElementById('p-impact-category').value =
-      project.impactCategory || '';
+  allowedPrograms.forEach(
+    (program, programIndex) => {
 
-    document.getElementById('p-measurable-impact').value =
-      project.measurableImpact || '';
+      const programInitiatives =
+        allowedProjects.filter(
+          project =>
+            Number(project.programId) ===
+            Number(program.id)
+        );
 
-    document.getElementById('p-business-benefit').value =
-      project.businessBenefit || '';
+      const programStatus =
+        evaluateProjectStatus(
+          program.name,
+          program.startDate,
+          program.targetEndDate,
+          program.actualEndDate
+        );
+
+      const programAge =
+        calculateProjectAge(
+          program.startDate,
+          program.targetEndDate
+        );
+
+      const programCountdown =
+        calculateCountdown(
+          program.targetEndDate,
+          program.startDate,
+          program.actualEndDate
+        );
+
+      const milestoneCount =
+        programInitiatives.reduce(
+          (total, initiative) =>
+            total +
+            (
+              initiative.milestones || []
+            ).length,
+          0
+        );
+
+      let countdownDisplay = '-';
+
+      if (programCountdown !== '-') {
+
+        countdownDisplay =
+          Number(programCountdown) < 0
+            ? `${programCountdown}d overdue`
+            : `${programCountdown}d left`;
+      }
+
+      const programDone =
+  programStatus === 'Done';
+
+const programCard =
+  document.createElement('div');
+
+programCard.className =
+  programDone
+    ? 'bg-emerald-50 rounded-2xl border-2 border-emerald-300 shadow-sm overflow-hidden'
+    : 'bg-violet-50/50 rounded-2xl border-2 border-violet-200 shadow-sm overflow-hidden';
+
+      programCard.innerHTML = `
+        <div
+  class="px-5 py-4 ${
+    programDone
+      ? 'bg-gradient-to-r from-emerald-500 to-green-600 text-white'
+      : 'bg-gradient-to-r from-violet-700 to-indigo-700 text-white'
+  }"
+>
+          <div
+            class="flex flex-col lg:flex-row lg:items-center justify-between gap-3"
+          >
+            <div
+  class="flex items-start gap-3 min-w-0 cursor-pointer"
+  ondblclick="openProgramModal(${program.id})"
+  title="Double Click to Edit Program"
+>
+              <button
+                type="button"
+                onclick="toggleProgramCollapse(${program.id})"
+                class="mt-0.5 p-1 rounded-lg hover:bg-white/10 transition"
+                title="Expand or collapse Program"
+              >
+                <i
+                  data-lucide="${
+                    program.collapsed
+                      ? 'chevron-right'
+                      : 'chevron-down'
+                  }"
+                  class="w-5 h-5"
+                ></i>
+              </button>
+
+              <div class="w-full">
+
+                <div
+                  class="flex items-center flex-wrap gap-2"
+                >
+                  <span
+                    class="text-[10px] font-mono text-violet-200"
+                  >
+                    Program ID: ${program.id}
+                  </span>
+
+                  <span
+                    class="px-2 py-0.5 bg-white/15 border border-white/20 rounded-full text-[10px] font-bold"
+                  >
+                    PROGRAM
+                  </span>
+
+                  <span
+                    class="px-2 py-0.5 bg-white text-violet-700 rounded-full text-[10px] font-bold"
+                  >
+                    ${programStatus || 'Pending'}
+                  </span>
+                </div>
+
+                <h2
+  class="text-base font-bold mt-1 break-words cursor-pointer"
+  ondblclick="openProgramModal(${program.id})"
+  title="Double Click to Edit Program"
+>
+  ${programIndex + 1}. ${program.name}
+</h2>
+
+
+                <div
+                  class="text-[11px] text-violet-100 mt-1"
+                >
+                  ${programInitiatives.length} Initiative(s)
+                  |
+                  ${milestoneCount} Milestone(s)
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-2">
+
+              ${
+                canCreateInitiative()
+                  ? `
+                    <button
+                      type="button"
+                      onclick="openProgramModal(${program.id})"
+                      class="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition"
+                      title="Edit Program"
+                    >
+                      <i
+                        data-lucide="edit"
+                        class="w-4 h-4"
+                      ></i>
+                    </button>
+                  `
+                  : ''
+              }
+
+              ${
+                canDeleteInitiative()
+                  ? `
+                    <button
+                      type="button"
+                      onclick="deleteProgram(${program.id})"
+                      class="p-2 rounded-lg bg-white/10 hover:bg-rose-500/40 transition"
+                      title="Delete Program"
+                    >
+                      <i
+                        data-lucide="trash-2"
+                        class="w-4 h-4"
+                      ></i>
+                    </button>
+                  `
+                  : ''
+              }
+            </div>
+          </div>
+
+          <div
+            class="mt-4 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-px bg-white/20 rounded-lg overflow-hidden"
+          >
+            <div class="bg-white/10 p-2.5">
+              <div
+                class="text-[9px] uppercase text-violet-200"
+              >
+                Program Owner
+              </div>
+
+              <div
+                class="text-xs font-semibold mt-0.5 truncate"
+                title="${program.owner || '-'}"
+              >
+                ${program.owner || '-'}
+              </div>
+            </div>
+
+            <div class="bg-white/10 p-2.5">
+              <div
+                class="text-[9px] uppercase text-violet-200"
+              >
+                Assigned To
+              </div>
+
+              <div
+                class="text-xs font-semibold mt-0.5 truncate"
+                title="${program.assignedTo || '-'}"
+              >
+                ${program.assignedTo || '-'}
+              </div>
+            </div>
+
+            <div class="bg-white/10 p-2.5">
+              <div
+                class="text-[9px] uppercase text-violet-200"
+              >
+                Vertical
+              </div>
+
+              <div
+                class="text-xs font-semibold mt-0.5"
+              >
+                ${program.vertical || '-'}
+              </div>
+            </div>
+
+            <div class="bg-white/10 p-2.5">
+              <div
+                class="text-[9px] uppercase text-violet-200"
+              >
+                Start Date
+              </div>
+
+              <div
+                class="text-xs font-mono mt-0.5"
+              >
+                ${formatDate(program.startDate)}
+              </div>
+            </div>
+
+            <div class="bg-white/10 p-2.5">
+              <div
+                class="text-[9px] uppercase text-violet-200"
+              >
+                Target End
+              </div>
+
+              <div
+                class="text-xs font-mono mt-0.5"
+              >
+                ${formatDate(program.targetEndDate)}
+              </div>
+            </div>
+
+            <div class="bg-white/10 p-2.5">
+              <div
+                class="text-[9px] uppercase text-violet-200"
+              >
+                Actual End
+              </div>
+
+              <div
+                class="text-xs font-mono mt-0.5"
+              >
+                ${formatDate(program.actualEndDate)}
+              </div>
+            </div>
+
+            <div class="bg-white/10 p-2.5">
+              <div
+                class="text-[9px] uppercase text-violet-200"
+              >
+                Program Age
+              </div>
+
+              <div
+                class="text-xs font-mono mt-0.5"
+              >
+                ${
+                  programAge === '-'
+                    ? '-'
+                    : `${programAge} work days`
+                }
+              </div>
+            </div>
+
+            <div class="bg-white/10 p-2.5">
+              <div
+                class="text-[9px] uppercase text-violet-200"
+              >
+                Countdown
+              </div>
+
+              <div
+                class="text-xs font-mono mt-0.5 ${
+                  Number(programCountdown) < 0
+                    ? 'text-rose-200 font-bold'
+                    : ''
+                }"
+              >
+                ${countdownDisplay}
+              </div>
+            </div>
+          </div>
+
+          
+            </div>
+          </div>
+        </div>
+
+        <div
+          id="program-initiatives-${program.id}"
+          class="${
+            program.collapsed
+              ? 'hidden'
+              : 'block'
+          } p-4 space-y-4"
+        ></div>
+      `;
+
+      masterContainer.appendChild(
+        programCard
+      );
+
+      if (!program.collapsed) {
+
+        const initiativeContainer =
+          document.getElementById(
+            `program-initiatives-${program.id}`
+          );
+
+        if (programInitiatives.length === 0) {
+
+          initiativeContainer.innerHTML = `
+            <div
+              class="p-6 text-center text-xs text-slate-400 bg-white border border-dashed border-violet-200 rounded-xl"
+            >
+              No Initiatives are mapped to this Program.
+            </div>
+          `;
+
+        } else {
+
+          renderInitiativeCards(
+            programInitiatives,
+            initiativeContainer
+          );
+        }
+      }
+    }
+  );
+
+  const unmappedInitiatives =
+    allowedProjects.filter(
+      project =>
+        !project.programId
+    );
+
+  if (unmappedInitiatives.length > 0) {
+
+    const unmappedWrapper =
+      document.createElement('div');
+
+    unmappedWrapper.className =
+      'bg-white rounded-2xl border border-dashed border-slate-300 overflow-hidden';
+
+    unmappedWrapper.innerHTML = `
+      <div
+        class="px-5 py-3 bg-slate-100 border-b border-slate-200"
+      >
+        <div class="flex items-start gap-4">
+
+          
+
+          <i
+            data-lucide="unlink"
+            class="w-4 h-4 text-slate-500"
+          ></i>
+
+          <div>
+            <h2
+              class="text-sm font-bold text-slate-800"
+            >
+              Unmapped Initiatives
+            </h2>
+
+            <p
+              class="text-[10px] text-slate-500"
+            >
+              Initiatives not currently assigned to a Program
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div
+        id="unmapped-initiatives-container"
+        class="p-4 space-y-4"
+      ></div>
+    `;
+
+    masterContainer.appendChild(
+      unmappedWrapper
+    );
+
+    renderInitiativeCards(
+      unmappedInitiatives,
+      document.getElementById(
+        'unmapped-initiatives-container'
+      )
+    );
+  }
+
+  const hasVisibleData =
+    allowedPrograms.length > 0 ||
+    unmappedInitiatives.length > 0;
+
+  if (emptyState) {
+
+    emptyState.classList.toggle(
+      'hidden',
+      hasVisibleData
+    );
+  }
+
+  lucide.createIcons();
+}
+
+
+function openProjectModal(
+  editId = null
+) {
+
+  if (!currentUser) {
+    return;
+  }
+
+  const form =
+    document.getElementById(
+      'project-form'
+    );
+
+  form.reset();
+
+  populateUserDropdowns();
+
+  populateProgramDropdown();
+
+  populateMasterLOVs();
+
+  document
+    .getElementById(
+      'project-id'
+    )
+    .value = '';
+
+  document
+    .getElementById(
+      'project-modal-title'
+    )
+    .innerText =
+      editId
+        ? 'Edit Project / Epic'
+        : 'New Project / Epic';
+
+  if (editId) {
+
+    const project =
+      projects.find(
+        item =>
+          Number(item.id) ===
+          Number(editId)
+      );
+
+    if (!project) {
+
+      showToast(
+        'Initiative was not found.',
+        'error'
+      );
+
+      return;
+    }
+
+    document
+      .getElementById(
+        'p-type'
+      )
+      .innerHTML =
+        buildMasterOptions(
+          'INITIATIVE_TYPE',
+          '-- Select Initiative Type --',
+          project.type || ''
+        );
+
+    document
+      .getElementById(
+        'p-impact-category'
+      )
+      .innerHTML =
+        buildMasterOptions(
+          'BUSINESS_BENEFIT_CATEGORY',
+          '-- Select Business Benefit Category --',
+          project.impactCategory || ''
+        );
+
+    document
+      .getElementById(
+        'project-id'
+      )
+      .value =
+        project.id;
+
+    document
+      .getElementById(
+        'p-program-id'
+      )
+      .value =
+        project.programId || '';
+
+    document
+      .getElementById(
+        'p-name'
+      )
+      .value =
+        project.name || '';
+
+    document
+      .getElementById(
+        'p-type'
+      )
+      .value =
+        project.type || '';
+
+    document
+      .getElementById(
+        'p-cr'
+      )
+      .value =
+        project.crNo || '';
+
+    document
+      .getElementById(
+        'p-vertical'
+      )
+      .value =
+        project.vertical || '';
+
+    document
+      .getElementById(
+        'p-business-owner'
+      )
+      .value =
+        project.businessOwner || '';
+
+    document
+      .getElementById(
+        'p-assigned-to'
+      )
+      .value =
+        project.assignedTo || '';
+
+    document
+      .getElementById(
+        'p-start-date'
+      )
+      .value =
+        project.startDate || '';
+
+    document
+      .getElementById(
+        'p-target-end-date'
+      )
+      .value =
+        project.targetEndDate || '';
+
+    document
+      .getElementById(
+        'p-actual-end-date'
+      )
+      .value =
+        project.actualEndDate || '';
+
+    document
+      .getElementById(
+        'p-impact-category'
+      )
+      .value =
+        project.impactCategory || '';
+
+    document
+      .getElementById(
+        'p-measurable-impact'
+      )
+      .value =
+        project.measurableImpact || '';
+
+    document
+      .getElementById(
+        'p-business-benefit'
+      )
+      .value =
+        project.businessBenefit || '';
   }
 
   document
-    .getElementById('project-modal')
-    .classList.remove('hidden');
+    .getElementById(
+      'project-modal'
+    )
+    .classList.remove(
+      'hidden'
+    );
+
+  lucide.createIcons();
 }
+
 
 function editProject(projectId) {
   openProjectModal(projectId);
@@ -1996,6 +6560,16 @@ function editProject(projectId) {
     );
 
   const databaseRecord = {
+    program_id:
+  document
+    .getElementById('p-program-id')
+    .value
+    ? Number(
+        document
+          .getElementById('p-program-id')
+          .value
+      )
+    : null,
     title: name,
 
     initiative_type:
@@ -2144,6 +6718,8 @@ function openMilestoneModal(
   return;
 }
   populateUserDropdowns();
+
+  
 
   const form =
     document.getElementById('milestone-form');
@@ -3951,11 +8527,25 @@ async function loginUser() {
       .getElementById('main-content')
       .style.display = '';
 
-    document
-      .getElementById(
-        'current-user-display'
-      )
-      .innerText =
+    const rightBadge =
+document.getElementById(
+    'current-user-display'
+);
+
+const leftBadge =
+document.getElementById(
+    'current-user-display-left'
+);
+
+if(rightBadge){
+    rightBadge.innerText =
+    `${currentUser.name} (${currentUser.role})`;
+}
+
+if(leftBadge){
+    leftBadge.innerText =
+    `${currentUser.name} (${currentUser.role})`;
+}
         `${currentUser.name} (${currentUser.role})`;
 
     const userMasterMenu =
@@ -3971,10 +8561,34 @@ async function loginUser() {
           : 'none';
     }
 
+    const usersSection =
+  document.getElementById(
+    'sidebar-users-section'
+  );
+
+if (usersSection) {
+  usersSection.style.display =
+    currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+}
+
+const masterDataSection =
+  document.getElementById(
+    'sidebar-master-section'
+  );
+
+if (masterDataSection) {
+  masterDataSection.style.display =
+    currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+}
+
     const adminButton =
-      document.getElementById(
-        'btn-admin-roles'
-      );
+document.getElementById(
+  'sidebar-admin-roles'
+);
 
     if (adminButton) {
 
@@ -3983,6 +8597,19 @@ async function loginUser() {
           ? ''
           : 'none';
     }
+
+    const newProgramButton =
+  document.getElementById(
+    'btn-new-program'
+  );
+
+if (newProgramButton) {
+
+  newProgramButton.style.display =
+    canCreateInitiative()
+      ? ''
+      : 'none';
+}
 
     const newProjectButton =
       document.getElementById(
@@ -3996,6 +8623,13 @@ async function loginUser() {
           ? ''
           : 'none';
     }
+
+    const mastersLoaded =
+  await loadMasterValues();
+
+if (!mastersLoaded) {
+  return;
+} 
 
     const projectsLoaded =
       await loadInitiativesFromSupabase();
@@ -4080,12 +8714,25 @@ async function restoreSession() {
     .getElementById('main-content')
     .style.display = '';
 
-  document
-    .getElementById(
-      'current-user-display'
-    )
-    .innerText =
-      `${currentUser.name} (${currentUser.role})`;
+  const rightBadge =
+document.getElementById(
+    'current-user-display'
+);
+
+const leftBadge =
+document.getElementById(
+    'current-user-display-left'
+);
+
+if(rightBadge){
+    rightBadge.innerText =
+    `${currentUser.name} (${currentUser.role})`;
+}
+
+if(leftBadge){
+    leftBadge.innerText =
+    `${currentUser.name} (${currentUser.role})`;
+}
 
       const userMasterMenu =
   document.querySelector(
@@ -4100,14 +8747,53 @@ if (userMasterMenu) {
       : 'none';
 }
 
+const usersSection =
+document.getElementById(
+  'sidebar-users-section'
+);
+
+if (usersSection) {
+
+  usersSection.style.display =
+    currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+
+}
+
       const adminButton =
-  document.getElementById(
-    'btn-admin-roles'
-  );
+document.getElementById(
+  'sidebar-admin-roles'
+);
 
 if (adminButton) {
   adminButton.style.display =
     currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+}
+const masterDataSection =
+  document.getElementById(
+    'sidebar-master-section'
+  );
+
+if (masterDataSection) {
+  masterDataSection.style.display =
+    currentUser &&
+    currentUser.role === 'Admin'
+      ? ''
+      : 'none';
+}
+
+const newProgramButton =
+  document.getElementById(
+    'btn-new-program'
+  );
+
+if (newProgramButton) {
+
+  newProgramButton.style.display =
+    canCreateInitiative()
       ? ''
       : 'none';
 }
@@ -4183,10 +8869,43 @@ if (!usersLoaded) {
   return;
 }
 
+const deleteButton =
+  document.getElementById(
+    'master-delete-confirm-btn'
+  );
+
+if (deleteButton) {
+
+  deleteButton.onclick =
+    async function () {
+
+      if (
+        pendingDeleteMasterId
+      ) {
+
+        await deleteMasterValue(
+          pendingDeleteMasterId
+        );
+
+      }
+
+      closeMasterDeleteModal();
+
+    };
+
+}
+
 const sessionRestored =
   await restoreSession();
 
 if (sessionRestored) {
+
+  const mastersLoaded =
+    await loadMasterValues();
+
+  if (!mastersLoaded) {
+    return;
+  }
 
   const projectsLoaded =
     await loadInitiativesFromSupabase();
@@ -4228,23 +8947,23 @@ if (userDisplay && currentUser) {
   userDisplay.innerText =
     `${currentUser.name} (${currentUser.role})`;
 
-    const userMasterMenu =
-  document.querySelector(
-    '[onclick="openUserModal()"]'
+    const usersSection =
+  document.getElementById(
+    'sidebar-users-section'
   );
 
-if (userMasterMenu) {
+if (usersSection) {
 
-  userMasterMenu.style.display =
+  usersSection.style.display =
     currentUser.role === 'Admin'
       ? ''
       : 'none';
 }
 }
 
-    const adminButton =
+const adminButton =
   document.getElementById(
-    'btn-admin-roles'
+    'sidebar-admin-roles'
   );
 
 if (adminButton) {
@@ -4253,6 +8972,32 @@ if (adminButton) {
     currentUser.role === 'Admin'
       ? ''
       : 'none';
+}
+
+const masterDataSection =
+  document.getElementById(
+    'sidebar-master-section'
+  );
+
+if (masterDataSection) {
+
+  masterDataSection.style.display =
+  currentUser &&
+  currentUser.role === 'Admin'
+    ? ''
+    : 'none';
+}
+
+
+const newProgramButton =
+  document.getElementById(
+    'btn-new-program'
+  );
+
+if (newProgramButton) {
+
+  newProgramButton.style.display =
+    'none';
 }
 
     const newProjectButton =
@@ -4268,5 +9013,92 @@ if (newProjectButton) {
   }
 );
   </script>
+
+  <!-- Master Delete Confirmation -->
+
+<div
+  id="master-delete-modal"
+  class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"
+>
+
+  <div
+    class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+  >
+
+    <div
+      class="px-6 py-4 bg-rose-50 border-b border-rose-100 flex items-center gap-3"
+    >
+      <div
+        class="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center"
+      >
+        <i
+          data-lucide="trash-2"
+          class="w-5 h-5 text-rose-600"
+        ></i>
+      </div>
+
+      <div>
+        <h3 class="font-bold text-slate-800">
+          Confirm Delete
+        </h3>
+
+        <p class="text-xs text-slate-500">
+          This action cannot be undone.
+        </p>
+      </div>
+    </div>
+
+    <div class="px-6 py-5">
+
+      <p
+        id="master-delete-message"
+        class="text-sm text-slate-700 leading-relaxed"
+      >
+      </p>
+
+    </div>
+
+    <div
+      class="px-6 py-4 bg-slate-50 border-t flex justify-end gap-2"
+    >
+
+      <button
+        type="button"
+        onclick="closeMasterDeleteModal()"
+        class="
+          px-4
+          py-2
+          border
+          border-slate-300
+          bg-white
+          hover:bg-slate-100
+          rounded-lg
+          text-sm
+        "
+      >
+        No
+      </button>
+
+      <button
+        type="button"
+        id="master-delete-confirm-btn"
+        class="
+          px-4
+          py-2
+          bg-rose-600
+          hover:bg-rose-700
+          text-white
+          rounded-lg
+          text-sm
+          font-semibold
+        "
+      >
+        Delete Permanently
+      </button>
+
+    </div>
+
+  </div>
+</div>
 </body>
 </html>
