@@ -176,49 +176,6 @@ body.analytics-view-active #analytics-page > .analytics-dashboard-banner { margi
 @media (max-width:640px){.import-modal-panel{max-width:calc(100vw - 1.5rem);max-height:calc(100vh - 1.5rem)}}
 @media (prefers-reduced-motion:reduce){.import-modal-backdrop,.import-modal-panel{animation:none}.import-progress-bar{transition:none}}
 </style>
-
-<style id="completed-track-card-theme">
-/* Completed Track card theme. Progress remains sourced from getTrackSummary(). */
-.track-card-completed {
-  background-color: #f0fdf4 !important;
-  border-color: #86efac !important;
-  border-left-color: #10b981 !important;
-}
-.track-card-completed > .track-card-header {
-  background-color: #dcfce7 !important;
-  border-color: #86efac !important;
-}
-.track-card-completed .track-card-title { color: #14532d !important; }
-.track-card-completed .track-card-summary { color: #166534 !important; }
-.track-card-completed .track-card-header button.text-slate-400 { color: #166534 !important; }
-.track-card-completed .track-card-header button.hover\:text-amber-600:hover { color: #d97706 !important; }
-.track-card-completed > .custom-scrollbar { background-color: #f0fdf4; }
-.track-card-completed > .custom-scrollbar thead {
-  background-color: #ecfdf5 !important;
-  border-color: #bbf7d0 !important;
-}
-.track-card-completed > .custom-scrollbar tbody { background-color: #f7fef9 !important; }
-.track-card-completed > .custom-scrollbar tbody tr:not(.bg-emerald-50) { background-color: transparent; }
-.track-card-completed button:focus-visible {
-  outline: 2px solid #047857;
-  outline-offset: 2px;
-}
-.track-card-completed:not(.track-card-archived):hover { border-color: #4ade80 !important; }
-.track-card-completed.track-card-archived {
-  background-image: repeating-linear-gradient(135deg, rgba(100,116,139,.08) 0, rgba(100,116,139,.08) 8px, transparent 8px, transparent 16px);
-  border-top-color: #94a3b8 !important;
-  border-right-color: #94a3b8 !important;
-  border-bottom-color: #94a3b8 !important;
-}
-.track-card-completed.track-card-archived > .track-card-header {
-  background-color: #d1fae5 !important;
-  border-color: #94a3b8 !important;
-}
-@media (forced-colors: active) {
-  .track-card-completed { border-left-width: 6px; }
-  .track-card-completed > .track-card-header { border-bottom-width: 2px; }
-}
-</style>
 </head>
 
 <body
@@ -2143,21 +2100,6 @@ async function loadUsersFromSupabase() {
   createdAt:
     row.created_at || '',
 
-createdBy:
-  row.created_by_name || row.created_by || row.created_by_email || '',
-
-modifiedBy:
-  row.modified_by_name || row.updated_by_name || row.modified_by || row.updated_by || '',
-
-updatedAt:
-  row.modified_at || row.updated_at || '',
-
-archivedBy:
-  row.archived_by_name || row.archived_by || '',
-
-archivedAt:
-  row.archived_at || ((row.archived_by_name || row.archived_by) ? (row.updated_at || '') : ''),
-
   name:
     row.full_name || '',
 
@@ -2392,21 +2334,6 @@ sequenceNo:
 createdAt:
   row.created_at || '',
 
-createdBy:
-  row.created_by_name || row.created_by || row.created_by_email || '',
-
-modifiedBy:
-  row.modified_by_name || row.updated_by_name || row.modified_by || row.updated_by || '',
-
-updatedAt:
-  row.modified_at || row.updated_at || '',
-
-archivedBy:
-  row.archived_by_name || row.archived_by || '',
-
-archivedAt:
-  row.archived_at || ((row.archived_by_name || row.archived_by) ? (row.updated_at || '') : ''),
-
 name:
   row.program_name || '',
 
@@ -2474,21 +2401,6 @@ sequenceNo:
 
 createdAt:
   row.created_at || '',
-
-createdBy:
-  row.created_by_name || row.created_by || row.created_by_email || '',
-
-modifiedBy:
-  row.modified_by_name || row.updated_by_name || row.modified_by || row.updated_by || '',
-
-updatedAt:
-  row.modified_at || row.updated_at || '',
-
-archivedBy:
-  row.archived_by_name || row.archived_by || '',
-
-archivedAt:
-  row.archived_at || ((row.archived_by_name || row.archived_by) ? (row.updated_at || '') : ''),
 
 recordStatus:
   row.record_status || 'active',
@@ -2569,24 +2481,6 @@ programId:
   recordStatus:
     track.record_status || 'active',
 
-  createdBy:
-    track.created_by_name || track.created_by || track.created_by_email || '',
-
-  createdAt:
-    track.created_at || '',
-
-  modifiedBy:
-    track.modified_by_name || track.updated_by_name || track.modified_by || track.updated_by || '',
-
-  updatedAt:
-    track.modified_at || track.updated_at || '',
-
-  archivedBy:
-    track.archived_by_name || track.archived_by || '',
-
-  archivedAt:
-    track.archived_at || ((track.archived_by_name || track.archived_by) ? (track.updated_at || '') : ''),
-
   name:
     track.track_name || '',
 
@@ -2619,24 +2513,6 @@ programId:
 
   recordStatus:
     milestone.record_status || 'active',
-
-  createdBy:
-    milestone.created_by_name || milestone.created_by || milestone.created_by_email || '',
-
-  createdAt:
-    milestone.created_at || '',
-
-  modifiedBy:
-    milestone.modified_by_name || milestone.updated_by_name || milestone.modified_by || milestone.updated_by || '',
-
-  updatedAt:
-    milestone.modified_at || milestone.updated_at || '',
-
-  archivedBy:
-    milestone.archived_by_name || milestone.archived_by || '',
-
-  archivedAt:
-    milestone.archived_at || ((milestone.archived_by_name || milestone.archived_by) ? (milestone.updated_at || '') : ''),
 
   trackId:
               milestone.track_id
@@ -3247,48 +3123,32 @@ function calculateProjectAge(startDateStr, targetEndDateStr) {
 
     function getMilestoneUserOptions(selectedValue = '') {
   const normalizedSelected = String(selectedValue || '').trim();
-  const users = [];
-  const seen = new Set();
-  userMaster.forEach(user => {
-    const name = String(user.name || '').trim();
-    const key = name.toLocaleLowerCase();
-    if (!name || seen.has(key)) return;
-    seen.add(key);
-    users.push(name);
-  });
-  const canonicalSelected = users.find(
-    name => name.toLocaleLowerCase() === normalizedSelected.toLocaleLowerCase()
-  ) || normalizedSelected;
-  const preservedOption = canonicalSelected && !seen.has(canonicalSelected.toLocaleLowerCase())
-    ? `<option value="${escapeHtml(canonicalSelected)}" selected>${escapeHtml(canonicalSelected)}</option>`
+  const activeNames = new Set(userMaster.map(user => String(user.name || '').trim()).filter(Boolean));
+  const preservedOption = normalizedSelected && !activeNames.has(normalizedSelected)
+    ? `<option value="${escapeHtml(normalizedSelected)}">${escapeHtml(normalizedSelected)}</option>`
     : '';
 
   return '<option value="">-- Select User --</option>' + preservedOption +
-    users
-      .map(name => `<option value="${escapeHtml(name)}" ${name === canonicalSelected ? 'selected' : ''}>${escapeHtml(name)}</option>`)
+    userMaster
+      .filter(user => String(user.name || '').trim())
+      .map(user => `<option value="${escapeHtml(user.name)}">${escapeHtml(user.name)}</option>`)
       .join('');
 }
 
 function populateMilestoneUserDropdowns() {
   document.querySelectorAll('.milestone-user-lov').forEach(select => {
-    const selectedValue = String(select.value || '').trim();
+    const selectedValue = select.value;
     select.innerHTML = getMilestoneUserOptions(selectedValue);
-    const matchingOption = [...select.options].find(
-      option => option.value.toLocaleLowerCase() === selectedValue.toLocaleLowerCase()
-    );
-    select.value = matchingOption?.value || selectedValue;
+    select.value = selectedValue;
   });
 }
 
 function setMilestoneUserValue(selectId, value) {
   const select = document.getElementById(selectId);
   if (!select) return;
-  const selectedValue = String(value || '').trim();
+  const selectedValue = String(value || '');
   select.innerHTML = getMilestoneUserOptions(selectedValue);
-  const matchingOption = [...select.options].find(
-    option => option.value.toLocaleLowerCase() === selectedValue.toLocaleLowerCase()
-  );
-  select.value = matchingOption?.value || selectedValue;
+  select.value = selectedValue;
 }
 
 function updateMilestoneRuntimeDates() {
@@ -7525,8 +7385,7 @@ group
     const canManage=canEdit&&!archived;
     const milestones=(matchingMilestones||[]).filter(m=>Number(m.trackId)===Number(track.id));
     const summary=getTrackSummary({...project,milestones:getVisibleInitiativeMilestones(project)},track);
-    const isCompleted=summary.milestoneCount>0&&summary.progressPercentage===100;
-    return `<div class="mb-3 border-y border-r border-l-4 rounded-xl overflow-hidden bg-white ${archived?'border-slate-300 border-l-slate-500 track-card-archived':'border-sky-200 border-l-sky-500'} ${isCompleted?'track-card-completed':''}" data-track-completed="${isCompleted}"><div class="track-card-header px-4 py-3 border-b flex items-center justify-between gap-3 ${archived?'bg-slate-100 border-slate-300':'bg-sky-50 border-sky-200'}"><div class="flex items-center gap-3"><button type="button" onclick="toggleMilestoneTrack(${project.id},${track.id})" class="p-1 rounded hover:bg-slate-200"><i data-lucide="${track.collapsed?'chevron-right':'chevron-down'}" class="w-4 h-4"></i></button><div><div class="flex items-center gap-2 flex-wrap">${getInitiativeTag('TRACK',archived?'bg-slate-200 text-slate-700 border-slate-300':'bg-sky-100 text-sky-800 border-sky-200')}${archived?getInitiativeTag('ARCHIVED','bg-slate-800 text-white border-slate-700'):''}<div class="track-card-title text-sm font-bold text-slate-800">Track ${track.sequenceNo} - ${escapeHtml(track.name)}</div></div><div class="track-card-summary text-xs text-slate-500">Track ID: ${track.id} | ${summary.completedCount} / ${summary.milestoneCount} Done (${summary.progressPercentage}%)</div></div></div><div class="flex items-center gap-2">${canManage?`<button type="button" onclick="addMilestoneInline(${project.id},${track.id})" class="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-semibold"><i data-lucide="plus" class="w-3.5 h-3.5"></i>Add Milestone</button><button type="button" onclick="openTrackModal(${project.id},${track.id})" class="p-1.5 text-slate-400" title="Edit Track"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button><button type="button" onclick="duplicateMilestoneTrack(${project.id},${track.id})" class="p-1.5 text-slate-400" title="Duplicate Track"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button><button type="button" onclick="deleteMilestoneTrack(${project.id},${track.id})" class="p-1.5 text-slate-400 hover:text-amber-600" title="Archive Track"><i data-lucide="archive" class="w-3.5 h-3.5"></i></button>`:'<span class="px-2 py-1 text-[10px] font-semibold text-slate-500 bg-slate-100 border rounded-lg">Read Only</span>'}</div></div>${track.collapsed?'':renderTrackMilestones(project,milestones,track.id)}</div>`;
+    return `<div class="mb-3 border-y border-r border-l-4 rounded-xl overflow-hidden bg-white ${archived?'border-slate-300 border-l-slate-500':'border-sky-200 border-l-sky-500'}"><div class="px-4 py-3 border-b flex items-center justify-between gap-3 ${archived?'bg-slate-100 border-slate-300':'bg-sky-50 border-sky-200'}"><div class="flex items-center gap-3"><button type="button" onclick="toggleMilestoneTrack(${project.id},${track.id})" class="p-1 rounded hover:bg-slate-200"><i data-lucide="${track.collapsed?'chevron-right':'chevron-down'}" class="w-4 h-4"></i></button><div><div class="flex items-center gap-2 flex-wrap">${getInitiativeTag('TRACK',archived?'bg-slate-200 text-slate-700 border-slate-300':'bg-sky-100 text-sky-800 border-sky-200')}${archived?getInitiativeTag('ARCHIVED','bg-slate-800 text-white border-slate-700'):''}<div class="text-sm font-bold text-slate-800">Track ${track.sequenceNo} - ${escapeHtml(track.name)}</div></div><div class="text-xs text-slate-500">Track ID: ${track.id} | ${summary.completedCount} / ${summary.milestoneCount} Done (${summary.progressPercentage}%)</div></div></div><div class="flex items-center gap-2">${canManage?`<button type="button" onclick="addMilestoneInline(${project.id},${track.id})" class="flex items-center gap-1.5 px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-semibold"><i data-lucide="plus" class="w-3.5 h-3.5"></i>Add Milestone</button><button type="button" onclick="openTrackModal(${project.id},${track.id})" class="p-1.5 text-slate-400" title="Edit Track"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button><button type="button" onclick="duplicateMilestoneTrack(${project.id},${track.id})" class="p-1.5 text-slate-400" title="Duplicate Track"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button><button type="button" onclick="deleteMilestoneTrack(${project.id},${track.id})" class="p-1.5 text-slate-400 hover:text-amber-600" title="Archive Track"><i data-lucide="archive" class="w-3.5 h-3.5"></i></button>`:'<span class="px-2 py-1 text-[10px] font-semibold text-slate-500 bg-slate-100 border rounded-lg">Read Only</span>'}</div></div>${track.collapsed?'':renderTrackMilestones(project,milestones,track.id)}</div>`;
   }).join('');
 }
 
@@ -7786,7 +7645,7 @@ async function saveInlineMilestone(projectId, milestoneId, options = {}) {
       : await supabaseClient.from('milestones').update(milestoneRecord).eq('id',Number(milestoneId)).select('*').single();
     const {data,error}=result;
     if(error){showToast(`Unable to save Milestone: ${error.message}`,'error');return false;}
-    Object.assign(milestone,{id:Number(data?.id??milestone.id),sequenceNo:Number(data?.sequence_no??sequenceNo)||sequenceNo,recordStatus:data?.record_status||milestone.recordStatus||'active',actions:data?.actions??actions,owner:data?.owner??owner,dependency:data?.dependency??dependency,days:data?.days??days,startDate:data?.start_date??startDate,endDate:data?.end_date??endDate,deadline:data?.deadline??deadline,completionDate:data?.completion_date??completionDate,status:data?.status??status,deviationDays:(data?.deviation_days??calculateDeviation(deadline,startDate,completionDate))||null,createdBy:data?.created_by_name??data?.created_by??milestone.createdBy??'',createdAt:data?.created_at??milestone.createdAt??'',modifiedBy:data?.modified_by_name??data?.updated_by_name??data?.modified_by??data?.updated_by??milestone.modifiedBy??'',updatedAt:data?.modified_at??data?.updated_at??milestone.updatedAt??'',archivedBy:data?.archived_by_name??data?.archived_by??milestone.archivedBy??'',archivedAt:data?.archived_at??milestone.archivedAt??''});
+    Object.assign(milestone,{id:Number(data?.id??milestone.id),sequenceNo:Number(data?.sequence_no??sequenceNo)||sequenceNo,recordStatus:data?.record_status||milestone.recordStatus||'active',actions:data?.actions??actions,owner:data?.owner??owner,dependency:data?.dependency??dependency,days:data?.days??days,startDate:data?.start_date??startDate,endDate:data?.end_date??endDate,deadline:data?.deadline??deadline,completionDate:data?.completion_date??completionDate,status:data?.status??status,deviationDays:(data?.deviation_days??calculateDeviation(deadline,startDate,completionDate))||null,createdBy:data?.created_by??milestone.createdBy??'',createdAt:data?.created_at??milestone.createdAt??'',modifiedBy:data?.modified_by??milestone.modifiedBy??'',updatedAt:data?.updated_at??milestone.updatedAt??''});
     if(isDraft)kpiMilestoneRows.push({...data});else{const ri=kpiMilestoneRows.findIndex(r=>Number(r.id)===Number(milestone.id));if(ri>=0)kpiMilestoneRows[ri]={...kpiMilestoneRows[ri],...data};}
     inlineMilestoneEditId=null;
     await cascadeTrackMilestoneSchedule(project,milestone.id);
@@ -11831,17 +11690,10 @@ async function importWorkbook(event) {
         .filter(Boolean)
     );
     const validVerticals = new Set(
-      [
-        'Retail commercial',
-        'Finance',
-        'Merchandising',
-        ...userMaster.map(user => user.assignedVertical),
-        ...programs.map(program => program.vertical),
-        ...projects.map(project => project.vertical)
-      ]
-        .map(value => String(value || '').trim().toLowerCase())
-        .filter(value => value && value !== 'all')
-    );
+  getMasterValues('DEPARTMENT')
+    .map(item => String(item.value_name || '').trim().toLowerCase())
+    .filter(Boolean)
+);
     const validDeliveryMethods = ['Waterfall', 'Agile'];
     const errors = [];
     const programRowsByKey = new Map();
@@ -14077,7 +13929,7 @@ function formatMilestoneTotalOverallDeviation(milestone){return `${getMilestoneT
 function findMilestoneRecord(pid,mid){const project=projects.find(p=>Number(p.id)===Number(pid));return{project,milestone:project?.milestones?.find(m=>Number(m.id)===Number(mid))};}
 function captureDeliveryViewState(){return{scrollX:window.scrollX,scrollY:window.scrollY,programs:new Map(programs.map(p=>[Number(p.id),p.collapsed])),projects:new Map(projects.map(p=>[Number(p.id),p.collapsed])),tracks:new Map(projects.flatMap(p=>(p.tracks||[]).map(t=>[Number(t.id),t.collapsed])))};}
 function restoreDeliveryViewState(state){if(!state)return;programs.forEach(p=>{if(state.programs.has(Number(p.id)))p.collapsed=state.programs.get(Number(p.id));});projects.forEach(p=>{if(state.projects.has(Number(p.id)))p.collapsed=state.projects.get(Number(p.id));(p.tracks||[]).forEach(t=>{if(state.tracks.has(Number(t.id)))t.collapsed=state.tracks.get(Number(t.id));});});requestAnimationFrame(()=>window.scrollTo(state.scrollX,state.scrollY));}
-function openMilestoneDeviationModal(pid,mid){const {project,milestone}=findMilestoneRecord(pid,mid);if(!project||!milestone||!canEditInitiative(project))return showToast('Permission denied.','error');const currentStatus=getEffectiveMilestoneStatus(milestone);if(!['WIP','Pending','Deviated','Deviation'].includes(currentStatus))return showToast('Deviation can be recorded only for WIP, Pending, or Deviated Milestones.','error');const end=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);document.getElementById('deviation-project-id').value=pid;document.getElementById('deviation-milestone-id').value=mid;document.getElementById('milestone-deviation-context').innerText=`${project.name} | ${milestone.actions||milestone.title}`;document.getElementById('deviation-current-start').innerText=formatDate(milestone.startDate);document.getElementById('deviation-current-end').innerText=formatDate(end);document.getElementById('deviation-new-start').value=getNextWorkingDay(end||localToday());document.getElementById('deviation-new-days').value=/^\d+$/.test(String(milestone.days||''))?milestone.days:'';document.getElementById('deviation-dependency').value=milestone.dependency||'';document.getElementById('deviation-remarks').value='';calculateDeviationPreview();const x=document.getElementById('milestone-deviation-modal');x.classList.remove('hidden');x.classList.add('flex');lucide.createIcons();}
+function openMilestoneDeviationModal(pid,mid){const {project,milestone}=findMilestoneRecord(pid,mid);if(!project||!milestone||!canEditInitiative(project))return showToast('Permission denied.','error');const currentStatus=getEffectiveMilestoneStatus(milestone);if(!['WIP','Pending'].includes(currentStatus))return showToast('Deviation can be recorded only for WIP or Pending Milestones.','error');const end=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);document.getElementById('deviation-project-id').value=pid;document.getElementById('deviation-milestone-id').value=mid;document.getElementById('milestone-deviation-context').innerText=`${project.name} | ${milestone.actions||milestone.title}`;document.getElementById('deviation-current-start').innerText=formatDate(milestone.startDate);document.getElementById('deviation-current-end').innerText=formatDate(end);document.getElementById('deviation-new-start').value=getNextWorkingDay(end||localToday());document.getElementById('deviation-new-days').value=/^\d+$/.test(String(milestone.days||''))?milestone.days:'';document.getElementById('deviation-dependency').value=milestone.dependency||'';document.getElementById('deviation-remarks').value='';calculateDeviationPreview();const x=document.getElementById('milestone-deviation-modal');x.classList.remove('hidden');x.classList.add('flex');lucide.createIcons();}
 function closeMilestoneDeviationModal(){const x=document.getElementById('milestone-deviation-modal');x.classList.add('hidden');x.classList.remove('flex');}
 function calculateDeviationPreview(){const start=document.getElementById('deviation-new-start')?.value||'',days=document.getElementById('deviation-new-days')?.value||'',end=calculateMilestoneEndDate(days,start);document.getElementById('deviation-new-end').value=end||'';document.getElementById('deviation-preview').innerText=end?`New commitment: ${formatDate(start)} to ${formatDate(end)}.`:'Enter Start Date and Days.';}
 async function saveMilestoneDeviation(e){e.preventDefault();const b=document.getElementById('save-deviation-btn');b.disabled=true;const state=captureDeliveryViewState(),pid=+document.getElementById('deviation-project-id').value,mid=+document.getElementById('deviation-milestone-id').value,newStart=document.getElementById('deviation-new-start').value,newDays=document.getElementById('deviation-new-days').value,newEnd=document.getElementById('deviation-new-end').value,dependency=document.getElementById('deviation-dependency').value.trim(),remarks=document.getElementById('deviation-remarks').value.trim(),{milestone}=findMilestoneRecord(pid,mid);if(!milestone||!newStart||!normalizeMilestoneDays(newDays)||!newEnd){b.disabled=false;return showToast('Enter a valid Start Date and positive Days.','error');}const oldEnd=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate),h=parseMilestoneRevisionData(milestone.remarks),revisionNo=(h.revisions?.length||0)+1,rowDeviation=oldEnd?Math.ceil((new Date(newEnd+'T00:00:00')-new Date(oldEnd+'T00:00:00'))/86400000):0;h.revisions=h.revisions||[];h.revisions.push({revisionNo,oldStart:milestone.startDate||'',oldEnd:oldEnd||'',oldDays:milestone.days||'',newStart,newEnd,newDays:Number(newDays),deviationDays:rowDeviation,dependency,remarks,changedAt:new Date().toISOString(),changedBy:currentUser?.name||currentUser?.email||''});const result=await supabaseClient.from('milestones').update({start_date:newStart,end_date:newEnd,deadline:newEnd,days:normalizeMilestoneDays(newDays),dependency:dependency||null,status:'Deviated',deviation_days:rowDeviation,remarks:JSON.stringify(h)}).eq('id',mid);b.disabled=false;if(result.error)return showToast('Unable to save deviation: '+result.error.message,'error');Object.assign(milestone,{startDate:newStart,endDate:newEnd,deadline:newEnd,days:normalizeMilestoneDays(newDays),dependency,status:'Deviated',deviationDays:rowDeviation,remarks:JSON.stringify(h)});const kpi=kpiMilestoneRows.find(r=>Number(r.id)===mid);if(kpi)Object.assign(kpi,{start_date:newStart,end_date:newEnd,deadline:newEnd,days:normalizeMilestoneDays(newDays),dependency:dependency||null,status:'Deviated',deviation_days:rowDeviation,remarks:JSON.stringify(h)});closeMilestoneDeviationModal();renderProjects();restoreDeliveryViewState(state);showToast(`Deviation revision ${revisionNo} saved.`,'success');}
@@ -14167,13 +14019,13 @@ function clearBulkSelection(){bulkWorkspaceSelection[currentWorkspaceView]?.clea
 function syncBulkSelectionUI(){const count=bulkWorkspaceSelection[currentWorkspaceView]?.size||0;const label=document.getElementById('bulk-selected-count');if(label)label.innerText=`${count} selected`;document.querySelectorAll('#bulk-action-toolbar button:not(:last-child)').forEach(button=>button.disabled=count===0);}
 function selectedBulkIds(){return [...(bulkWorkspaceSelection[currentWorkspaceView]||[])];}
 function bulkEditFields(entity){
-  if(entity==='programs')return[{value:'program_status',label:'Status',type:'status'},{value:'program_owner',label:'Program Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'}];
-  if(entity==='initiatives')return[{value:'initiative_status',label:'Status',type:'status'},{value:'business_owner',label:'Business Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'},{value:'initiative_type',label:'Initiative Type',type:'initiativeType'}];
+  if(entity==='programs')return[{value:'program_owner',label:'Program Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'}];
+  if(entity==='initiatives')return[{value:'business_owner',label:'Business Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'},{value:'initiative_type',label:'Initiative Type',type:'initiativeType'}];
   if(entity==='tracks')return[{value:'append_track_name',label:'Append text to Track Name',type:'text'}];
-  return[{value:'status',label:'Status',type:'status'},{value:'owner',label:'Milestone Owner',type:'user'},{value:'dependency',label:'Dependency',type:'text'},{value:'days',label:'Days',type:'number'},{value:'start_date',label:'Start Date',type:'date'},{value:'completion_date',label:'Actual End Date',type:'date'}];
+  return[{value:'owner',label:'Milestone Owner',type:'user'},{value:'dependency',label:'Dependency',type:'text'},{value:'days',label:'Days',type:'number'},{value:'start_date',label:'Start Date',type:'date'},{value:'completion_date',label:'Actual End Date',type:'date'}];
 }
-function openBulkEditModal(){const ids=selectedBulkIds();if(!ids.length)return showToast('Select at least one record.','error');bulkEditEntity=currentWorkspaceView==='overview'?overviewBulkEntity:currentWorkspaceView;const fields=bulkEditFields(bulkEditEntity),select=document.getElementById('bulk-edit-field');select.innerHTML=fields.map(f=>`<option value="${f.value}" data-type="${f.type}">${f.label}</option>`).join('');document.getElementById('bulk-edit-context').innerText=`${ids.length} ${bulkEditEntity} selected`;renderBulkEditValueInput();const modal=document.getElementById('bulk-edit-modal');modal.classList.remove('hidden');modal.classList.add('flex');lucide.createIcons();}
-function renderBulkEditValueInput(){const select=document.getElementById('bulk-edit-field'),type=select.selectedOptions[0]?.dataset.type||'text',area=document.getElementById('bulk-edit-value-area');let control='';if(type==='user')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="">-- Select User --</option>${userMaster.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join('')}</select>`;else if(type==='vertical')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${['Retail commercial','Finance','Merchandising'].map(v=>`<option>${v}</option>`).join('')}</select>`;else if(type==='initiativeType')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${getMasterValues('INITIATIVE_TYPE').map(v=>`<option value="${escapeHtml(v.value_name)}">${escapeHtml(v.value_name)}</option>`).join('')}</select>`;else if(type==='status')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="Pending">Pending</option><option value="In Progress">In Progress</option><option value="On-Hold">On Hold</option><option value="Delayed">Delayed</option><option value="Critical">Critical</option><option value="Done">Done</option><option value="In-Queue">In-Queue</option><option value="WIP">WIP</option><option value="Deviated">Deviated</option></select>`;else control=`<input id="bulk-edit-value" type="${type}" ${type==='number'?'min="1" step="1"':''} required class="mt-1 w-full rounded-lg border px-3 py-2">`;area.innerHTML=`<label class="block font-semibold text-slate-700">New value${control}</label>`;}
+function openBulkEditModal(){const ids=selectedBulkIds();if(!ids.length)return showToast('Select at least one record.','error');bulkEditEntity=currentWorkspaceView;const fields=bulkEditFields(bulkEditEntity),select=document.getElementById('bulk-edit-field');select.innerHTML=fields.map(f=>`<option value="${f.value}" data-type="${f.type}">${f.label}</option>`).join('');document.getElementById('bulk-edit-context').innerText=`${ids.length} ${bulkEditEntity} selected`;renderBulkEditValueInput();const modal=document.getElementById('bulk-edit-modal');modal.classList.remove('hidden');modal.classList.add('flex');lucide.createIcons();}
+function renderBulkEditValueInput(){const select=document.getElementById('bulk-edit-field'),type=select.selectedOptions[0]?.dataset.type||'text',area=document.getElementById('bulk-edit-value-area');let control='';if(type==='user')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="">-- Select User --</option>${userMaster.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join('')}</select>`;else if(type==='vertical')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${['Retail commercial','Finance','Merchandising'].map(v=>`<option>${v}</option>`).join('')}</select>`;else if(type==='initiativeType')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${getMasterValues('INITIATIVE_TYPE').map(v=>`<option value="${escapeHtml(v.value_name)}">${escapeHtml(v.value_name)}</option>`).join('')}</select>`;else control=`<input id="bulk-edit-value" type="${type}" ${type==='number'?'min="1" step="1"':''} required class="mt-1 w-full rounded-lg border px-3 py-2">`;area.innerHTML=`<label class="block font-semibold text-slate-700">New value${control}</label>`;}
 function closeBulkEditModal(){const modal=document.getElementById('bulk-edit-modal');modal.classList.add('hidden');modal.classList.remove('flex');bulkEditEntity='';}
 async function saveBulkEdit(event){event.preventDefault();const ids=selectedBulkIds(),field=document.getElementById('bulk-edit-field').value,value=document.getElementById('bulk-edit-value').value;if(!ids.length||!field||value==='')return;const button=document.getElementById('bulk-edit-save');button.disabled=true;try{if(bulkEditEntity==='tracks'&&field==='append_track_name'){for(const id of ids){const track=projects.flatMap(i=>i.tracks||[]).find(t=>Number(t.id)===Number(id));if(!track)continue;const {error}=await supabaseClient.from('milestone_tracks').update({track_name:`${track.name} ${value}`.trim(),updated_at:new Date().toISOString()}).eq('id',id);if(error)throw error;}}else if(bulkEditEntity==='milestones'&&['days','start_date','completion_date'].includes(field)){for(const id of ids){const milestone=projects.flatMap(i=>i.milestones||[]).find(m=>Number(m.id)===Number(id));if(!milestone)continue;const days=field==='days'?String(value):String(milestone.days||''),start=field==='start_date'?value:milestone.startDate||'',completion=field==='completion_date'?value:milestone.completionDate||'',end=calculateMilestoneEndDate(days,start),status=completion?'Done':(hasMilestoneDeviationHistory(milestone)||milestone.status==='Deviated'?'Deviated':evaluateMilestoneStatus(milestone.title,days,start,end,end,''));const payload={[field]:field==='days'?normalizeMilestoneDays(value):value,end_date:end||null,deadline:end||null,status,deviation_days:calculateDeviation(end,start,completion)||null};const {error}=await supabaseClient.from('milestones').update(payload).eq('id',id);if(error)throw error;}}else{const table=bulkEditEntity==='programs'?'programs':bulkEditEntity==='initiatives'?'initiatives':'milestones',payload={[field]:value};if(table!=='milestones')payload.updated_at=new Date().toISOString();const {error}=await supabaseClient.from(table).update(payload).in('id',ids);if(error)throw error;}closeBulkEditModal();clearBulkSelection();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records updated successfully.','success');}catch(error){showToast('Bulk edit failed: '+error.message,'error');}finally{button.disabled=false;}}
 async function bulkDeleteSelected(){const entity=currentWorkspaceView,ids=selectedBulkIds();if(!ids.length)return;if(!confirm(`Archive ${ids.length} selected ${entity}?`))return;try{if(entity==='programs'){let r=await supabaseClient.from('initiatives').update({program_id:null}).in('program_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('programs').update({is_active:false,updated_at:new Date().toISOString()}).in('id',ids);if(r.error)throw r.error;}else if(entity==='initiatives'){let r=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('initiative_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('milestone_tracks').update({record_status:'deleted',updated_at:new Date().toISOString()}).in('initiative_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('initiatives').update({record_status:'deleted'}).in('id',ids);if(r.error)throw r.error;}else if(entity==='tracks'){const r1=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('track_id',ids);if(r1.error)throw r1.error;const r2=await softDeleteRecords('milestone_tracks',ids);if(r2.error)throw r2.error;}else{const r=await softDeleteRecords('milestones',ids);if(r.error)throw r.error;}clearBulkSelection();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records archived successfully.','success');}catch(error){showToast('Bulk archive failed: '+error.message,'error');}}
@@ -18124,98 +17976,14 @@ body:not(.delivery-overview-filter-active) .shared-overview-filter-bar-hidden {
 <script id="audit-actions-enhancement-script">
 (function(){
   'use strict';
-  const labels=['Created By','Created Time','Modified By','Modified Time','Archived By','Archived Time'];
-  const auditTimeZone='Asia/Kolkata';
+  const labels=['Created By','Created On','Modified By','Modified On','Archived By','Archived On'];
   const safe=v=>(v===null||v===undefined||v==='')?'-':String(v);
-  function parseAuditDateTime(value){
-    if(!value)return null;
-    if(value instanceof Date)return Number.isNaN(value.getTime())?null:value;
-    const raw=String(value).trim();
-    if(!raw)return null;
-    // Supabase timestamp values without an explicit offset represent UTC.
-    // Normalize every audit value to one absolute instant before formatting it in IST.
-    const hasExplicitZone=/(?:z|[+-]\d{2}:?\d{2})$/i.test(raw);
-    const normalized=hasExplicitZone?raw:`${raw.replace(' ','T')}Z`;
-    const parsed=new Date(normalized);
-    return Number.isNaN(parsed.getTime())?null:parsed;
-  }
-  function fmt(value){
-    const date=parseAuditDateTime(value);
-    if(!date)return value?safe(value):'-';
-    const parts=new Intl.DateTimeFormat('en-GB',{timeZone:auditTimeZone,day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:true}).formatToParts(date);
-    const get=type=>parts.find(part=>part.type===type)?.value||'';
-    const month=get('month').replace(/^Sept$/i,'Sep');
-    return `${get('day')}-${month}-${get('year')} ${get('hour')}:${get('minute')}:${get('second')} ${get('dayPeriod').toUpperCase()}`;
-  }
-  function findEntity(entity,id,projectId){
-    const key=String(id??'');
-    if(!key)return null;
-    try{
-      if(entity==='programs')return (programs||[]).find(item=>String(item.id)===key)||null;
-      if(entity==='initiatives')return (projects||[]).find(item=>String(item.id)===key)||null;
-      if(entity==='tracks'){
-        const parent=projectId?(projects||[]).find(item=>String(item.id)===String(projectId)):null;
-        return (parent?.tracks||[]).find(item=>String(item.id)===key)||(projects||[]).flatMap(item=>item.tracks||[]).find(item=>String(item.id)===key)||null;
-      }
-      if(entity==='milestones'){
-        const parent=projectId?(projects||[]).find(item=>String(item.id)===String(projectId)):null;
-        return (parent?.milestones||[]).find(item=>String(item.id)===key)||(projects||[]).flatMap(item=>item.milestones||[]).find(item=>String(item.id)===key)||null;
-      }
-    }catch(error){console.warn('Unable to resolve audit record.',error)}
-    return null;
-  }
-  function recordFor(row){
-    const marker=row.querySelector('[data-entity][data-id]');
-    if(marker)return findEntity(marker.dataset.entity,marker.dataset.id,row.dataset?.inlineMilestoneProjectId);
-    const ds=row.dataset||{};
-    if(ds.inlineMilestoneId||ds.milestoneId)return findEntity('milestones',ds.inlineMilestoneId||ds.milestoneId,ds.inlineMilestoneProjectId||ds.projectId);
-    if(ds.trackId)return findEntity('tracks',ds.trackId,ds.initiativeId||ds.projectId);
-    if(ds.initiativeId||ds.projectId)return findEntity('initiatives',ds.initiativeId||ds.projectId);
-    if(ds.programId)return findEntity('programs',ds.programId);
-    return null;
-  }
-  function vals(r){
-    r=r||{};
-    const createdBy=r.created_by_name??r.createdByName??r.created_by??r.createdBy??r.created_by_email;
-    const modifiedBy=r.modified_by_name??r.updated_by_name??r.modified_by??r.updated_by??r.modifiedBy??r.updatedBy;
-    const archivedBy=r.archived_by_name??r.archived_by??r.archivedBy;
-    const modifiedTime=r.modified_at??r.updated_at??r.updatedAt??r.modifiedAt;
-    const archivedTime=r.archived_at??r.archivedAt??(archivedBy?modifiedTime:null);
-    return [safe(createdBy),fmt(r.created_at??r.createdAt),safe(modifiedBy),fmt(modifiedTime),safe(archivedBy),fmt(archivedTime)];
-  }
-  function enhanceTable(table){
-    if(table.dataset.auditEnhanced)return;
-    let headers=[...table.querySelectorAll(':scope > thead > tr:first-child > th')];
-    const rows=[...table.querySelectorAll(':scope > tbody > tr')];
-    if(!headers.length||!rows.some(row=>recordFor(row)))return;
-    const dayStatusIndex=headers.findIndex(header=>header.textContent.trim().toLowerCase()==='day status');
-    if(dayStatusIndex>=0){
-      table.querySelectorAll(':scope > thead > tr, :scope > tbody > tr, :scope > tfoot > tr').forEach(row=>row.children[dayStatusIndex]?.remove());
-      headers=[...table.querySelectorAll(':scope > thead > tr:first-child > th')];
-    }
-    if(headers.some(header=>labels.includes(header.textContent.trim()))){table.dataset.auditEnhanced='1';return;}
-    const actionIndex=headers.findIndex(header=>['actions','action'].includes(header.textContent.trim().toLowerCase()));
-    if(actionIndex<0)return;
-    const actionHeader=headers[actionIndex];
-    labels.forEach((label,index)=>{
-      const th=document.createElement('th');
-      th.className='py-2.5 px-3 audit-col '+(index%2?'audit-col-date':'');
-      th.textContent=label;
-      actionHeader.before(th);
-    });
-    rows.forEach(row=>{
-      const record=recordFor(row);
-      const actionCell=row.children[actionIndex];
-      if(!record||!actionCell)return;
-      vals(record).forEach((value,index)=>{
-        const td=document.createElement('td');
-        td.className='py-2.5 px-3 audit-col '+(index%2?'audit-col-date':'');
-        td.textContent=value;
-        actionCell.before(td);
-      });
-    });
-    table.dataset.auditEnhanced='1';
-  }
+  function fmt(v){if(!v)return '-';const d=new Date(v);if(Number.isNaN(d.getTime()))return safe(v);const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Kolkata',day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit',hour12:true}).formatToParts(d);const get=t=>parts.find(p=>p.type===t)?.value||'';return `${get('day')}-${get('month')}-${get('year')} ${get('hour')}:${get('minute')} ${get('dayPeriod').toUpperCase()}`}
+  function allRecords(){const pools=[];try{if(Array.isArray(programs))pools.push(...programs)}catch(e){}try{if(Array.isArray(projects)){pools.push(...projects);projects.forEach(p=>{if(Array.isArray(p.tracks))pools.push(...p.tracks);if(Array.isArray(p.milestones))pools.push(...p.milestones)})}}catch(e){}['initiatives','tracks','milestones','allPrograms','allProjects','allInitiatives','allTracks','allMilestones'].forEach(k=>{try{if(Array.isArray(window[k]))pools.push(...window[k])}catch(e){}});return pools}
+  function recordFor(row){const ds=row.dataset||{};const milestoneId=ds.milestoneId||ds.inlineMilestoneId;if(milestoneId){try{for(const project of (projects||[])){const found=(project.milestones||[]).find(m=>String(m.id)===String(milestoneId));if(found)return found}}catch(e){}try{const raw=(kpiMilestoneRows||[]).find(m=>String(m.id)===String(milestoneId));if(raw)return raw}catch(e){}}const ids=[ds.trackId,ds.initiativeId,ds.programId,ds.projectId,ds.inlineMilestoneProjectId].filter(Boolean).map(String);if(!ids.length)return null;return allRecords().find(r=>ids.includes(String(r.id??r.track_id??r.initiative_id??r.program_id??r.project_id)))||null}
+  function vals(r){r=r||{};return [safe(r.created_by_name??r.createdByName??r.created_by??r.createdBy??r.created_by_email),fmt(r.created_at??r.createdAt),safe(r.modified_by_name??r.updated_by_name??r.modified_by??r.updated_by??r.modifiedBy??r.updatedBy),fmt(r.updated_at??r.updatedAt??r.modifiedAt),safe(r.archived_by_name??r.archived_by??r.archivedBy),fmt(r.archived_at??r.archivedAt)]}
+  function enhanceTable(t){if(t.dataset.auditEnhanced)return;const head=[...t.querySelectorAll('thead th')];if(!head.length)return;const texts=head.map(x=>x.textContent.trim().toLowerCase());const day=texts.indexOf('day status');if(day>=0){t.querySelectorAll('tr').forEach(tr=>{const c=[...tr.children];if(c[day])c[day].remove()})}
+    const h2=[...t.querySelectorAll('thead th')];if(h2.some(x=>labels.includes(x.textContent.trim()))){t.dataset.auditEnhanced='1';return}let idx=h2.findIndex(x=>x.textContent.trim().toLowerCase()==='countdown');if(idx<0)idx=h2.findIndex(x=>x.textContent.trim().toLowerCase()==='actions');if(idx<0)return;const before=h2[idx].textContent.trim().toLowerCase()==='actions';const anchor=h2[idx];labels.forEach((l,i)=>{const th=document.createElement('th');th.className='py-2.5 px-3 audit-col '+(i%2?'audit-col-date':'');th.textContent=l;before?anchor.before(th):anchor.after(th);if(!before)idx++});[...t.querySelectorAll('tbody tr')].forEach(row=>{const cells=[...row.children];let pos=cells.findIndex(x=>x.textContent.trim().toLowerCase()==='actions');const action=cells.find((x,i)=>i===texts.indexOf('actions'))||cells[cells.length-1];const anchorCell=before?action:(cells[idx]||action);vals(recordFor(row)).forEach(v=>{const td=document.createElement('td');td.className='py-2.5 px-3 audit-col';td.textContent=v;anchorCell?anchorCell.before(td):row.appendChild(td)})});t.dataset.auditEnhanced='1'}
   function menuLabel(el){const s=(el.getAttribute('title')||el.getAttribute('aria-label')||el.textContent||'').trim();const map={edit:'Edit Milestone',complete:'Complete Milestone',deviation:'Record Deviation',history:'Revision History',clone:'Clone Milestone',archive:'Archive Milestone',delete:'Delete Milestone',review:'Review Milestone'};const k=Object.keys(map).find(x=>s.toLowerCase().includes(x));return k?map[k]:(s||'Action')}
   function enhanceActions(root=document){
     root.querySelectorAll('tr[data-milestone-row="true"]').forEach(row=>{
@@ -18245,18 +18013,12 @@ body:not(.delivery-overview-filter-active) .shared-overview-filter-bar-hidden {
   }
   function close(b){b.classList.remove('open');const x=b.querySelector('.audit-action-trigger');if(x)x.setAttribute('aria-expanded','false')}
   function run(){document.querySelectorAll('table').forEach(enhanceTable);enhanceActions()}
-  let auditEnhanceFrame=0;
-  const auditObserver=new MutationObserver(records=>{
-    if(!records.some(record=>[...record.addedNodes].some(node=>node.nodeType===1&&(node.matches?.('table,[data-entity][data-id],.audit-action-menu')||node.querySelector?.('table,[data-entity][data-id]')))))return;
-    if(auditEnhanceFrame)return;
-    auditEnhanceFrame=requestAnimationFrame(()=>{auditEnhanceFrame=0;auditObserver.disconnect();try{run()}finally{auditObserver.observe(document.documentElement,{childList:true,subtree:true})}});
-  });
-  document.addEventListener('click',e=>document.querySelectorAll('.audit-action-menu.open').forEach(b=>{if(!b.contains(e.target))close(b)}));document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.audit-action-menu.open').forEach(close)});auditObserver.observe(document.documentElement,{childList:true,subtree:true});if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run,{once:true});else run();
+  document.addEventListener('click',e=>document.querySelectorAll('.audit-action-menu.open').forEach(b=>{if(!b.contains(e.target))close(b)}));document.addEventListener('keydown',e=>{if(e.key==='Escape')document.querySelectorAll('.audit-action-menu.open').forEach(close)});new MutationObserver(()=>requestAnimationFrame(run)).observe(document.documentElement,{childList:true,subtree:true});if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run);else run();
 })();
 </script>
 
 <script id="system-audit-enforcement">
-/* Schema-safe system audit enforcement with immutable creation fields. */
+/* Schema-safe system audit enforcement. Uses only verified existing timestamp fields. */
 (function(){
   const auditedTables = new Set(['programs','initiatives','milestone_tracks','milestones']);
   const archiveState = value => value && typeof value === 'object' && (
@@ -18270,41 +18032,35 @@ body:not(.delivery-overview-filter-active) .shared-overview-filter-bar-hidden {
   }
   function cleanUnsupportedAuditFields(row){
     const next={...(row||{})};
+    // Recently introduced columns that are not present consistently in the current schema.
+    delete next.modified_at;
+    delete next.archived_at;
     delete next.updated_by;
     delete next.created_by_name;
     delete next.modified_by_name;
     delete next.archived_by_name;
     return next;
   }
-  function stampRow(table,row,mode,now,actor){
-    now=now||new Date().toISOString();
+  function stampRow(row, mode, now, actor){
+    const actionTimestamp=new Date().toISOString();
+    now=actionTimestamp;
     const next=cleanUnsupportedAuditFields(row);
     if(mode==='create'){
+      // Creation audit values always come from the live authenticated action.
+      // Imported/static values are intentionally overwritten at insert time.
       next.created_by=actor;
       next.created_at=now;
       delete next.modified_by;
       delete next.archived_by;
-      delete next.modified_at;
-      delete next.archived_at;
-      if(table!=='milestones') delete next.updated_at;
-    }else{
-      // Creation audit values are immutable on every update path.
-      delete next.created_by;
-      delete next.created_by_name;
-      delete next.created_at;
-      if(mode==='archive') {
-        next.archived_by=actor;
-        next.status='Archived';
-      }
-      else next.modified_by=actor;
-
-      // Use only schema-safe timestamp columns.
-      // Milestones in this environment do not contain modified_at.
-      // Store the current system timestamp in updated_at and let the audit grid
-      // display Created, Modified and Archived times from the same IST formatter.
+    }else if(mode==='archive'){
+      // Archive audit values are captured only by an archive action.
+      next.archived_by=actor;
       next.updated_at=now;
-      delete next.modified_at;
-      delete next.archived_at;
+    }else{
+      // Every successful edit, inline edit, bulk edit, completion or deviation
+      // receives the current authenticated user and a fresh system timestamp.
+      next.modified_by=actor;
+      next.updated_at=now;
     }
     return next;
   }
@@ -18317,17 +18073,20 @@ body:not(.delivery-overview-filter-active) .shared-overview-filter-bar-hidden {
     const originalUpsert=query.upsert.bind(query);
     query.insert=function(values,options){
       const actor=currentAuditUser(),now=new Date().toISOString();
-      const stamped=Array.isArray(values)?values.map(v=>stampRow(table,v,'create',now,actor)):stampRow(table,values,'create',now,actor);
+      const stamped=Array.isArray(values)?values.map(v=>stampRow(v,'create',now,actor)):stampRow(values,'create',now,actor);
       return originalInsert(stamped,options);
     };
     query.update=function(values,options){
       const actor=currentAuditUser(),now=new Date().toISOString();
-      const stamped=stampRow(table,values,archiveState(values)?'archive':'modify',now,actor);
+      const stamped=stampRow(values,archiveState(values)?'archive':'modify',now,actor);
+      // The current milestones table does not contain updated_at. Keep the
+      // existing archive payload schema-safe while preserving all other logic.
+      if(table==='milestones') delete stamped.updated_at;
       return originalUpdate(stamped,options);
     };
     query.upsert=function(values,options){
       const actor=currentAuditUser(),now=new Date().toISOString();
-      const one=v=>stampRow(table,v,(v&&v.id)?(archiveState(v)?'archive':'modify'):'create',now,actor);
+      const one=v=>stampRow(v,(v&&v.id)?(archiveState(v)?'archive':'modify'):'create',now,actor);
       return originalUpsert(Array.isArray(values)?values.map(one):one(values),options);
     };
     return query;
@@ -18335,230 +18094,9 @@ body:not(.delivery-overview-filter-active) .shared-overview-filter-bar-hidden {
 })();
 </script>
 
+
 <script id="inline-milestone-enter-save">
 (function(){if(window.inlineMilestoneEnterHandlerInstalled)return;window.inlineMilestoneEnterHandlerInstalled=true;document.addEventListener('keydown',function(event){if(event.key!=='Enter'||event.isComposing||event.repeat)return;const control=event.target.closest?.('input[id^="inline-"], textarea[id^="inline-"]');if(!control)return;const row=control.closest('tr[data-inline-editing="true"]');if(!row)return;if(control.tagName==='TEXTAREA'&&!event.ctrlKey&&!event.metaKey)return;if(control.getAttribute('aria-expanded')==='true'||control.closest('[role="combobox"]')?.getAttribute('aria-expanded')==='true')return;const projectId=Number(row.dataset.inlineMilestoneProjectId),milestoneId=Number(row.dataset.inlineMilestoneId);if(!Number.isFinite(projectId)||!Number.isFinite(milestoneId))return;event.preventDefault();event.stopPropagation();saveInlineMilestone(projectId,milestoneId,{addNextRow:true});},true);})();
-</script>
-
-<!-- PAGE-SPECIFIC IMPORT/EXPORT EXTENSION: preserves Project Overview handlers -->
-<style>
-#page-export-menu{position:fixed;z-index:100000;min-width:210px;background:#fff;border:1px solid #cbd5e1;border-radius:.75rem;box-shadow:0 18px 45px rgba(15,23,42,.22);padding:.35rem}#page-export-menu button{display:block;width:100%;padding:.6rem .75rem;text-align:left;border-radius:.5rem;font-size:.75rem;font-weight:600;color:#334155}#page-export-menu button:hover,#page-export-menu button:focus{background:#eef2ff;color:#4338ca;outline:0}.page-io-progress{height:8px;border-radius:999px;background:#e2e8f0;overflow:hidden}.page-io-progress>i{display:block;height:100%;width:0;background:#4f46e5;transition:width .15s}
-</style>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/docx@9.5.1/dist/index.iife.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
-<script>
-(()=>{'use strict';
-const original={openImport:window.openPageImportModal,exportPage:window.exportCurrentWorkspacePage,importPage:window.importCurrentWorkspacePage,updateHeader:window.updateWorkspaceHeaderActions};
-let contextualPage=null,busy=false;
-const safe=v=>v==null?'':String(v), norm=s=>safe(s).trim().toLowerCase(), stamp=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date()).replace(/[-: ]/g,'').slice(0,13);
-const audit=['created_at','created_by','modified_at','modified_by','archived_at','archived_by'];
-const cfg={
- programs:{label:'Programs',sheet:'Programs',table:'programs',key:'id',required:['Program Name'],headers:['Program ID','Sequence No','Program Name','Vertical','Program Owner','Assigned To','Start Date','Target End Date','Revised Start Date','Revised End Date','Actual End Date','Impact Category','Measurable Impact','Business Benefit','Program Status','Record Status'],map:{'Program ID':'id','Sequence No':'sequence_no','Program Name':'name','Vertical':'vertical','Program Owner':'owner','Assigned To':'assigned_to','Start Date':'start_date','Target End Date':'target_end_date','Revised Start Date':'revised_start_date','Revised End Date':'revised_end_date','Actual End Date':'actual_end_date','Impact Category':'impact_category','Measurable Impact':'measurable_impact','Business Benefit':'business_benefit','Program Status':'status','Record Status':'record_status'},rows:()=>window.programs||[]},
- initiatives:{label:'Initiatives',sheet:'Initiatives',table:'initiatives',key:'id',required:['Initiative Name','Program ID'],headers:['Initiative ID','Program ID','Sequence No','Initiative Name','Initiative Type','CR Number','Vertical','Delivery Method','Business Owner','Assigned To','Start Date','Target End Date','Revised Start Date','Revised End Date','Actual End Date','Impact Category','Measurable Impact','Business Benefit','Status','Record Status'],map:{'Initiative ID':'id','Program ID':'program_id','Sequence No':'sequence_no','Initiative Name':'name','Initiative Type':'initiative_type','CR Number':'cr_no','Vertical':'vertical','Delivery Method':'delivery_method','Business Owner':'business_owner','Assigned To':'assigned_to','Start Date':'start_date','Target End Date':'target_end_date','Revised Start Date':'revised_start_date','Revised End Date':'revised_end_date','Actual End Date':'actual_end_date','Impact Category':'impact_category','Measurable Impact':'measurable_impact','Business Benefit':'business_benefit','Status':'status','Record Status':'record_status'},rows:()=>window.projects||[]},
- tracks:{label:'Tracks',sheet:'Tracks',table:'milestone_tracks',key:'id',required:['Track Name','Initiative ID'],headers:['Track ID','Sequence No','Initiative ID','Track Name','Record Status'],map:{'Track ID':'id','Sequence No':'display_order','Initiative ID':'initiative_id','Track Name':'name','Record Status':'record_status'},rows:()=> (window.projects||[]).flatMap(i=>(i.tracks||[]).map(t=>({...t,initiative_id:i.id})))},
- milestones:{label:'Milestones',sheet:'Milestones',table:'milestones',key:'id',required:['Initiative ID','Action / Deliverable'],headers:['Milestone ID','Initiative ID','Track ID','Sequence No','Action / Deliverable','Owner','Dependency','Days','Start Date','End Date','Deadline','Completion Date','Status','Deviation','Critical','Record Status'],map:{'Milestone ID':'id','Initiative ID':'initiative_id','Track ID':'track_id','Sequence No':'sequence_no','Action / Deliverable':'action','Owner':'owner','Dependency':'dependency','Days':'days','Start Date':'start_date','End Date':'end_date','Deadline':'deadline','Completion Date':'completion_date','Status':'status','Deviation':'deviation','Critical':'critical','Record Status':'record_status'},rows:()=> (window.projects||[]).flatMap(i=>(i.milestones||[]).map(m=>({...m,initiative_id:i.id})))},
- daily:{label:'Daily Tracker',sheet:'Daily Tracker',table:'milestones',key:'id',required:['Milestone ID'],headers:['Milestone ID','Program','Initiative','Track','Action / Deliverable','Owner','Status','Start Date','End Date','Deadline','Completion Date','Deviation','Critical','Review State','Record Status'],map:{'Milestone ID':'id','Owner':'owner','Status':'status','Completion Date':'completion_date','Review State':'review_state','Record Status':'record_status'},rows:()=>{const search=(document.getElementById('daily-search')?.value||'').trim().toLowerCase(),owner=document.getElementById('daily-owner-filter')?.value||'';return (typeof getDailyPendingRows==='function'?getDailyPendingRows():[]).filter(r=>(!owner||r.m.owner===owner)&&(!search||[r.m.actions,r.m.owner,r.i.name,r.p?.name,r.t?.name].filter(Boolean).join(' ').toLowerCase().includes(search))).map(r=>({'Milestone ID':r.m.id??'','Program':r.p?.name||'','Initiative':r.i?.name||'','Track':r.t?.name||'','Action / Deliverable':r.m.actions||'','Owner':r.m.owner||'','Status':r.status||'','Start Date':r.m.startDate||'','End Date':r.m.revisedEndDate||r.m.endDate||'','Deadline':r.m.deadline||r.end||'','Completion Date':r.m.completionDate||'','Deviation':r.m.deviationReason||r.m.deviation||'','Critical':r.m.isCritical?'Yes':'No','Review State':r.m.reviewState||'','Record Status':r.m.recordStatus||'active'}))}},
- todo:{label:'To Do List',sheet:'To Do List',table:'todo_items',key:'id',required:['Task Title'],headers:['Task ID','Task Title','Description','Owner','Status','Priority','Start Date','Due Date','Program ID','Initiative ID','Track ID','Milestone ID','Record Status'],map:{'Task ID':'id','Task Title':'title','Description':'description','Owner':'owner','Status':'status','Priority':'priority','Start Date':'start_date','Due Date':'due_date','Program ID':'program_id','Initiative ID':'initiative_id','Track ID':'track_id','Milestone ID':'milestone_id','Record Status':'record_status'},rows:()=>typeof loadTodoItems==='function'?loadTodoItems():[]},
- user_master:{label:'User Master',sheet:'User Master',table:'user_master',key:'email',required:['Full Name','Email'],headers:['User ID','Full Name','Email','Department','Role Tier','Assigned Vertical','Active Status'],map:{'User ID':'id','Full Name':'name','Email':'email','Department':'department','Role Tier':'role_tier','Assigned Vertical':'vertical','Active Status':'is_active'},rows:()=>window.userMaster||[]},
- user_roles:{label:'User Roles',sheet:'User Roles',table:'user_master',key:'email',required:['Email','Role Tier'],headers:['Email','Role Tier','Vertical Restriction','Permission Mapping','Active Status'],map:{'Email':'email','Role Tier':'role_tier','Vertical Restriction':'vertical','Permission Mapping':'permissions','Active Status':'is_active'},rows:()=>window.userMaster||[]},
- initiative_type:master('Initiative Type','INITIATIVE_TYPE'),departments:master('Departments','DEPARTMENT'),business_benefit:master('Business Benefit Categories','BUSINESS_BENEFIT_CATEGORY'),project_status:master('Project Status','PROJECT_STATUS'),
- project_planner:{label:'Project Planner',sheet:'Project Planner',table:'project_planner_templates',key:'id',required:['Planner Name'],headers:['Planner ID','Planner Name','Description','Milestone Order','Milestone Name','Days','Rule','Dynamic / Fixed','Active Status'],map:{'Planner ID':'id','Planner Name':'name','Description':'description','Active Status':'is_active'},rows:()=>window.projectPlannerTemplates||[]}
-};
-function master(label,type){return{label,sheet:label.slice(0,31),table:'master_values',key:'id',masterType:type,required:['Value Name'],headers:['Master ID','Code','Value Name','Master Type','Active Status'],map:{'Master ID':'id','Code':'code','Value Name':'value','Master Type':'master_type','Active Status':'is_active'},rows:()=> (window.masterValues||window.masterData||[]).filter(x=>x.master_type===type||x.type===type)}}
-function page(){return contextualPage||window.currentWorkspaceView||'overview'}
-function canImport(p){if(p==='analytics'||p==='logout')return false;if(typeof canCreateInitiative==='function'&&!canCreateInitiative())return false;if(p==='user_roles'&&!(currentUser?.roleTier==='admin'||currentUser?.role==='admin'))return false;return true}
-function setContext(p){contextualPage=p;setTimeout(update,0)}
-function update(){const p=page(),c=cfg[p],ib=document.getElementById('btn-page-import'),eb=document.getElementById('btn-page-export');if(p==='overview'){contextualPage=null;return original.updateHeader?.()}if(ib){ib.style.display=(p==='analytics'||p==='logout'||!c)?'none':'';ib.title=c?`Import ${c.label}`:'';ib.setAttribute('aria-label',ib.title)}if(eb){eb.style.display=(p==='logout'||(!c&&p!=='analytics'))?'none':'';eb.title=p==='analytics'?'Export Analytics':c?`Export ${c.label}`:'';eb.setAttribute('aria-label',eb.title)}}
-window.openPageImportModal=function(){const p=page();if(p==='overview')return original.openImport();const c=cfg[p];if(!c)return showToast?.('Import is not available for this page.','error');if(!canImport(p))return showToast?.('You are not authorised to import this page.','error');const title=document.getElementById('import-modal-title'),content=document.getElementById('import-modal-default'),status=document.getElementById('import-modal-status');if(title)title.textContent=`${c.label} Import Center`;if(content)content.innerHTML=`<p class="text-sm text-slate-600">Template: <b>${c.label}_Import_Template.xlsx</b></p><div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button type="button" id="pio-template" class="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white">Download Template</button><button type="button" id="pio-select" class="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white">Select Import File</button></div><div class="page-io-progress"><i id="pio-bar"></i></div><p id="pio-count" class="text-xs text-slate-500">Ready</p>`;if(status){status.classList.add('hidden');status.innerHTML=''};openImportModal();document.getElementById('pio-template').onclick=()=>template(p);document.getElementById('pio-select').onclick=()=>document.getElementById('import-file')?.click()};
-function template(p){const c=cfg[p],wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([c.headers]),meta=XLSX.utils.aoa_to_sheet([['PMO_DELIVERY_HUB_TEMPLATE',p,'1.0']]);XLSX.utils.book_append_sheet(wb,ws,c.sheet);XLSX.utils.book_append_sheet(wb,meta,'_PMO_META');meta['!state']='hidden';XLSX.writeFile(wb,`${c.label.replace(/ /g,'_')}_Import_Template.xlsx`)}
-window.importCurrentWorkspacePage=async function(e){const p=page();if(p==='overview')return original.importPage(e);if(busy)return;const file=e.target.files?.[0];e.target.value='';if(!file)return;const c=cfg[p];busy=true;lock(true);try{const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});const meta=wb.Sheets._PMO_META?XLSX.utils.sheet_to_json(wb.Sheets._PMO_META,{header:1})[0]:null;if(!meta||meta[0]!=='PMO_DELIVERY_HUB_TEMPLATE'||meta[1]!==p||!wb.Sheets[c.sheet])throw new Error(`This file is not a ${c.label} import template. Please use the ${c.label} template.`);const rows=XLSX.utils.sheet_to_json(wb.Sheets[c.sheet],{defval:''}),heads=rows.length?Object.keys(rows[0]):[];const missing=c.required.filter(h=>!heads.includes(h));if(missing.length)throw new Error(`Missing required columns: ${missing.join(', ')}`);if(!rows.length)throw new Error('The selected template contains no data rows.');const errors=[];rows.forEach((r,i)=>{c.required.forEach(h=>{if(!safe(r[h]).trim())errors.push(`Row ${i+2}: ${h} is required.`)});if(p==='user_master'||p==='user_roles'){if(r.Email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.Email))errors.push(`Row ${i+2}: invalid email.`)}});if(errors.length)throw new Error(errors.slice(0,8).join(' '));const payload=rows.map(r=>{const o={};Object.entries(c.map).forEach(([h,k])=>{if(h in r&&r[h]!=='')o[k]=r[h]});if(c.masterType)o.master_type=c.masterType;o.modified_at=new Date().toISOString();o.modified_by=currentUser?.email||currentUser?.name||'';return o});progress(30,`Validated ${rows.length} rows`);const db=window.supabaseClient||window.supabase;if(!db?.from)throw new Error('Database connection is not available.');const q=db.from(c.table).upsert(payload,{onConflict:c.key});const {error}=await q;if(error)throw error;progress(100,`Processed ${rows.length}. Updated/created: ${rows.length}. Failed: 0. Skipped: 0.`);showStatus('success',`${c.label} import completed. ${rows.length} row(s) processed.`);await refresh(p)}catch(err){console.error('[Page import]',p,err);showStatus('error',err.message||'Import failed. No rows were imported.')}finally{busy=false;lock(false)}};
-function lock(on){document.getElementById('import-modal-close')?.toggleAttribute('disabled',on);const b=document.getElementById('pio-select');if(b)b.disabled=on}function progress(n,t){const b=document.getElementById('pio-bar'),c=document.getElementById('pio-count');if(b)b.style.width=n+'%';if(c)c.textContent=t}function showStatus(type,msg){const s=document.getElementById('import-modal-status');if(s){s.className=`rounded-lg p-3 text-sm ${type==='success'?'bg-emerald-50 text-emerald-800':'bg-rose-50 text-rose-800'}`;s.textContent=msg}}
-async function refresh(p){if(['programs','initiatives','tracks','milestones','daily'].includes(p)&&typeof loadProjectsFromDB==='function')await loadProjectsFromDB();if(p==='todo'&&typeof renderTodoList==='function')renderTodoList();if(typeof renderFlatWorkspacePage==='function'&&['programs','initiatives','tracks','milestones'].includes(p))renderFlatWorkspacePage()}
-window.exportCurrentWorkspacePage=function(){const p=page();if(p==='overview')return original.exportPage();if(p==='analytics')return menu();const c=cfg[p];if(!c)return showToast?.('Export is not available for this page.','error');if(busy)return;busy=true;try{let exportHeaders=c.headers,rows;if(p==='daily'){const table=document.querySelector('#workspace-flat-page table');if(!table)throw new Error('Daily Tracker table is not available.');const allHeaders=[...table.querySelectorAll('thead th')].map((th,index)=>({index,label:th.innerText.replace(/\s+/g,' ').trim()}));const included=allHeaders.filter(h=>h.label&&!/^(select|action|actions)$/i.test(h.label));exportHeaders=included.map(h=>h.label);rows=[...table.querySelectorAll('tbody tr')].filter(tr=>tr.offsetParent!==null&&!tr.querySelector('td[colspan]')).map(tr=>{const cells=[...tr.querySelectorAll(':scope > td')],o={};included.forEach(h=>{const cell=cells[h.index];o[h.label]=cell?cell.innerText.replace(/\s+/g,' ').trim():''});return o}).filter(row=>Object.values(row).some(value=>String(value).trim()));if(!rows.length)throw new Error('No Daily Tracker rows are visible for the current filters.');}else{rows=c.rows().map(x=>{const o={};c.headers.forEach(h=>{if(Object.prototype.hasOwnProperty.call(x,h)){o[h]=x[h]??'';return}const k=c.map[h];o[h]=k?x[k]??x[toCamel(k)]??'':''});return o})}const ws=XLSX.utils.json_to_sheet(rows,{header:exportHeaders}),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,c.sheet);XLSX.writeFile(wb,`${c.label.replace(/ /g,'_')}_${stamp()}.xlsx`);showToast?.(`${c.label} export created.`,'success')}catch(err){console.error('[Page export]',p,err);showToast?.(`Unable to export ${c.label}: ${err.message}`,'error')}finally{busy=false}};
-function toCamel(s){return s.replace(/_([a-z])/g,(_,c)=>c.toUpperCase())}
-function menu(){document.getElementById('page-export-menu')?.remove();const b=document.getElementById('btn-page-export'),r=b.getBoundingClientRect(),m=document.createElement('div');m.id='page-export-menu';m.setAttribute('role','menu');m.innerHTML=['Excel','PDF','Word','PowerPoint'].map((x,i)=>`<button role="menuitem" data-format="${x.toLowerCase()}" tabindex="${i?' -1':'0'}">Export as ${x}</button>`).join('');m.style.left=Math.max(8,r.right-210)+'px';m.style.top=(r.bottom+6)+'px';document.body.appendChild(m);m.onclick=e=>{const x=e.target.closest('button');if(x){analyticsExport(x.dataset.format);m.remove()}};m.onkeydown=e=>{const a=[...m.querySelectorAll('button')],i=a.indexOf(document.activeElement);if(e.key==='ArrowDown'){e.preventDefault();a[(i+1)%a.length].focus()}if(e.key==='ArrowUp'){e.preventDefault();a[(i+a.length-1)%a.length].focus()}if(e.key==='Escape'){m.remove();b.focus()}};setTimeout(()=>document.addEventListener('click',function out(e){if(!m.contains(e.target)&&e.target!==b){m.remove();document.removeEventListener('click',out)}}),0);m.querySelector('button').focus()}
-function analyticsData(){const root=document.getElementById('analytics-dashboard')||document.querySelector('.analytics-dashboard')||document.getElementById('workspace-flat-page'),filters=[...document.querySelectorAll('select,input')].filter(x=>x.offsetParent&&x.value).map(x=>`${x.getAttribute('aria-label')||x.name||x.id}: ${x.value}`),kpis=[...root.querySelectorAll('[data-kpi],.kpi-card,.analytics-kpi')].map(x=>safe(x.innerText).replace(/\s+/g,' ').trim()).filter(Boolean),charts=[...root.querySelectorAll('canvas')].filter(x=>x.offsetParent).map(x=>({title:x.closest('.analytics-chart-card')?.querySelector('h3')?.textContent||'Analytics Report',image:x.toDataURL('image/png'),chart:window.Chart?.getChart(x)}));return{root,filters,kpis,charts,date:new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}}
-async function analyticsExport(f){if(busy)return;busy=true;try{const d=analyticsData(),name=`Analytics_${stamp()}`;if(f==='excel'){const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PMO Delivery Hub Analytics'],['Export Date',d.date],['Active Filters',d.filters.join('; ')],[],['KPIs'],...d.kpis.map(x=>[x])]),'Summary');d.charts.forEach((x,i)=>{const ch=x.chart,labels=ch?.data?.labels||[],sets=ch?.data?.datasets||[],aoa=[['Category',...sets.map(s=>s.label||'Value')],...labels.map((l,j)=>[l,...sets.map(s=>s.data?.[j]??'')])];XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),(`Report ${i+1}`).slice(0,31))});XLSX.writeFile(wb,name+'.xlsx')}else if(f==='pdf'){const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:'landscape'});doc.setFontSize(18);doc.text('PMO Delivery Hub Analytics',14,16);doc.setFontSize(9);doc.text(`Exported: ${d.date}`,14,23);doc.text(`Filters: ${d.filters.join('; ')||'None'}`,14,29,{maxWidth:260});for(let i=0;i<d.charts.length;i++){if(i||d.charts.length)doc.addPage();doc.setFontSize(14);doc.text(d.charts[i].title,14,15);doc.addImage(d.charts[i].image,'PNG',14,22,260,145);doc.setFontSize(8);doc.text(`Page ${i+2}`,270,195,{align:'right'})}doc.save(name+'.pdf')}else if(f==='word'){if(!window.docx)throw new Error('Word library failed to load.');const {Document,Packer,Paragraph,HeadingLevel,ImageRun,TextRun}=docx,children=[new Paragraph({text:'PMO Delivery Hub Analytics',heading:HeadingLevel.TITLE}),new Paragraph(`Exported: ${d.date}`),new Paragraph(`Active filters: ${d.filters.join('; ')||'None'}`),new Paragraph({text:'KPI Summary',heading:HeadingLevel.HEADING_1}),...d.kpis.map(x=>new Paragraph(x))];for(const x of d.charts){children.push(new Paragraph({text:x.title,heading:HeadingLevel.HEADING_1}),new Paragraph({children:[new ImageRun({data:Uint8Array.from(atob(x.image.split(',')[1]),c=>c.charCodeAt(0)),transformation:{width:620,height:330}})]}))}const blob=await Packer.toBlob(new Document({sections:[{children}]}));saveAsBlob(blob,name+'.docx')}else{if(!window.PptxGenJS)throw new Error('PowerPoint library failed to load.');const ppt=new PptxGenJS();ppt.layout='LAYOUT_WIDE';ppt.author='PMO Delivery Hub';let s=ppt.addSlide();s.addText('PMO Delivery Hub Analytics',{x:.7,y:1.7,w:12,h:.7,fontSize:28,bold:true,color:'312E81'});s.addText(`Exported ${d.date}`,{x:.7,y:2.6,w:12,h:.35,fontSize:12,color:'64748B'});s=ppt.addSlide();s.addText('Active Filters and KPI Summary',{x:.5,y:.35,w:12.3,h:.5,fontSize:22,bold:true,color:'312E81'});s.addText((d.filters.join('\n')||'No active filters')+'\n\n'+d.kpis.join('\n'),{x:.7,y:1,w:11.8,h:5.8,fontSize:15,breakLine:true});d.charts.forEach(x=>{const sl=ppt.addSlide();sl.addText(x.title,{x:.5,y:.25,w:12.2,h:.45,fontSize:20,bold:true,color:'312E81'});sl.addImage({data:x.image,x:.7,y:.9,w:11.9,h:5.9})});await ppt.writeFile({fileName:name+'.pptx'})}showToast?.(`Analytics ${f} export created.`,'success')}catch(err){console.error('[Analytics export]',err);showToast?.(`Analytics export failed: ${err.message}`,'error')}finally{busy=false}}
-function saveAsBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-const wrap=(n,pick)=>{const fn=window[n];if(typeof fn!=='function')return;window[n]=function(...a){setContext(pick(...a));return fn.apply(this,a)}};
-wrap('showWorkspaceView',x=>x);wrap('showTodoListView',()=> 'todo');wrap('showAnalyticsView',()=> 'analytics');wrap('openUserModal',()=> 'user_master');wrap('openMasterModal',t=>({INITIATIVE_TYPE:'initiative_type',DEPARTMENT:'departments',BUSINESS_BENEFIT_CATEGORY:'business_benefit',PROJECT_STATUS:'project_status'}[t]));wrap('openProjectPlannerModal',()=> 'project_planner');
-document.addEventListener('DOMContentLoaded',update);window.addEventListener('resize',()=>document.getElementById('page-export-menu')?.remove());
-})();
-</script>
-
-
-
-<!-- Targeted fix: reliable Overview multi-select enable/disable lifecycle. -->
-<style id="overview-multi-select-state-fix">
-body:not(.overview-multi-select-active) #overview-select-all-group,
-body:not(.overview-multi-select-active) #overview-selection-actions,
-body:not(.overview-multi-select-active) #overview-bulk-action-toolbar,
-body:not(.overview-multi-select-active) #projects-container .overview-bulk-checkbox,
-body:not(.overview-multi-select-active) #projects-container input[aria-label^="Select all"],
-body:not(.overview-multi-select-active) #projects-container .selection-count,
-body:not(.overview-multi-select-active) #projects-container .selection-banner {
-  display: none !important;
-}
-</style>
-<script>
-(function fixOverviewMultiSelectLifecycle(){
-  function clearEveryOverviewSelection(){
-    if(typeof bulkWorkspaceSelection !== 'undefined'){
-      ['programs','initiatives','tracks','milestones'].forEach(function(entity){
-        bulkWorkspaceSelection[entity]?.clear?.();
-      });
-    }
-    if(typeof overviewBulkEntity !== 'undefined') overviewBulkEntity='';
-
-    document.querySelectorAll(
-      '#projects-container .overview-bulk-checkbox,'+
-      '#projects-container input[aria-label^="Select all"]'
-    ).forEach(function(box){
-      box.checked=false;
-      box.indeterminate=false;
-    });
-
-    document.querySelectorAll(
-      '#projects-container .selected,'+
-      '#projects-container .is-selected,'+
-      '#projects-container [aria-selected="true"]'
-    ).forEach(function(row){
-      row.classList.remove('selected','is-selected');
-      row.setAttribute('aria-selected','false');
-    });
-
-    document.getElementById('overview-select-all-group')?.remove();
-    document.getElementById('overview-selection-actions')?.remove();
-    document.getElementById('overview-bulk-action-toolbar')?.remove();
-    if(typeof syncBulkSelectionUI === 'function') syncBulkSelectionUI();
-  }
-
-  function updateOverviewMultiSelectButton(){
-    const button=document.getElementById('overview-multi-select-toggle');
-    if(!button)return;
-    button.setAttribute('aria-pressed',String(overviewMultiSelectEnabled));
-    button.className=overviewMultiSelectEnabled
-      ? 'inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white border border-indigo-600'
-      : 'inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg bg-white text-slate-700 border border-slate-300 hover:bg-slate-50';
-    button.innerHTML='<i data-lucide="list-checks" class="w-4 h-4"></i>Multiple Select';
-  }
-
-  window.setOverviewMultiSelect=function(enabled){
-    overviewMultiSelectEnabled=Boolean(enabled);
-    document.body.classList.toggle('overview-multi-select-active',overviewMultiSelectEnabled);
-
-    if(!overviewMultiSelectEnabled){
-      clearEveryOverviewSelection();
-    }
-
-    updateOverviewMultiSelectButton();
-
-    requestAnimationFrame(function(){
-      if(overviewMultiSelectEnabled){
-        if(typeof decorateOverviewBulkSelection === 'function') decorateOverviewBulkSelection();
-        if(typeof decorateOverviewSelectAll === 'function') decorateOverviewSelectAll();
-      }else{
-        document.getElementById('overview-select-all-group')?.remove();
-        document.getElementById('overview-selection-actions')?.remove();
-        document.getElementById('overview-bulk-action-toolbar')?.remove();
-      }
-      if(window.lucide?.createIcons) window.lucide.createIcons();
-    });
-  };
-
-  window.toggleOverviewMultiSelect=function(){
-    window.setOverviewMultiSelect(!overviewMultiSelectEnabled);
-  };
-
-  const originalDecorateOverviewSelectAll=window.decorateOverviewSelectAll;
-  if(typeof originalDecorateOverviewSelectAll === 'function'){
-    window.decorateOverviewSelectAll=function(){
-      if(!overviewMultiSelectEnabled){
-        document.getElementById('overview-select-all-group')?.remove();
-        return;
-      }
-      return originalDecorateOverviewSelectAll.apply(this,arguments);
-    };
-  }
-})();
-</script>
-
-<style id="overview-filter-layout-optimized">
-/* Project Overview: one stable primary filter row using the existing controls. */
-#filter-search {
-  width: 200px !important;
-  min-width: 200px !important;
-  max-width: 200px !important;
-  flex: 0 0 200px !important;
-}
-.overview-primary-filter-row {
-  display: grid !important;
-  grid-template-columns: 200px repeat(5, minmax(128px, 1fr)) auto 46px !important;
-  align-items: center !important;
-  gap: 8px !important;
-  width: 100% !important;
-}
-.overview-primary-filter-row > #filter-search,
-.overview-primary-filter-row > select,
-.overview-primary-filter-row > .unified-filter-reset,
-.overview-primary-filter-row > .unified-filter-toggle {
-  width: 100% !important;
-  min-width: 0 !important;
-  max-width: none !important;
-  margin: 0 !important;
-}
-.overview-primary-filter-row > .unified-filter-reset {
-  white-space: nowrap;
-}
-[data-delivery-filter-page="overview"] > .unified-filter-primary > .unified-filter-spacer,
-[data-delivery-filter-page="overview"] > .unified-filter-primary > .unified-filter-count {
-  display: none !important;
-}
-@media (max-width: 1199px) {
-  .overview-primary-filter-row {
-    grid-template-columns: repeat(3, minmax(150px, 1fr)) !important;
-  }
-}
-@media (max-width: 767px) {
-  .overview-primary-filter-row {
-    grid-template-columns: 1fr !important;
-  }
-  #filter-search {
-    width: 100% !important;
-    min-width: 0 !important;
-    max-width: none !important;
-  }
-}
-</style>
-<script id="overview-filter-layout-optimized-js">
-(function overviewFilterLayoutOptimized(){
-  function placeOverviewFilters(){
-    var search=document.getElementById('filter-search');
-    if(!search) return;
-    var bar=search.closest('[data-delivery-filter-page="overview"]')||search.closest('.bg-white');
-    if(!bar) return;
-    var primary=bar.querySelector(':scope > .unified-filter-primary');
-    if(!primary) return;
-    primary.classList.add('overview-primary-filter-row');
-    var reset=primary.querySelector('.unified-filter-reset');
-    var toggle=primary.querySelector('.unified-filter-toggle');
-    var orderedIds=['filter-search','filter-status','filter-type','filter-vertical','filter-critical','filter-reviewed'];
-    orderedIds.forEach(function(id){
-      var control=document.getElementById(id);
-      if(control) primary.insertBefore(control,reset||toggle||null);
-    });
-    if(reset) primary.appendChild(reset);
-    if(toggle) primary.appendChild(toggle);
-    bar.dataset.overviewFilterLayoutOptimized='1';
-  }
-  function schedule(){requestAnimationFrame(placeOverviewFilters);}
-  if(document.readyState==='loading'){
-    document.addEventListener('DOMContentLoaded',schedule,{once:true});
-  }else{
-    schedule();
-  }
-})();
 </script>
 
 </body>
