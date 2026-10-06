@@ -3409,8 +3409,25 @@ async function addUser(e) {
   try {
     const { data: { session } } = await supabaseClient.auth.getSession();
     if (!session?.access_token) throw new Error('Your administrator session has expired. Please sign in again.');
-    const { data, error } = await supabaseClient.functions.invoke('admin-create-user', { body: payload });
-    if (error) throw new Error(error.message || 'Secure onboarding failed.');
+    let data,error;
+    try {
+      const { data: sessionData } = await supabaseClient.auth.getSession();
+      if(!sessionData?.session?.access_token){
+        throw new Error('Administrator session expired. Please sign in again.');
+      }
+      ({ data, error } = await supabaseClient.functions.invoke('admin-create-user', {
+        body: payload,
+        headers: {
+          Authorization: `Bearer ${sessionData.session.access_token}`
+        }
+      }));
+    } catch (invokeError) {
+      console.error('admin-create-user invoke failed', invokeError);
+      throw new Error('Failed to send a request to the Edge Function. Ensure admin-create-user is deployed and the current admin session is valid. ' + (invokeError?.message || ''));
+    }
+    if (error) {
+      throw new Error(error.message || error.context?.message || 'Secure onboarding failed.');
+    }
     if (!data?.auth_user_id || !['created', 'reconciled'].includes(data.status)) {
       throw new Error(data?.error || 'Onboarding did not complete. No changes were confirmed.');
     }
@@ -19326,7 +19343,36 @@ RLS/function security review required:
  function hideBulkProgress(){const modal=document.getElementById('bulk-operation-progress-modal');modal.classList.add('hidden');modal.classList.remove('flex');}
  function startMultiDeviation(){multiDeviationQueue=state.rows.filter(r=>['WIP','Pending','Deviated','Deviation'].includes(getEffectiveMilestoneStatus(r.milestone)));if(!multiDeviationQueue.length)return showToast('No selected Milestones are eligible for deviation.','error');multiDeviationActive=true;document.getElementById('daily-milestone-action-modal').classList.add('hidden');document.getElementById('daily-milestone-action-modal').classList.remove('flex');const first=multiDeviationQueue[0];openMilestoneDeviationModal(first.project.id,first.milestone.id);const context=document.getElementById('milestone-deviation-context');if(context)context.textContent+=` | Input applies to ${multiDeviationQueue.length} selected Milestones`;}
  const sharedSaveMilestoneDeviation=window.saveMilestoneDeviation;
- async function saveOneBulkDeviation(row,values){const milestone=row.milestone;const newEnd=calculateMilestoneEndDate(values.newDays,values.newStart);if(!newEnd)throw new Error(`Unable to calculate the revised End Date for Milestone ${milestone.id}.`);const oldEnd=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate),history=parseMilestoneRevisionData(milestone.remarks),revisionNo=(history.revisions?.length||0)+1,rowDeviation=oldEnd?Math.ceil((new Date(newEnd+'T00:00:00')-new Date(oldEnd+'T00:00:00'))/86400000):0,status=getEffectiveMilestoneStatus(milestone)==='Done'?'Done':'Deviated';history.revisions=history.revisions||[];history.revisions.push({revisionNo,oldStart:milestone.startDate||'',oldEnd:oldEnd||'',oldDays:milestone.days||'',newStart:values.newStart,newEnd,newDays:Number(values.newDays),deviationDays:rowDeviation,dependency:values.dependency,remarks:values.remarks,changedAt:new Date().toISOString(),changedBy:currentUser?.name||currentUser?.email||''});const {error}=await supabaseClient.from('milestones').update({start_date:values.newStart,end_date:newEnd,deadline:newEnd,days:normalizeMilestoneDays(values.newDays),dependency:values.dependency||null,status,deviation_days:rowDeviation,remarks:JSON.stringify(history)}).eq('id',Number(milestone.id));if(error)throw error;}
+ async function saveOneBulkDeviation(row,values){
+  const project=row.project;
+  const milestone=row.milestone;
+  if(!project||!milestone)throw new Error('The selected Milestone could not be resolved.');
+  if(!canEditInitiative(project))throw new Error(`Permission denied for Milestone ${milestone.id}.`);
+  const normalizedDays=normalizeMilestoneDays(values.newDays);
+  const newEnd=calculateMilestoneEndDate(normalizedDays,values.newStart);
+  if(!values.newStart||!normalizedDays||!newEnd)throw new Error(`Unable to calculate the revised End Date for Milestone ${milestone.id}.`);
+  const history=parseMilestoneRevisionData(milestone.remarks);
+  history.revisions=Array.isArray(history.revisions)?history.revisions:[];
+  const revisionNo=history.revisions.reduce((maximum,item)=>Math.max(maximum,Number(item?.revisionNo)||0),0)+1;
+  const oldEnd=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate)||'';
+  const rowDeviation=oldEnd?Math.ceil((new Date(`${newEnd}T00:00:00`)-new Date(`${oldEnd}T00:00:00`))/86400000):0;
+  const changedAt=new Date().toISOString();
+  const changedBy=currentUser?.name||currentUser?.email||'';
+  history.revisions.push({revisionNo,oldStart:milestone.startDate||'',oldEnd,oldDays:milestone.days||'',newStart:values.newStart,newEnd,newDays:Number(normalizedDays),deviationDays:rowDeviation,dependency:values.dependency,remarks:values.remarks,changedAt,changedBy});
+  history.auditEvents=Array.isArray(history.auditEvents)?history.auditEvents:[];
+  history.auditEvents.push({action:'Deviation Added',revisionNo,changedAt,changedBy});
+  const rebuilt=typeof rebuildDeviationSchedule==='function'
+    ?rebuildDeviationSchedule(milestone,history)
+    :{start:values.newStart,days:normalizedDays,end:newEnd,total:history.revisions.filter(item=>!item?.deleted).reduce((sum,item)=>sum+(Number(item?.deviationDays)||0),0),active:history.revisions.filter(item=>!item?.deleted)};
+  const status=(milestone.completionDate||milestone.completion_date||getEffectiveMilestoneStatus(milestone)==='Done')?'Done':'Deviated';
+  const payload={start_date:rebuilt.start||values.newStart,end_date:rebuilt.end||newEnd,deadline:rebuilt.end||newEnd,days:normalizeMilestoneDays(rebuilt.days||normalizedDays),dependency:values.dependency||null,status,deviation_days:Number(rebuilt.total)||0,remarks:JSON.stringify(history)};
+  const {data,error}=await supabaseClient.from('milestones').update(payload).eq('id',Number(milestone.id)).select('*').single();
+  if(error)throw error;
+  Object.assign(milestone,{startDate:payload.start_date||'',endDate:payload.end_date||'',deadline:payload.deadline||'',days:payload.days,dependency:payload.dependency||'',status:payload.status,deviationDays:payload.deviation_days,remarks:payload.remarks});
+  const kpi=typeof kpiMilestoneRows!=='undefined'?kpiMilestoneRows.find(item=>Number(item.id)===Number(milestone.id)):null;
+  if(kpi)Object.assign(kpi,data||payload);
+  return data||payload;
+}
  window.saveMilestoneDeviation=async function(event){if(!multiDeviationActive)return sharedSaveMilestoneDeviation.call(this,event);event.preventDefault();const button=document.getElementById('save-deviation-btn'),values={newStart:document.getElementById('deviation-new-start').value,newDays:document.getElementById('deviation-new-days').value,dependency:document.getElementById('deviation-dependency').value.trim(),remarks:document.getElementById('deviation-remarks').value.trim()};if(!values.newStart||!normalizeMilestoneDays(values.newDays)){return showToast('Enter a valid Start Date and positive Days.','error');}button.disabled=true;multiDeviationActive=false;closeMilestoneDeviationModal();showBulkProgress('Applying Milestone Deviation',multiDeviationQueue.length);let updated=0;try{for(const row of multiDeviationQueue){await saveOneBulkDeviation(row,values);updated+=1;updateBulkProgress(updated,multiDeviationQueue.length,`Applied deviation to ${updated} of ${multiDeviationQueue.length} selected Milestones.`);}await loadInitiativesFromSupabase();resetDailyMultiSelectAfterSuccess();if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();updateBulkProgress(multiDeviationQueue.length,multiDeviationQueue.length,'All selected Milestones updated successfully.');setTimeout(hideBulkProgress,450);requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));showToast(`Deviation applied to ${updated} selected Milestone${updated===1?'':'s'}.`,'success');}catch(error){console.error('Multi Select deviation failed:',error);hideBulkProgress();showToast(`Updated ${updated} of ${multiDeviationQueue.length}. ${error?.message||'Unable to complete the bulk deviation update.'}`,'error');requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));}finally{button.disabled=false;multiDeviationQueue=[];}};
  document.getElementById('milestone-deviation-modal').addEventListener('click',function(event){if(multiDeviationActive&&event.target.closest('button[onclick="closeMilestoneDeviationModal()"]')){multiDeviationActive=false;multiDeviationQueue=[];requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));}},true);
  document.getElementById('daily-milestone-action-list').addEventListener('click',function(e){const button=e.target.closest('[data-action]');if(!button)return;const action=button.dataset.action;if(action.startsWith('change-')){e.preventDefault();e.stopImmediatePropagation();editor(action);return;}if(!state.multi)return;if(action==='deviate'){e.preventDefault();e.stopImmediatePropagation();startMultiDeviation();return;}if(['complete','hold','critical'].includes(action)){e.preventDefault();e.stopImmediatePropagation();applyMultiWorkflow(action);}},true);
@@ -19383,5 +19429,301 @@ function resetDailyMultiSelectAfterSuccess(){
   updateDailyMultiSelectBanner();
 }
 </script>
+
+<!-- Deviation history edit/delete enhancement -->
+<div id="deviation-delete-confirm-modal" class="fixed inset-0 z-[120] hidden items-center justify-center bg-slate-900/60 p-4">
+  <div class="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl">
+    <div class="border-b bg-rose-50 px-6 py-4">
+      <h2 class="font-bold text-slate-800">Delete Deviation Record?</h2>
+      <p class="mt-1 text-xs text-slate-600">This action will remove the selected deviation entry and recalculate milestone deviation history.</p>
+    </div>
+    <div class="flex justify-end gap-2 p-6">
+      <button type="button" onclick="closeDeviationDeleteConfirmation()" class="rounded-lg border px-4 py-2 text-xs font-semibold">Cancel</button>
+      <button id="confirm-delete-deviation-btn" type="button" onclick="confirmDeleteDeviationRecord()" class="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white">Confirm Delete</button>
+    </div>
+  </div>
+</div>
+<script>
+// Extend the existing milestone revision storage. No new table or parallel history store is introduced.
+let activeDeviationEditIndex = null;
+let pendingDeviationDelete = null;
+
+(function initializeDeviationHistoryEnhancement(){
+  const form=document.querySelector('#milestone-deviation-modal form');
+  if(form&&!document.getElementById('deviation-edit-index')){
+    const input=document.createElement('input');
+    input.type='hidden';input.id='deviation-edit-index';input.value='';form.prepend(input);
+  }
+  const heading=document.querySelector('#milestone-deviation-modal h2');
+  if(heading&&!heading.id)heading.id='milestone-deviation-title';
+})();
+
+function getActiveMilestoneRevisions(milestone){
+  const history=parseMilestoneRevisionData(milestone?.remarks);
+  return (Array.isArray(history.revisions)?history.revisions:[]).filter(row=>!row?.deleted);
+}
+
+function getMilestoneTotalOverallDeviation(milestone){
+  const active=getActiveMilestoneRevisions(milestone);
+  if(active.length)return active.reduce((total,row)=>total+(Number(row?.deviationDays)||0),0);
+  const history=parseMilestoneRevisionData(milestone?.remarks);
+  if(Array.isArray(history.revisions)&&history.revisions.length)return 0;
+  const stored=Number(milestone?.deviationDays);
+  return Number.isFinite(stored)?stored:0;
+}
+
+function getDeviationActor(){return currentUser?.name||currentUser?.email||'';}
+function getDeviationPreservedStatus(milestone){
+  if(typeof hasMilestoneCompletion==='function'&&hasMilestoneCompletion(milestone))return 'Done';
+  const current=String(milestone?.status||'').trim();
+  if(['Done','On Hold','OnHold','Critical'].includes(current))return current;
+  return getActiveMilestoneRevisions(milestone).length?'Deviated':current;
+}
+
+function rebuildDeviationSchedule(milestone,history){
+  const rows=Array.isArray(history.revisions)?history.revisions:[];
+  const first=rows.find(row=>!row?.deleted)||rows[0];
+  let start=first?.oldStart||milestone.startDate||'';
+  let days=normalizeMilestoneDays(first?.oldDays||milestone.days)||milestone.days||'';
+  let end=first?.oldEnd||calculateMilestoneEndDate(days,start)||milestone.endDate||'';
+  rows.forEach(row=>{
+    if(row?.deleted)return;
+    row.oldStart=start||'';row.oldDays=days||'';row.oldEnd=end||'';
+    row.newDays=normalizeMilestoneDays(row.newDays)||days;
+    row.newEnd=calculateMilestoneEndDate(row.newDays,row.newStart)||row.newEnd||'';
+    row.deviationDays=end&&row.newEnd?Math.ceil((new Date(row.newEnd+'T00:00:00')-new Date(end+'T00:00:00'))/86400000):0;
+    start=row.newStart||start;days=row.newDays||days;end=row.newEnd||end;
+  });
+  const active=rows.filter(row=>!row?.deleted);
+  return {start,days,end,total:active.reduce((sum,row)=>sum+(Number(row.deviationDays)||0),0),active};
+}
+
+function refreshDeviationViews(viewState){
+  if(typeof renderProjects==='function')renderProjects();
+  if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();
+  if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();
+  if(typeof renderActiveDeliveryWorkspace==='function')renderActiveDeliveryWorkspace();
+  if(viewState&&typeof restoreDeliveryViewState==='function')restoreDeliveryViewState(viewState);
+}
+
+function openDeviationHistoryEdit(pid,mid,revisionIndex){
+  const {project,milestone}=findMilestoneRecord(pid,mid);
+  if(!project||!milestone||!canEditInitiative(project))return showToast('Permission denied.','error');
+  const history=parseMilestoneRevisionData(milestone.remarks),row=history.revisions?.[revisionIndex];
+  if(!row||row.deleted)return showToast('Deviation record is not available.','error');
+  activeDeviationEditIndex=revisionIndex;
+  document.getElementById('deviation-edit-index').value=String(revisionIndex);
+  document.getElementById('deviation-project-id').value=pid;
+  document.getElementById('deviation-milestone-id').value=mid;
+  document.getElementById('milestone-deviation-context').innerText=`${project.name} | ${milestone.actions||milestone.title} | Revision ${row.revisionNo}`;
+  document.getElementById('deviation-current-start').innerText=formatDate(row.oldStart);
+  document.getElementById('deviation-current-end').innerText=formatDate(row.oldEnd);
+  document.getElementById('deviation-new-start').value=row.newStart||'';
+  document.getElementById('deviation-new-days').value=row.newDays||'';
+  document.getElementById('deviation-dependency').value=row.dependency||'';
+  document.getElementById('deviation-remarks').value=row.remarks||row.reason||'';
+  const heading=document.getElementById('milestone-deviation-title');if(heading)heading.innerText='Edit Milestone Deviation';
+  const save=document.getElementById('save-deviation-btn');if(save)save.innerText='Save Changes';
+  calculateDeviationPreview();
+  closeMilestoneRevisionHistory();
+  const modal=document.getElementById('milestone-deviation-modal');modal.classList.remove('hidden');modal.classList.add('flex');
+  lucide.createIcons();
+}
+
+function requestDeleteDeviationRecord(pid,mid,revisionIndex){
+  const {project,milestone}=findMilestoneRecord(pid,mid);
+  if(!project||!milestone||!canEditInitiative(project))return showToast('Permission denied.','error');
+  const row=parseMilestoneRevisionData(milestone.remarks).revisions?.[revisionIndex];
+  if(!row||row.deleted)return showToast('Deviation record is not available.','error');
+  pendingDeviationDelete={pid:Number(pid),mid:Number(mid),revisionIndex:Number(revisionIndex)};
+  const modal=document.getElementById('deviation-delete-confirm-modal');modal.classList.remove('hidden');modal.classList.add('flex');lucide.createIcons();
+}
+function closeDeviationDeleteConfirmation(){pendingDeviationDelete=null;const modal=document.getElementById('deviation-delete-confirm-modal');modal.classList.add('hidden');modal.classList.remove('flex');}
+
+async function persistRebuiltDeviationHistory(project,milestone,history,successMessage){
+  const rebuilt=rebuildDeviationSchedule(milestone,history);
+  const status=getDeviationPreservedStatus({...milestone,remarks:JSON.stringify(history)});
+  const payload={start_date:rebuilt.start||null,end_date:rebuilt.end||null,deadline:rebuilt.end||null,days:normalizeMilestoneDays(rebuilt.days),dependency:rebuilt.active.length?(rebuilt.active[rebuilt.active.length-1].dependency||null):(milestone.dependency||null),status,deviation_days:rebuilt.total,remarks:JSON.stringify(history)};
+  const result=await supabaseClient.from('milestones').update(payload).eq('id',milestone.id);
+  if(result.error)throw result.error;
+  Object.assign(milestone,{startDate:payload.start_date||'',endDate:payload.end_date||'',deadline:payload.deadline||'',days:payload.days,dependency:payload.dependency||'',status:payload.status,deviationDays:payload.deviation_days,remarks:payload.remarks});
+  const kpi=kpiMilestoneRows.find(row=>Number(row.id)===Number(milestone.id));if(kpi)Object.assign(kpi,payload);
+  await loadInitiativesFromSupabase();
+  if(successMessage)showToast(successMessage,'success');
+}
+
+async function confirmDeleteDeviationRecord(){
+  if(!pendingDeviationDelete)return;
+  const button=document.getElementById('confirm-delete-deviation-btn'),state=captureDeliveryViewState(),target={...pendingDeviationDelete};button.disabled=true;
+  try{
+    const {project,milestone}=findMilestoneRecord(target.pid,target.mid);
+    if(!project||!milestone||!canEditInitiative(project))throw new Error('Permission denied.');
+    const history=parseMilestoneRevisionData(milestone.remarks),row=history.revisions?.[target.revisionIndex];
+    if(!row||row.deleted)throw new Error('Deviation record is not available.');
+    const now=new Date().toISOString(),actor=getDeviationActor();
+    row.deleted=true;row.deletedAt=now;row.deletedBy=actor;
+    history.auditEvents=Array.isArray(history.auditEvents)?history.auditEvents:[];
+    history.auditEvents.push({action:'Deviation Deleted',revisionNo:row.revisionNo,changedAt:now,changedBy:actor,snapshot:{...row}});
+    await persistRebuiltDeviationHistory(project,milestone,history,`Deviation revision ${row.revisionNo} deleted.`);
+    closeDeviationDeleteConfirmation();closeMilestoneRevisionHistory();refreshDeviationViews(state);
+  }catch(error){console.error('Delete deviation failed:',error);showToast('Unable to delete deviation: '+(error?.message||error),'error');}
+  finally{button.disabled=false;}
+}
+
+async function saveMilestoneDeviation(e){
+  e.preventDefault();
+  const button=document.getElementById('save-deviation-btn'),state=captureDeliveryViewState(),pid=+document.getElementById('deviation-project-id').value,mid=+document.getElementById('deviation-milestone-id').value,newStart=document.getElementById('deviation-new-start').value,newDays=document.getElementById('deviation-new-days').value,dependency=document.getElementById('deviation-dependency').value.trim(),remarks=document.getElementById('deviation-remarks').value.trim(),editIndex=document.getElementById('deviation-edit-index')?.value;
+  button.disabled=true;
+  try{
+    const {project,milestone}=findMilestoneRecord(pid,mid),newEnd=calculateMilestoneEndDate(newDays,newStart);
+    if(!project||!milestone||!canEditInitiative(project))throw new Error('Permission denied.');
+    if(!newStart||!normalizeMilestoneDays(newDays)||!newEnd)throw new Error('Enter a valid Start Date and positive Days.');
+    const history=parseMilestoneRevisionData(milestone.remarks);history.revisions=Array.isArray(history.revisions)?history.revisions:[];
+    if(editIndex!==''){
+      const index=Number(editIndex),row=history.revisions[index];if(!row||row.deleted)throw new Error('Deviation record is not available.');
+      const now=new Date().toISOString(),actor=getDeviationActor(),before={...row};
+      row.newStart=newStart;row.newDays=Number(newDays);row.newEnd=newEnd;row.dependency=dependency;row.remarks=remarks;row.modifiedAt=now;row.modifiedBy=actor;
+      row.editHistory=Array.isArray(row.editHistory)?row.editHistory:[];row.editHistory.push({modifiedAt:now,modifiedBy:actor,before});
+      history.auditEvents=Array.isArray(history.auditEvents)?history.auditEvents:[];history.auditEvents.push({action:'Deviation Edited',revisionNo:row.revisionNo,changedAt:now,changedBy:actor,before,after:{...row}});
+      await persistRebuiltDeviationHistory(project,milestone,history,`Deviation revision ${row.revisionNo} updated.`);
+    }else{
+      const oldEnd=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate),revisionNo=history.revisions.reduce((max,row)=>Math.max(max,Number(row.revisionNo)||0),0)+1,rowDeviation=oldEnd?Math.ceil((new Date(newEnd+'T00:00:00')-new Date(oldEnd+'T00:00:00'))/86400000):0,now=new Date().toISOString(),actor=getDeviationActor();
+      history.revisions.push({revisionNo,oldStart:milestone.startDate||'',oldEnd:oldEnd||'',oldDays:milestone.days||'',newStart,newEnd,newDays:Number(newDays),deviationDays:rowDeviation,dependency,remarks,changedAt:now,changedBy:actor});
+      history.auditEvents=Array.isArray(history.auditEvents)?history.auditEvents:[];history.auditEvents.push({action:'Deviation Added',revisionNo,changedAt:now,changedBy:actor});
+      await persistRebuiltDeviationHistory(project,milestone,history,`Deviation revision ${revisionNo} saved.`);
+    }
+    closeMilestoneDeviationModal();refreshDeviationViews(state);
+  }catch(error){console.error('Save deviation failed:',error);showToast(error?.message||'Unable to save deviation.','error');}
+  finally{button.disabled=false;}
+}
+
+const originalOpenMilestoneDeviationModal=openMilestoneDeviationModal;
+openMilestoneDeviationModal=function(pid,mid){
+  activeDeviationEditIndex=null;
+  const hidden=document.getElementById('deviation-edit-index');if(hidden)hidden.value='';
+  const heading=document.getElementById('milestone-deviation-title');if(heading)heading.innerText='Record Milestone Deviation';
+  const save=document.getElementById('save-deviation-btn');if(save)save.innerText='Save Deviation';
+  return originalOpenMilestoneDeviationModal(pid,mid);
+};
+
+const originalCloseMilestoneDeviationModal=closeMilestoneDeviationModal;
+closeMilestoneDeviationModal=function(){
+  activeDeviationEditIndex=null;const hidden=document.getElementById('deviation-edit-index');if(hidden)hidden.value='';
+  const heading=document.getElementById('milestone-deviation-title');if(heading)heading.innerText='Record Milestone Deviation';
+  const save=document.getElementById('save-deviation-btn');if(save)save.innerText='Save Deviation';
+  return originalCloseMilestoneDeviationModal();
+};
+
+function openMilestoneRevisionHistory(pid,mid){
+  const {project,milestone}=findMilestoneRecord(pid,mid);if(!project||!milestone)return;
+  const history=parseMilestoneRevisionData(milestone.remarks),rows=Array.isArray(history.revisions)?history.revisions:[],total=getMilestoneTotalOverallDeviation(milestone),allowed=canEditInitiative(project);
+  document.getElementById('milestone-history-context').innerText=`${project.name} | ${milestone.actions||milestone.title}`;
+  document.getElementById('milestone-history-total').innerText=`${total} day(s)`;
+  document.getElementById('milestone-history-list').innerHTML=rows.length?rows.map((row,index)=>({row,index})).reverse().map(({row,index})=>{
+    const deleted=!!row.deleted;
+    const actions=allowed&&!deleted?`<div class="flex items-center gap-1"><button type="button" onclick="openDeviationHistoryEdit(${Number(pid)},${Number(mid)},${index})" class="rounded p-1.5 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600" title="Edit Deviation"><i data-lucide="pencil" class="h-4 w-4"></i></button><button type="button" onclick="requestDeleteDeviationRecord(${Number(pid)},${Number(mid)},${index})" class="rounded p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600" title="Delete Deviation"><i data-lucide="trash-2" class="h-4 w-4"></i></button></div>`:'';
+    const audit=deleted?`<div class="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-700">Deleted by ${escapeHtml(row.deletedBy||'-')} on ${row.deletedAt?new Date(row.deletedAt).toLocaleString():'-'}</div>`:row.modifiedAt?`<div class="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 p-2 text-xs text-indigo-700">Modified by ${escapeHtml(row.modifiedBy||'-')} on ${new Date(row.modifiedAt).toLocaleString()}</div>`:'';
+    return `<div class="border rounded-xl p-4 ${deleted?'opacity-70 bg-slate-50':''}"><div class="flex items-start justify-between gap-3"><div><b>Revision ${row.revisionNo}</b>${deleted?'<span class="ml-2 rounded bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700">DELETED</span>':''}<div class="text-xs text-slate-500">${row.changedAt?new Date(row.changedAt).toLocaleString():''}${row.changedBy?` | Created by ${escapeHtml(row.changedBy)}`:''}</div></div>${actions}</div><div class="grid grid-cols-2 md:grid-cols-5 gap-3 mt-3 text-xs"><div><span class="text-slate-500">Old Schedule</span><div>${formatDate(row.oldStart)} to ${formatDate(row.oldEnd)}</div></div><div><span class="text-slate-500">New Schedule</span><div>${formatDate(row.newStart)} to ${formatDate(row.newEnd)}</div></div><div><span class="text-slate-500">Days</span><div>${row.oldDays||'-'} → ${row.newDays||'-'}</div></div><div><span class="text-slate-500">Row Deviation</span><div class="font-bold text-rose-700">${deleted?0:(row.deviationDays||0)} day(s)</div></div><div><span class="text-slate-500">Dependency</span><div>${escapeHtml(row.dependency||'-')}</div></div></div><div class="mt-3 text-xs"><span class="text-slate-500">Remarks:</span> ${escapeHtml(row.remarks||row.reason||'-')}</div>${audit}</div>`;
+  }).join(''):'<div class="text-center text-slate-500 py-10">No revisions recorded.</div>';
+  const modal=document.getElementById('milestone-history-modal');modal.classList.remove('hidden');modal.classList.add('flex');lucide.createIcons();
+}
+</script>
+
+<script id="daily-multiselect-deviation-final-dispatch-fix">
+(function installFinalMultiSelectDeviationDispatcher(){
+  const singleRowDeviationSave=window.saveMilestoneDeviation;
+
+  function selectedMilestoneRecords(){
+    const selectedIds=new Set([...dailySelectedMilestones].map(Number));
+    const records=[];
+    for(const project of projects||[]){
+      for(const milestone of project.milestones||[]){
+        if(selectedIds.has(Number(milestone.id)))records.push({project,milestone});
+      }
+    }
+    return records;
+  }
+
+  async function saveSelectedDeviation(record,values){
+    const {project,milestone}=record;
+    if(!project||!milestone)throw new Error('Selected Milestone could not be resolved.');
+    if(!canEditInitiative(project))throw new Error(`Permission denied for Milestone ${milestone.id}.`);
+    const normalizedDays=normalizeMilestoneDays(values.newDays);
+    const newEnd=calculateMilestoneEndDate(normalizedDays,values.newStart);
+    if(!values.newStart||!normalizedDays||!newEnd)throw new Error(`Unable to calculate the revised End Date for Milestone ${milestone.id}.`);
+
+    const history=parseMilestoneRevisionData(milestone.remarks);
+    history.revisions=Array.isArray(history.revisions)?history.revisions:[];
+    const revisionNo=history.revisions.reduce((maximum,item)=>Math.max(maximum,Number(item?.revisionNo)||0),0)+1;
+    const oldEnd=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate)||'';
+    const rowDeviation=oldEnd?Math.ceil((new Date(`${newEnd}T00:00:00`)-new Date(`${oldEnd}T00:00:00`))/86400000):0;
+    const changedAt=new Date().toISOString();
+    const changedBy=currentUser?.name||currentUser?.email||'';
+    history.revisions.push({revisionNo,oldStart:milestone.startDate||'',oldEnd,oldDays:milestone.days||'',newStart:values.newStart,newEnd,newDays:Number(normalizedDays),deviationDays:rowDeviation,dependency:values.dependency,remarks:values.remarks,changedAt,changedBy});
+    history.auditEvents=Array.isArray(history.auditEvents)?history.auditEvents:[];
+    history.auditEvents.push({action:'Deviation Added',revisionNo,changedAt,changedBy});
+
+    const rebuilt=typeof rebuildDeviationSchedule==='function'?rebuildDeviationSchedule(milestone,history):{start:values.newStart,days:normalizedDays,end:newEnd,total:history.revisions.filter(item=>!item?.deleted).reduce((sum,item)=>sum+(Number(item?.deviationDays)||0),0)};
+    const status=(milestone.completionDate||milestone.completion_date||getEffectiveMilestoneStatus(milestone)==='Done')?'Done':'Deviated';
+    const payload={start_date:rebuilt.start||values.newStart,end_date:rebuilt.end||newEnd,deadline:rebuilt.end||newEnd,days:normalizeMilestoneDays(rebuilt.days||normalizedDays),dependency:values.dependency||null,status,deviation_days:Number(rebuilt.total)||0,remarks:JSON.stringify(history)};
+    const {data,error}=await supabaseClient.from('milestones').update(payload).eq('id',Number(milestone.id)).select('*').single();
+    if(error)throw error;
+    Object.assign(milestone,{startDate:payload.start_date||'',endDate:payload.end_date||'',deadline:payload.deadline||'',days:payload.days,dependency:payload.dependency||'',status:payload.status,deviationDays:payload.deviation_days,remarks:payload.remarks});
+    return data||payload;
+  }
+
+  window.saveMilestoneDeviation=async function(event){
+    const isMultiSelect=Boolean(dailyMultiSelectEnabled&&dailySelectedMilestones?.size);
+    if(!isMultiSelect)return singleRowDeviationSave.call(this,event);
+    event.preventDefault();
+    event.stopPropagation();
+
+    const button=document.getElementById('save-deviation-btn');
+    const values={newStart:document.getElementById('deviation-new-start')?.value||'',newDays:document.getElementById('deviation-new-days')?.value||'',dependency:document.getElementById('deviation-dependency')?.value.trim()||'',remarks:document.getElementById('deviation-remarks')?.value.trim()||''};
+    if(!values.newStart||!normalizeMilestoneDays(values.newDays))return showToast('Enter a valid Start Date and positive Days.','error');
+    const records=selectedMilestoneRecords().filter(record=>['WIP','Pending','Deviated','Deviation'].includes(getEffectiveMilestoneStatus(record.milestone)));
+    if(!records.length)return showToast('No selected Milestones are eligible for deviation.','error');
+    if(!confirm(`Apply this deviation input to ${records.length} selected Milestone${records.length===1?'':'s'}? Each Milestone will calculate its own history, End Date, Deadline, and Total Overall Deviation.`))return;
+
+    const viewState=typeof captureDeliveryViewState==='function'?captureDeliveryViewState():{x:window.scrollX,y:window.scrollY};
+    button.disabled=true;
+    if(typeof showBulkProgress==='function')showBulkProgress('Applying Milestone Deviation',records.length);
+    const successful=[],failed=[];
+    for(let index=0;index<records.length;index++){
+      const record=records[index];
+      try{
+        await saveSelectedDeviation(record,values);
+        successful.push(Number(record.milestone.id));
+        if(typeof updateBulkProgress==='function')updateBulkProgress(index+1,records.length,`Updated Milestone ${index+1} of ${records.length}.`);
+      }catch(error){
+        console.error('Multi Select deviation failed for Milestone',record.milestone.id,error);
+        failed.push({id:Number(record.milestone.id),message:error?.message||String(error)});
+      }
+    }
+
+    try{await loadInitiativesFromSupabase();}catch(error){console.error('Unable to reload Milestones after Multi Select deviation.',error);}
+    successful.forEach(id=>dailySelectedMilestones.delete(id));
+    document.getElementById('milestone-deviation-modal')?.classList.add('hidden');
+    document.getElementById('milestone-deviation-modal')?.classList.remove('flex');
+    if(typeof hideBulkProgress==='function')hideBulkProgress();
+
+    if(!failed.length){
+      if(typeof resetDailyMultiSelectAfterSuccess==='function')resetDailyMultiSelectAfterSuccess();
+      else{dailySelectedMilestones.clear();dailyMultiSelectEnabled=false;document.body.classList.remove('daily-multi-select-active');}
+      showToast(`Deviation successfully applied to ${successful.length} Milestone${successful.length===1?'':'s'}.`,'success');
+    }else{
+      dailyMultiSelectEnabled=true;
+      document.body.classList.add('daily-multi-select-active');
+      showToast(`Successful: ${successful.length}. Failed: ${failed.length}. Failed Milestones remain selected. ${failed[0].message}`,'error');
+    }
+    if(typeof renderProjects==='function')renderProjects();
+    if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();
+    if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();
+    if(typeof restoreDeliveryViewState==='function')restoreDeliveryViewState(viewState);else requestAnimationFrame(()=>scrollTo(viewState.x,viewState.y));
+    button.disabled=false;
+  };
+})();
+</script>
+
 </body>
 </html>
