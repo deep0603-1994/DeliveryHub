@@ -19838,5 +19838,111 @@ function openMilestoneRevisionHistory(pid,mid){
 })();
 
 </script>
+
+
+<style id="daily-tracker-project-overview-layout-standardization">
+/* Daily Tracker control surfaces use the same visual hierarchy as Project Overview. */
+body.daily-tracker-view-active #workspace-flat-page{display:flex;flex-direction:column;gap:1rem}
+body.daily-tracker-view-active #daily-overview-filter-bar{order:2}
+body.daily-tracker-view-active #daily-multi-actions{order:3;position:relative!important;top:auto!important;z-index:2!important;box-shadow:0 1px 2px rgba(15,23,42,.05)!important}
+body.daily-tracker-view-active #workspace-flat-page>div:first-child{order:1}
+body.daily-tracker-view-active #workspace-flat-page>div:not(:first-child):not(#daily-overview-filter-bar):not(#daily-multi-actions){order:4}
+#daily-overview-filter-bar{display:grid!important;grid-template-columns:minmax(240px,2fr) repeat(5,minmax(130px,1fr)) auto;align-items:end!important;gap:.625rem!important;width:100%;padding:1rem!important}
+#daily-overview-filter-bar .daily-search-host{position:relative;min-width:0}
+#daily-overview-filter-bar .daily-search-host>i{position:absolute;left:.75rem;top:50%;width:1rem;height:1rem;transform:translateY(-50%);color:#94a3b8;pointer-events:none}
+#daily-overview-filter-bar input,#daily-overview-filter-bar select{width:100%!important;min-width:0!important;height:38px!important;padding:.375rem .75rem!important;font-size:.75rem!important;background:#f8fafc!important;border:1px solid #cbd5e1!important;border-radius:.5rem!important;box-sizing:border-box}
+#daily-overview-filter-bar input{padding-left:2.25rem!important}
+#daily-overview-filter-bar input:focus,#daily-overview-filter-bar select:focus{outline:none!important;box-shadow:0 0 0 2px #6366f1!important;border-color:#6366f1!important}
+#daily-overview-filter-bar .daily-filter-actions{display:flex;align-items:center;gap:.5rem;white-space:nowrap}
+#daily-overview-filter-bar .daily-filter-action{display:inline-flex;align-items:center;justify-content:center;gap:.375rem;height:38px;padding:0 .75rem;font-size:.75rem;font-weight:600;border:1px solid #cbd5e1;border-radius:.5rem;background:#f8fafc;color:#475569}
+#daily-overview-filter-bar .daily-filter-action:hover{background:#f1f5f9;color:#0f172a}
+#daily-overview-filter-bar.is-collapsed .daily-filter-secondary{display:none!important}
+#daily-overview-filter-bar.is-collapsed{grid-template-columns:minmax(240px,1fr) auto!important}
+#daily-multi-actions{display:flex!important;align-items:center!important;justify-content:space-between!important;gap:.75rem!important;padding:.75rem 1rem!important;border-color:#e2e8f0!important}
+#daily-multi-actions .daily-multi-primary,#daily-multi-actions .daily-multi-controls{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
+#daily-multi-actions .daily-multi-instruction{font-size:.625rem;color:#64748b}
+#daily-multi-actions #daily-multi-count{margin-right:0!important;font-size:.75rem;font-weight:700;color:#4338ca}
+@media(max-width:1280px){#daily-overview-filter-bar{grid-template-columns:repeat(4,minmax(150px,1fr))}#daily-overview-filter-bar .daily-search-host{grid-column:span 2}#daily-overview-filter-bar .daily-filter-actions{grid-column:span 2;justify-content:flex-end}}
+@media(max-width:900px){#daily-overview-filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}#daily-overview-filter-bar .daily-search-host,#daily-overview-filter-bar .daily-filter-actions{grid-column:1/-1}#daily-multi-actions{align-items:flex-start!important}#daily-multi-actions .daily-multi-controls{justify-content:flex-end}}
+@media(max-width:640px){#daily-overview-filter-bar{grid-template-columns:minmax(0,1fr)}#daily-overview-filter-bar .daily-search-host,#daily-overview-filter-bar .daily-filter-actions{grid-column:auto}#daily-overview-filter-bar .daily-filter-actions{justify-content:stretch}#daily-overview-filter-bar .daily-filter-action{flex:1}#daily-overview-filter-bar.is-collapsed{grid-template-columns:minmax(0,1fr)!important}#daily-multi-actions{flex-direction:column;align-items:stretch!important}#daily-multi-actions .daily-multi-primary,#daily-multi-actions .daily-multi-controls{width:100%}#daily-multi-actions .daily-multi-controls{justify-content:flex-start}}
+</style>
+<script id="daily-tracker-project-overview-layout-standardization-js">
+(function standardizeDailyTrackerToProjectOverview(){
+  function preserveScroll(callback){const x=window.scrollX,y=window.scrollY;const value=callback();requestAnimationFrame(()=>window.scrollTo(x,y));return value;}
+  window.resetDailyTrackerFilters=function(){
+    return preserveScroll(()=>{
+      ['daily-search','daily-program-filter','daily-initiative-filter','daily-track-filter','daily-owner-filter','daily-status-filter'].forEach(id=>{const control=document.getElementById(id);if(control)control.value='';});
+      window.renderDailyTrackerPage?.();
+    });
+  };
+  window.toggleDailyTrackerFilterBar=function(){
+    const bar=document.getElementById('daily-overview-filter-bar');if(!bar)return;
+    const collapsed=bar.classList.toggle('is-collapsed');
+    const button=document.getElementById('daily-filter-collapse-toggle');
+    if(button){button.setAttribute('aria-expanded',String(!collapsed));button.innerHTML=`<i data-lucide="chevron-${collapsed?'down':'up'}" class="w-4 h-4"></i><span>${collapsed?'Expand':'Collapse'}</span>`;}
+    window.lucide?.createIcons();
+  };
+  function standardize(){
+    if(window.currentWorkspaceView!=='daily')return;
+    const page=document.getElementById('workspace-flat-page');
+    const multi=document.getElementById('daily-multi-actions');
+    const search=document.getElementById('daily-search');
+    if(!page||!multi||!search)return;
+    let filter=search.closest('[data-delivery-filter-page="daily"],.delivery-filter-bar');
+    if(!filter)filter=search.parentElement;
+    if(!filter)return;
+    filter.id='daily-overview-filter-bar';
+    filter.dataset.deliveryFilterPage='daily';
+    filter.className='bg-white rounded-xl border border-slate-200 shadow-sm delivery-filter-bar';
+    if(multi.previousElementSibling!==filter)page.insertBefore(filter,multi);
+
+    if(!search.closest('.daily-search-host')){
+      const host=document.createElement('div');host.className='daily-search-host';
+      search.parentNode.insertBefore(host,search);host.innerHTML='<i data-lucide="search" class="w-4 h-4"></i>';host.appendChild(search);
+    }
+    search.type='search';
+    search.placeholder='Search program, initiative, track, milestone, owner, dependency...';
+
+    const directControls=[...filter.children].filter(node=>!node.classList.contains('daily-search-host')&&!node.classList.contains('daily-filter-actions'));
+    let secondary=filter.querySelector(':scope > .daily-filter-secondary');
+    if(!secondary){secondary=document.createElement('div');secondary.className='daily-filter-secondary';}
+    directControls.filter(node=>node.matches('select')).forEach(node=>secondary.appendChild(node));
+    if(!secondary.parentElement)filter.appendChild(secondary);
+
+    let actions=filter.querySelector(':scope > .daily-filter-actions');
+    if(!actions){actions=document.createElement('div');actions.className='daily-filter-actions';filter.appendChild(actions);}
+    const refresh=[...filter.querySelectorAll('button')].find(button=>(button.getAttribute('onclick')||'').includes('refreshDailyTracker'));
+    if(refresh){refresh.className='daily-filter-action';refresh.innerHTML='<i data-lucide="refresh-cw" class="w-4 h-4"></i><span>Refresh</span>';actions.appendChild(refresh);}
+    let reset=document.getElementById('daily-filter-reset');
+    if(!reset){reset=document.createElement('button');reset.id='daily-filter-reset';reset.type='button';reset.className='daily-filter-action';reset.setAttribute('onclick','resetDailyTrackerFilters()');reset.innerHTML='<i data-lucide="rotate-ccw" class="w-4 h-4"></i><span>Reset Filters</span>';actions.appendChild(reset);}
+    let collapse=document.getElementById('daily-filter-collapse-toggle');
+    if(!collapse){collapse=document.createElement('button');collapse.id='daily-filter-collapse-toggle';collapse.type='button';collapse.className='daily-filter-action';collapse.setAttribute('onclick','toggleDailyTrackerFilterBar()');collapse.setAttribute('aria-expanded','true');collapse.innerHTML='<i data-lucide="chevron-up" class="w-4 h-4"></i><span>Collapse</span>';actions.appendChild(collapse);}
+
+    let primary=multi.querySelector(':scope > .daily-multi-primary');
+    let controls=multi.querySelector(':scope > .daily-multi-controls');
+    if(!primary){
+      primary=document.createElement('div');primary.className='daily-multi-primary';
+      controls=document.createElement('div');controls.className='daily-multi-controls';
+      const children=[...multi.children];
+      const toggle=children.find(node=>(node.getAttribute?.('onclick')||'').includes('setDailyMultiSelect'));
+      if(toggle)primary.appendChild(toggle);
+      let instruction=multi.querySelector('.daily-multi-instruction');
+      if(!instruction){instruction=document.createElement('span');instruction.className='daily-multi-instruction';instruction.textContent='Enable to select milestones and apply bulk actions.';}
+      primary.appendChild(instruction);
+      children.filter(node=>node!==toggle&&node!==instruction).forEach(node=>controls.appendChild(node));
+      multi.replaceChildren(primary,controls);
+    }else{
+      [...multi.children].filter(node=>node!==primary&&node!==controls).forEach(node=>controls.appendChild(node));
+    }
+    window.lucide?.createIcons();
+  }
+  const original=window.renderDailyTrackerPage;
+  if(typeof original==='function')window.renderDailyTrackerPage=function(){const x=window.scrollX,y=window.scrollY;const result=original.apply(this,arguments);standardize();requestAnimationFrame(()=>{standardize();window.scrollTo(x,y);});return result;};
+  const previousShow=window.showWorkspaceView;
+  if(typeof previousShow==='function')window.showWorkspaceView=function(){const result=previousShow.apply(this,arguments);if(window.currentWorkspaceView==='daily')requestAnimationFrame(standardize);return result;};
+  document.addEventListener('DOMContentLoaded',()=>requestAnimationFrame(standardize),{once:true});
+  requestAnimationFrame(standardize);
+})();
+</script>
 </body>
 </html>
