@@ -134,6 +134,9 @@
       border-radius: 2px;
       background: transparent;
     }
+    .drag-handle{cursor:grab;border-radius:6px}
+    .drag-handle:active{cursor:grabbing}
+    tr.drag-over{outline:2px dashed rgba(99,102,241,0.4);}
     .milestone-resizable-grid th:hover .milestone-column-resizer::after,
     .milestone-column-resizer.is-resizing::after {
       background: #6366f1;
@@ -7577,6 +7580,8 @@ group
                                 ${['WIP','Pending','Deviated'].includes(mStat) ? `<button onclick="openMilestoneDeviationModal(${p.id}, ${m.id})" class="p-1 text-slate-400 hover:text-rose-600" title="Record Deviation"><i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i></button>` : ''}
                                 <button onclick="openMilestoneRevisionHistory(${p.id}, ${m.id})" class="p-1 text-slate-400 hover:text-amber-600" title="Revision History"><i data-lucide="history" class="w-3.5 h-3.5"></i></button>
                                 <button onclick="startInlineMilestoneEdit(${p.id}, ${m.id})" class="p-1 text-slate-400 hover:text-indigo-600" title="Edit Milestone"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                                <button onclick="moveMilestoneUp(${p.id}, ${m.id})" class="p-1 text-slate-400 hover:text-slate-700" title="Move Up" aria-label="Move milestone up"><i data-lucide="arrow-up" class="w-3.5 h-3.5"></i></button>
+                                <button onclick="moveMilestoneDown(${p.id}, ${m.id})" class="p-1 text-slate-400 hover:text-slate-700" title="Move Down" aria-label="Move milestone down"><i data-lucide="arrow-down" class="w-3.5 h-3.5"></i></button>
                                 <button onclick="deleteMilestone(${p.id}, ${m.id})" class="p-1 text-slate-400 hover:text-rose-600" title="Archive Milestone"><i data-lucide="archive" class="w-3.5 h-3.5"></i></button>
                               ` : '-'}
                             </div>
@@ -7661,12 +7666,80 @@ group
       return [...((project && project.milestones) || [])].sort(compareMilestonesChronologically);
     }
 
-    function applyDerivedMilestoneSequence(project) {
-      getChronologicalInitiativeMilestones(project).forEach((milestone, index) => {
-        if (milestone.persistedSequenceNo === undefined) milestone.persistedSequenceNo = milestone.sequenceNo;
-        milestone.sequenceNo = index + 1;
-        milestone.chronologicalSequenceNo = index + 1;
-      });
+    function applyDerivedMilestoneSequence(project, options = { mode: 'chronological' }) {
+      // Ensure the authoritative in-memory `project.milestones` array reflects
+      // the chosen ordering. Two modes supported:
+      // - 'chronological' (default): reorder by Start Date with stable tie-breakers
+      // - 'manual': accept the current array order (from drag/move) and derive sequence numbers
+      if (!project) return;
+
+      const mode = (options && options.mode) || 'chronological';
+
+      if (mode === 'chronological') {
+        // Build deterministic chronological order using the comparator, then
+        // replace the authoritative array with that order.
+        const sorted = getChronologicalInitiativeMilestones(project);
+        // Preserve persistedSequenceNo for comparisons if not already present.
+        sorted.forEach((milestone, index) => {
+          if (milestone.persistedSequenceNo === undefined) milestone.persistedSequenceNo = milestone.sequenceNo;
+          milestone.sequenceNo = index + 1;
+          milestone.chronologicalSequenceNo = index + 1;
+        });
+        // Replace the project's milestones array in-place with the chronological order.
+        project.milestones = sorted.slice();
+        project._lastOrderMode = 'chronological';
+      } else {
+        // Manual ordering: respect the current array order (e.g., after a drag),
+        // but compute transient display sequence numbers so rendering and
+        // persistence can use them.
+        project.milestones = project.milestones || [];
+        project.milestones.forEach((milestone, index) => {
+          if (milestone.persistedSequenceNo === undefined) milestone.persistedSequenceNo = milestone.sequenceNo;
+          milestone.sequenceNo = index + 1;
+          milestone.chronologicalSequenceNo = normalizeMilestoneSortDate(milestone.startDate) || Number.MAX_SAFE_INTEGER;
+        });
+        project._lastOrderMode = 'manual';
+      }
+    }
+
+    // Persist only milestones whose sequence_no changed after a chronological
+    // reorder or manual drag. This updates the authoritative `sequence_no`
+    // stored in Supabase and then updates the in-memory persistedSequenceNo
+    // so future comparisons remain stable.
+    async function persistInitiativeSequenceChanges(initiativeId) {
+      if (!initiativeId) return true;
+      window._initiativeSequenceSaveLocks ||= new Set();
+      if (window._initiativeSequenceSaveLocks.has(initiativeId)) return true;
+      const project = projects.find(p => Number(p.id) === Number(initiativeId));
+      if (!project) return true;
+
+      const toUpdate = (project.milestones || []).filter(m => Number(m.recordStatus) !== 0).filter(m => Number(m.persistedSequenceNo || 0) !== Number(m.sequenceNo || 0));
+      if (!toUpdate.length) return true;
+
+      window._initiativeSequenceSaveLocks.add(initiativeId);
+      try {
+        // Persist each changed sequence. Avoid large transactions; update one-by-one
+        // to preserve existing DB behaviour and surface specific errors.
+        for (const m of toUpdate) {
+          const newSeq = Number(m.sequenceNo) || null;
+          const { error } = await supabaseClient.from('milestones').update({ sequence_no: newSeq }).eq('id', Number(m.id));
+          if (error) {
+            console.error('Unable to persist milestone sequence:', error);
+            showToast(`Unable to persist milestone order: ${error.message}`, 'error');
+            return false;
+          }
+          // Update in-memory authoritative persisted value and KPI rows
+          m.persistedSequenceNo = Number(newSeq);
+          const kpiIndex = kpiMilestoneRows.findIndex(r => Number(r.id) === Number(m.id));
+          if (kpiIndex >= 0) {
+            kpiMilestoneRows[kpiIndex] = { ...kpiMilestoneRows[kpiIndex], sequence_no: newSeq };
+          }
+        }
+
+        return true;
+      } finally {
+        window._initiativeSequenceSaveLocks.delete(initiativeId);
+      }
     }
 
     function renderAgileUnassignedMilestones(project, matchingMilestones, canEdit){
@@ -7737,6 +7810,14 @@ function renderTrackMilestones(project, milestones, trackId = null) {
   }
 
   const canEdit = canEditInitiative(project);
+  const isSavingSequence = Boolean(window._initiativeSequenceSaveLocks && window._initiativeSequenceSaveLocks.has(Number(project.id)));
+
+  // When the Initiative was last reordered manually we must render using the
+  // authoritative `project.milestones` array order (filtered to this Track).
+  // Otherwise use the supplied `milestones` argument (chronological sort).
+  const sourceMilestones = (project._lastOrderMode === 'manual')
+    ? (project.milestones || []).filter(m => (trackId === null ? !m.trackId : Number(m.trackId) === Number(trackId)))
+    : (milestones || []);
 
     return `  
     <div class="overflow-x-auto custom-scrollbar">  
@@ -7760,7 +7841,7 @@ function renderTrackMilestones(project, milestones, trackId = null) {
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100 text-slate-600 bg-white">
-          ${[...milestones].sort(compareMilestonesChronologically).map((m, mIdx) => {
+          ${(project._lastOrderMode === 'manual' ? [...sourceMilestones] : [...sourceMilestones].sort(compareMilestonesChronologically)).map((m, mIdx) => {
             if (inlineMilestoneEditId === Number(m.id)) {
               return renderInlineMilestoneRow(project, m, canEdit);
             }
@@ -7772,9 +7853,14 @@ function renderTrackMilestones(project, milestones, trackId = null) {
             const milestoneTheme = getHierarchyStatusTheme(mStat, 'milestone');
 
             return `
-              <tr data-milestone-row="true" data-inline-milestone-project-id="${project.id}" data-inline-milestone-id="${m.id}" ondblclick="event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();return false;" class="${milestoneTheme.row} transition-colors group">
+              <tr data-milestone-row="true" data-inline-milestone-project-id="${project.id}" data-inline-milestone-id="${m.id}" ondblclick="event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();return false;" ondragover="onMilestoneDragOver(event)" ondragleave="onMilestoneDragLeave(event)" ondrop="onMilestoneDrop(event, ${project.id}, ${m.id})" class="${milestoneTheme.row} transition-colors group">
                 <td class="px-2 text-center">
-                  ${canEdit ? `<button type="button" onclick="addMilestoneInline(${project.id}, ${trackId}, null, ${m.id})" class="p-1 text-sky-600 hover:text-sky-800 hover:bg-sky-50 rounded" title="Insert milestone below"><i data-lucide="plus" class="w-4 h-4"></i></button>` : ''}
+                  ${canEdit ? `<div class="flex items-center justify-center gap-1">` +
+                    (isSavingSequence
+                      ? `<button disabled class="p-1 text-slate-300 rounded opacity-60 cursor-not-allowed" title="Saving order..." aria-label="Saving order" aria-busy="true"><i data-lucide="loader" class="w-4 h-4 animate-spin"></i></button>`
+                      : `<button draggable="true" ondragstart="onMilestoneDragStart(event, ${project.id}, ${m.id})" class="p-1 text-slate-500 hover:text-slate-700 rounded focus:outline-none drag-handle" title="Drag to reorder" aria-label="Drag milestone"><i data-lucide="move" class="w-4 h-4"></i></button>`
+                    ) +
+                    `<button type="button" ${isSavingSequence ? 'disabled' : ''} onclick="addMilestoneInline(${project.id}, ${trackId}, null, ${m.id})" class="p-1 text-sky-600 hover:text-sky-800 hover:bg-sky-50 rounded" title="Insert milestone below"><i data-lucide="plus" class="w-4 h-4"></i></button></div>` : ''}
                 </td>
                 <td
   class="py-2.5 px-3 text-slate-700 leading-relaxed ${getMilestoneTotalOverallDeviation(m) >= 1 ? 'milestone-deviation-action' : ''}"
@@ -7797,11 +7883,13 @@ function renderTrackMilestones(project, milestones, trackId = null) {
                 <td class="py-2.5 px-3">
                   <div class="flex items-center justify-center gap-2">
                     ${canEdit ? `
-                      <button onclick="duplicateMilestone(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-indigo-600" title="Duplicate Milestone"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
-                      ${['WIP','Pending','Deviated'].includes(mStat) ? `<button onclick="openMilestoneDeviationModal(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-rose-600" title="Record Deviation"><i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i></button>` : ''}
-                      <button onclick="openMilestoneRevisionHistory(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-amber-600" title="Revision History"><i data-lucide="history" class="w-3.5 h-3.5"></i></button>
-                      <button onclick="startInlineMilestoneEdit(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-indigo-600" title="Edit Milestone"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
-                      <button onclick="deleteMilestone(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-rose-600" title="Archive Milestone"><i data-lucide="archive" class="w-3.5 h-3.5"></i></button>
+                      <button ${isSavingSequence ? 'disabled' : ''} onclick="duplicateMilestone(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-indigo-600" title="Duplicate Milestone"><i data-lucide="copy" class="w-3.5 h-3.5"></i></button>
+                      ${['WIP','Pending','Deviated'].includes(mStat) ? `<button ${isSavingSequence ? 'disabled' : ''} onclick="openMilestoneDeviationModal(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-rose-600" title="Record Deviation"><i data-lucide="calendar-clock" class="w-3.5 h-3.5"></i></button>` : ''}
+                      <button ${isSavingSequence ? 'disabled' : ''} onclick="openMilestoneRevisionHistory(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-amber-600" title="Revision History"><i data-lucide="history" class="w-3.5 h-3.5"></i></button>
+                      <button ${isSavingSequence ? 'disabled' : ''} onclick="startInlineMilestoneEdit(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-indigo-600" title="Edit Milestone"><i data-lucide="edit-2" class="w-3.5 h-3.5"></i></button>
+                      <button ${isSavingSequence ? 'disabled' : ''} onclick="moveMilestoneUp(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-slate-700" title="Move Up" aria-label="Move milestone up"><i data-lucide="arrow-up" class="w-3.5 h-3.5"></i></button>
+                      <button ${isSavingSequence ? 'disabled' : ''} onclick="moveMilestoneDown(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-slate-700" title="Move Down" aria-label="Move milestone down"><i data-lucide="arrow-down" class="w-3.5 h-3.5"></i></button>
+                      <button ${isSavingSequence ? 'disabled' : ''} onclick="deleteMilestone(${project.id}, ${m.id})" class="p-1 text-slate-400 hover:text-rose-600" title="Archive Milestone"><i data-lucide="archive" class="w-3.5 h-3.5"></i></button>
                     ` : '-'}
                   </div>
                 </td>
@@ -7984,6 +8072,10 @@ async function saveInlineMilestone(projectId, milestoneId, options = {}) {
     Object.assign(milestone,{id:Number(data?.id??milestone.id),sequenceNo:Number(data?.sequence_no??sequenceNo)||sequenceNo,recordStatus:data?.record_status||milestone.recordStatus||'active',actions:data?.actions??actions,owner:data?.owner??owner,dependency:data?.dependency??dependency,days:data?.days??days,startDate:data?.start_date??startDate,endDate:data?.end_date??endDate,deadline:data?.deadline??deadline,completionDate:data?.completion_date??completionDate,status:data?.status??status,deviationDays:(data?.deviation_days??calculateDeviation(deadline,startDate,completionDate))||null,createdBy:data?.created_by_name??data?.created_by??milestone.createdBy??'',createdAt:data?.created_at??milestone.createdAt??'',modifiedBy:data?.modified_by_name??data?.updated_by_name??data?.modified_by??data?.updated_by??milestone.modifiedBy??'',updatedAt:data?.modified_at??data?.updated_at??milestone.updatedAt??'',archivedBy:data?.archived_by_name??data?.archived_by??milestone.archivedBy??'',archivedAt:data?.archived_at??milestone.archivedAt??''});
     if(isDraft)kpiMilestoneRows.push({...data});else{const ri=kpiMilestoneRows.findIndex(r=>Number(r.id)===Number(milestone.id));if(ri>=0)kpiMilestoneRows[ri]={...kpiMilestoneRows[ri],...data};}
     inlineMilestoneEditId=null;
+    // Rebuild authoritative order now that this milestone's dates/sequence may have changed
+    applyDerivedMilestoneSequence(project);
+    await persistInitiativeSequenceChanges(project.id);
+    // Cascade dates using the final authoritative order
     await cascadeTrackMilestoneSchedule(project,milestone.id);
     if(addNextRow){const savedId=milestone.id,savedTrackId=milestone.trackId||null;addMilestoneInline(projectId,savedTrackId,null,savedId);requestAnimationFrame(()=>{window.scrollTo(scrollX,scrollY);requestAnimationFrame(()=>{const input=document.getElementById(`inline-actions-${inlineMilestoneEditId}`);input?.focus({preventScroll:true});input?.scrollIntoView({block:'nearest',inline:'nearest'});});});}
     else{renderProjects();requestAnimationFrame(()=>window.scrollTo(scrollX,scrollY));}
@@ -8074,6 +8166,100 @@ function addMilestoneInline(projectId, trackId = null, legacyTrackId = null, ins
 
   inlineMilestoneEditId = draftId;
   renderProjects();
+}
+
+// Drag & Drop handlers for Milestone reordering within an Initiative
+function onMilestoneDragStart(e, projectId, milestoneId) {
+  try { e.dataTransfer.setData('text/plain', `${projectId}:${milestoneId}`); e.dataTransfer.effectAllowed = 'move'; } catch (err) {}
+  window._draggingMilestone = { projectId: Number(projectId), milestoneId: Number(milestoneId) };
+}
+
+function onMilestoneDragOver(e) {
+  if (e.preventDefault) e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  e.currentTarget.classList.add('drag-over');
+}
+
+function onMilestoneDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+async function onMilestoneDrop(e, projectId, targetMilestoneId) {
+  if (e.preventDefault) e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  let payload = '';
+  try { payload = e.dataTransfer.getData('text/plain') || ''; } catch (err) { payload = ''; }
+  const parts = payload.split(':');
+  if (parts.length !== 2) return;
+  const srcProjectId = Number(parts[0]);
+  const srcMilestoneId = Number(parts[1]);
+  const destProjectId = Number(projectId);
+  if (window._initiativeSequenceSaveLocks && window._initiativeSequenceSaveLocks.has(destProjectId)) {
+    showToast('Saving milestone order — please wait', 'info');
+    return;
+  }
+  const destMilestoneId = Number(targetMilestoneId);
+  if (srcProjectId !== destProjectId) { showToast('Milestones can only be reordered within the same Initiative.', 'error'); return; }
+
+  const project = projects.find(p => Number(p.id) === Number(destProjectId));
+  if (!project) return;
+
+  const milestones = project.milestones || [];
+  const srcIndex = milestones.findIndex(m => Number(m.id) === Number(srcMilestoneId));
+  const destIndex = milestones.findIndex(m => Number(m.id) === Number(destMilestoneId));
+  if (srcIndex < 0 || destIndex < 0) return;
+
+  // Move source immediately before the destination row
+  const [item] = milestones.splice(srcIndex, 1);
+  const insertIndex = srcIndex < destIndex ? destIndex : destIndex;
+  milestones.splice(insertIndex, 0, item);
+
+  // Recompute authoritative display sequence (respecting manual reorder)
+  applyDerivedMilestoneSequence(project, { mode: 'manual' });
+  const ok = await persistInitiativeSequenceChanges(project.id);
+  if (!ok) {
+    showToast('Unable to save new milestone order. Reverting.', 'error');
+    await loadInitiativesFromSupabase();
+    return;
+  }
+
+  renderProjects();
+  showToast('Milestone order updated.', 'success');
+}
+
+// Keyboard accessible move actions
+async function moveMilestoneUp(projectId, milestoneId) {
+  const project = projects.find(p => Number(p.id) === Number(projectId));
+  if (window._initiativeSequenceSaveLocks && window._initiativeSequenceSaveLocks.has(Number(projectId))) {
+    showToast('Saving milestone order — please wait', 'info');
+    return;
+  }
+  if (!project) return;
+  const milestones = project.milestones || [];
+  const idx = milestones.findIndex(m => Number(m.id) === Number(milestoneId));
+  if (idx <= 0) return;
+  const [item] = milestones.splice(idx, 1);
+  milestones.splice(idx - 1, 0, item);
+  applyDerivedMilestoneSequence(project, { mode: 'manual' });
+  const ok = await persistInitiativeSequenceChanges(project.id);
+  if (ok) { renderProjects(); showToast('Milestone moved up.', 'success'); }
+}
+
+async function moveMilestoneDown(projectId, milestoneId) {
+  const project = projects.find(p => Number(p.id) === Number(projectId));
+  if (window._initiativeSequenceSaveLocks && window._initiativeSequenceSaveLocks.has(Number(projectId))) {
+    showToast('Saving milestone order — please wait', 'info');
+    return;
+  }
+  if (!project) return;
+  const milestones = project.milestones || [];
+  const idx = milestones.findIndex(m => Number(m.id) === Number(milestoneId));
+  if (idx < 0 || idx >= milestones.length - 1) return;
+  const [item] = milestones.splice(idx, 1);
+  milestones.splice(idx + 1, 0, item);
+  applyDerivedMilestoneSequence(project, { mode: 'manual' });
+  const ok = await persistInitiativeSequenceChanges(project.id);
+  if (ok) { renderProjects(); showToast('Milestone moved down.', 'success'); }
 }
 
 
@@ -11515,8 +11701,9 @@ if (milestoneId) {
   }
 
   closeMilestoneModal();
-
   await loadInitiativesFromSupabase();
+  // Ensure any chronological reorder triggered by this save is persisted
+  await persistInitiativeSequenceChanges(initiativeId);
 
   showToast(
     milestoneId
