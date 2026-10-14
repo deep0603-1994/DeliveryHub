@@ -519,6 +519,7 @@ Login
   </button>
   <div id="sidebar-analytics-menu" class="hidden mt-1 ml-4 pl-3 border-l border-slate-700 space-y-1">
     <button id="workspace-nav-analytics" type="button" onclick="showAnalyticsView()" title="Dashboard" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="layout-dashboard" class="w-4 h-4"></i><span class="sidebar-text">Dashboard</span></button>
+    <button id="workspace-nav-system_reports" type="button" onclick="showWorkspaceView('system_reports')" title="System Reports" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="clipboard-list" class="w-4 h-4"></i><span class="sidebar-text">System Reports</span></button>
     <button id="workspace-nav-report_builder" type="button" onclick="showWorkspaceView('report_builder')" title="Report Builder" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="table-properties" class="w-4 h-4"></i><span class="sidebar-text">Report Builder</span></button>
     <button id="workspace-nav-custom_reports" type="button" onclick="showWorkspaceView('custom_reports')" title="Custom Reports" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="files" class="w-4 h-4"></i><span class="sidebar-text">Custom Reports</span></button>
   </div>
@@ -797,6 +798,7 @@ Login
   </div>
 </section>
 <section id="report-builder-page" class="hidden space-y-4" aria-label="Report Builder workspace"></section>
+<section id="system-reports-page" class="hidden space-y-4" aria-label="System Reports"></section>
 <section id="custom-reports-page" class="hidden space-y-4" aria-label="Custom Reports workspace"></section>
       <div id="empty-state" class="hidden bg-white p-12 rounded-xl border border-dashed border-slate-300 text-center text-slate-400 space-y-3">
         <i data-lucide="folder-open" class="w-10 h-10 mx-auto text-slate-300"></i>
@@ -2267,12 +2269,20 @@ async function loadInitiativesFromSupabase() {
       (project.tracks || []).map(track => [`${Number(project.id)}:${Number(track.id)}`, Boolean(track.collapsed)])
     ))
   };
-  const programResult =
-    await supabaseClient
+  const [programResult, initiativeResult, milestoneResult, trackResult] = await Promise.all([
+    supabaseClient
       .from('programs')
-      .select('*')
+      .select('id,sequence_no,created_at,created_by_name,created_by,modified_by_name,modified_by,updated_at,archived_by_name,archived_by,archived_at,program_name,program_owner,assigned_to,vertical,start_date,target_end_date,revised_start_date,revised_end_date,actual_end_date,impact_category,measurable_impact,business_benefit,program_status,program_age,countdown_days,is_active')
       .eq('is_active', true)
-      .order('id', { ascending: true });
+      .order('id', { ascending: true }),
+    fetchAllSupabaseRows('initiatives'),
+    fetchAllSupabaseRows('milestones'),
+    supabaseClient
+      .from('milestone_tracks')
+      .select('id,initiative_id,sequence_no,display_order,record_status,created_by_name,created_by,created_at,modified_by_name,modified_by,updated_at,archived_by_name,archived_by,archived_at,track_name')
+      .order('display_order', { ascending: true })
+      .order('id', { ascending: true })
+  ]);
 
   if (programResult.error) {
     console.error(
@@ -2288,9 +2298,6 @@ async function loadInitiativesFromSupabase() {
 
     return false;
   }
-
-  const initiativeResult =
-    await fetchAllSupabaseRows('initiatives');
 
   if (initiativeResult.error) {
     console.error(
@@ -2312,9 +2319,6 @@ async function loadInitiativesFromSupabase() {
     return false;
   }
 
-  const milestoneResult =
-    await fetchAllSupabaseRows('milestones');
-
   if (milestoneResult.error) {
     console.error(
       'Milestone loading failed:',
@@ -2329,19 +2333,6 @@ async function loadInitiativesFromSupabase() {
 
     return false;
   }
-
-  const trackResult =
-    await supabaseClient
-      .from('milestone_tracks')
-      .select('*')
-      .order(
-        'display_order',
-        { ascending: true }
-      )
-      .order(
-        'id',
-        { ascending: true }
-      );
 
   if (trackResult.error) {
     console.error(
@@ -2369,6 +2360,19 @@ async function loadInitiativesFromSupabase() {
 
   const trackRows =
     trackResult.data || [];
+
+  const tracksByInitiative = new Map();
+  for (const track of trackRows) {
+    const initiativeId = Number(track.initiative_id);
+    if (!tracksByInitiative.has(initiativeId)) tracksByInitiative.set(initiativeId, []);
+    tracksByInitiative.get(initiativeId).push(track);
+  }
+  const milestonesByInitiative = new Map();
+  for (const milestone of milestoneRows) {
+    const initiativeId = Number(milestone.initiative_id);
+    if (!milestonesByInitiative.has(initiativeId)) milestonesByInitiative.set(initiativeId, []);
+    milestonesByInitiative.get(initiativeId).push(milestone);
+  }
 
   // Keep complete, unfiltered table data for KPI counts.
   kpiInitiativeRows = initiativeRows;
@@ -2542,12 +2546,7 @@ programId:
           : true,
 
       tracks:
-        trackRows
-          .filter(
-            track =>
-              Number(track.initiative_id) ===
-              Number(row.id)
-          )
+        (tracksByInitiative.get(Number(row.id)) || [])
           .map(track => ({
   id:
     Number(track.id),
@@ -2595,12 +2594,7 @@ programId:
 })),
 
       milestones:
-        milestoneRows
-          .filter(
-            milestone =>
-              Number(milestone.initiative_id) ===
-              Number(row.id)
-          )
+        (milestonesByInitiative.get(Number(row.id)) || [])
           .map(milestone => ({
   id:
     Number(milestone.id),
@@ -9499,7 +9493,14 @@ async function importTracksOnly(rows) {
   }
 }
 
-function flatProgram(i){return programs.find(p=>Number(p.id)===Number(i?.programId))||null;}
+let flatProgramLookupSource=null,flatProgramLookup=new Map();
+function flatProgram(i){
+  if(flatProgramLookupSource!==programs){
+    flatProgramLookupSource=programs;
+    flatProgramLookup=new Map(programs.map(program=>[Number(program.id),program]));
+  }
+  return flatProgramLookup.get(Number(i?.programId))||null;
+}
 function flatRecords(){
  const rs=document.getElementById('flat-record-status')?.value||'active',q=(document.getElementById('flat-search')?.value||'').trim().toLowerCase(),pf=document.getElementById('flat-program-filter')?.value||'',inf=document.getElementById('flat-initiative-filter')?.value||'',tf=document.getElementById('flat-track-filter')?.value||'',type=document.getElementById('flat-type-filter')?.value||'',vert=document.getElementById('flat-vertical-filter')?.value||'',impact=document.getElementById('flat-impact-filter')?.value||'',sf=document.getElementById('flat-status-filter')?.value||'';
  let rows=[];if(currentWorkspaceView==='programs')rows=programs.map(program=>({program}));if(currentWorkspaceView==='initiatives')rows=projects.map(initiative=>({program:flatProgram(initiative),initiative}));if(currentWorkspaceView==='tracks')rows=projects.flatMap(initiative=>(initiative.tracks||[]).map(track=>({program:flatProgram(initiative),initiative,track})));if(currentWorkspaceView==='milestones')rows=projects.flatMap(initiative=>(initiative.milestones||[]).map(milestone=>({program:flatProgram(initiative),initiative,track:(initiative.tracks||[]).find(t=>Number(t.id)===Number(milestone.trackId))||null,milestone})));
@@ -9511,7 +9512,8 @@ function flatFilterOptions(){const ps=document.getElementById('flat-program-filt
 function changeFlatListPage(p){flatListCurrentPage=Math.max(1,Number(p)||1);renderFlatWorkspacePage();window.scrollTo({top:0,behavior:'smooth'});}
 function setFlatKpiFilter(v){activeFlatKpiFilter=activeFlatKpiFilter===v?null:v;flatListCurrentPage=1;renderFlatWorkspacePage();}
 function flatStatus(r){if(r.milestone)return getEffectiveMilestoneStatus(r.milestone);if(r.track)return getTrackSummary(r.initiative,r.track).status;if(r.initiative)return evaluateProjectStatus(r.initiative.name,r.initiative.revisedStartDate||r.initiative.startDate,r.initiative.revisedEndDate||r.initiative.targetEndDate,r.initiative.actualEndDate);return evaluateProjectStatus(r.program?.name,r.program?.revisedStartDate||r.program?.startDate,r.program?.revisedEndDate||r.program?.targetEndDate,r.program?.actualEndDate);}
-function flatMetrics(){const rows=flatRecords(),st=rows.map(flatStatus);return{total:rows.length,related:currentWorkspaceView==='programs'?projects.filter(p=>rows.some(r=>Number(r.program?.id)===Number(p.programId))).length:currentWorkspaceView==='initiatives'?rows.reduce((a,r)=>a+(r.initiative?.milestones||[]).length,0):currentWorkspaceView==='tracks'?rows.reduce((a,r)=>a+getTrackSummary(r.initiative,r.track).milestoneCount,0):new Set(rows.map(r=>r.initiative?.id).filter(Boolean)).size,wip:st.filter(x=>!['Done','On-Hold','In-Queue'].includes(x)).length,onhold:st.filter(x=>x==='On-Hold').length,delay:st.filter(x=>['Delay','Pending','Deviation'].includes(x)).length,done:st.filter(x=>x==='Done').length};}
+let flatRowsForRender=null;
+function flatMetrics(){const rows=flatRecords();flatRowsForRender=rows;const st=rows.map(flatStatus),programIds=new Set(rows.map(row=>Number(row.program?.id)).filter(Number.isFinite));return{total:rows.length,related:currentWorkspaceView==='programs'?projects.filter(project=>programIds.has(Number(project.programId))).length:currentWorkspaceView==='initiatives'?rows.reduce((a,r)=>a+(r.initiative?.milestones||[]).length,0):currentWorkspaceView==='tracks'?rows.reduce((a,r)=>a+getTrackSummary(r.initiative,r.track).milestoneCount,0):new Set(rows.map(r=>r.initiative?.id).filter(Boolean)).size,wip:st.filter(x=>!['Done','On-Hold','In-Queue'].includes(x)).length,onhold:st.filter(x=>x==='On-Hold').length,delay:st.filter(x=>['Delay','Pending','Deviation'].includes(x)).length,done:st.filter(x=>x==='Done').length};}
 // DAILY PENDING MILESTONE TRACKER
 let dailyTrackerEditingId=null,dailyTrackerLastDate='';
 function localToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
@@ -9529,6 +9531,7 @@ function navigateToOverviewMilestone(iid,mid,tid=null){activeKpiFilter=null;['fi
 setInterval(()=>{const d=localToday();if(currentUser&&dailyTrackerLastDate!==d){dailyTrackerLastDate=d;if(currentWorkspaceView==='daily')renderDailyTrackerPage();updateDailyTrackerBadge();}},60000);
 
 function renderFlatWorkspacePage(){
+ flatRowsForRender=null;
  const c=document.getElementById('workspace-flat-page');if(!c||currentWorkspaceView==='overview')return;const conf=flatConfig(),old={q:document.getElementById('flat-search')?.value||'',s:document.getElementById('flat-record-status')?.value||'active',p:document.getElementById('flat-program-filter')?.value||'',i:document.getElementById('flat-initiative-filter')?.value||'',t:document.getElementById('flat-track-filter')?.value||'',type:document.getElementById('flat-type-filter')?.value||'',v:document.getElementById('flat-vertical-filter')?.value||'',impact:document.getElementById('flat-impact-filter')?.value||'',status:document.getElementById('flat-status-filter')?.value||''},types=[...new Set(projects.map(x=>x.type).filter(Boolean))],verts=[...new Set([...programs.map(x=>x.vertical),...projects.map(x=>x.vertical)].filter(Boolean))],impacts=[...new Set([...programs.map(x=>x.impactCategory),...projects.map(x=>x.impactCategory)].filter(Boolean))],sp=['Pending','In-Queue','WIP','In Progress','On-Hold','Delay','Deviation','Done'],showP=['initiatives','tracks','milestones'].includes(currentWorkspaceView),showI=['tracks','milestones'].includes(currentWorkspaceView),showT=currentWorkspaceView==='milestones',tl=currentWorkspaceView==='programs'?'TOTAL PROGRAMS':currentWorkspaceView==='initiatives'?'TOTAL INITIATIVES':currentWorkspaceView==='tracks'?'TOTAL TRACKS':'TOTAL MILESTONES',rl=currentWorkspaceView==='programs'?'TOTAL INITIATIVES':currentWorkspaceView==='milestones'?'TOTAL INITIATIVES':'TOTAL MILESTONES';
  c.innerHTML=`<div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">${[['total',tl,'text-slate-900'],['related',rl,'text-slate-900'],['wip','IN PROGRESS','text-blue-600'],['onhold','ON HOLD','text-slate-700'],['delay','DELAYS','text-amber-600'],['completed','COMPLETED','text-emerald-600']].map(([k,l,col])=>`<div class="kpi-slicer bg-white p-4 rounded-xl border border-slate-200 shadow-sm ${activeFlatKpiFilter===k?'kpi-slicer-active':''}" ${['wip','onhold','delay','completed'].includes(k)?`onclick="setFlatKpiFilter('${k}')"`:''}><span class="text-[11px] font-semibold uppercase ${col}">${l}</span><div id="flat-kpi-${k}" class="mt-1 text-2xl font-bold ${col}">0</div></div>`).join('')}</div><div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm"><div class="flex flex-wrap gap-2 items-center"><input id="flat-search" value="${escapeHtml(old.q)}" oninput="flatListCurrentPage=1;renderFlatWorkspacePage()" placeholder="Search ${conf.title.toLowerCase()}, owner, vertical, relationship..." class="flex-1 min-w-[280px] px-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg"><select id="flat-type-filter" onchange="flatListCurrentPage=1;renderFlatWorkspacePage()" class="px-3 py-1.5 text-xs bg-slate-50 border rounded-lg"><option value="">All Types</option>${types.map(x=>`<option>${escapeHtml(x)}</option>`).join('')}</select><select id="flat-vertical-filter" onchange="flatListCurrentPage=1;renderFlatWorkspacePage()" class="px-3 py-1.5 text-xs bg-slate-50 border rounded-lg"><option value="">All Verticals</option>${verts.map(x=>`<option>${escapeHtml(x)}</option>`).join('')}</select><select id="flat-impact-filter" onchange="flatListCurrentPage=1;renderFlatWorkspacePage()" class="px-3 py-1.5 text-xs bg-slate-50 border rounded-lg"><option value="">All Business Benefit Categories</option>${impacts.map(x=>`<option>${escapeHtml(x)}</option>`).join('')}</select><select id="flat-status-filter" onchange="flatListCurrentPage=1;renderFlatWorkspacePage()" class="px-3 py-1.5 text-xs bg-slate-50 border rounded-lg"><option value="">All Statuses</option>${sp.map(x=>`<option>${x}</option>`).join('')}</select><select id="flat-record-status" onchange="flatListCurrentPage=1;renderFlatWorkspacePage()" class="px-3 py-1.5 text-xs bg-slate-50 border rounded-lg"><option value="active">Active Records</option><option value="all">All Records</option><option value="deleted">Archived Records</option></select></div><div class="flex flex-wrap gap-2 mt-2">${showP?`<select id="flat-program-filter" onchange="flatListCurrentPage=1;renderFlatWorkspacePage()" class="px-3 py-1.5 text-xs bg-slate-50 border rounded-lg"><option value="">All Programs</option>${programs.map(p=>`<option value="${p.id}">Program ${p.sequenceNo} - ${escapeHtml(p.name)}</option>`).join('')}</select>`:'<select id="flat-program-filter" class="hidden"><option value=""></option></select>'}${showI?'<select id="flat-initiative-filter" onchange="flatListCurrentPage=1;renderFlatWorkspacePage()" class="px-3 py-1.5 text-xs bg-slate-50 border rounded-lg"></select>':'<select id="flat-initiative-filter" class="hidden"><option value=""></option></select>'}${showT?'<select id="flat-track-filter" onchange="flatListCurrentPage=1;renderFlatWorkspacePage()" class="px-3 py-1.5 text-xs bg-slate-50 border rounded-lg"></select>':'<select id="flat-track-filter" class="hidden"><option value=""></option></select>'}</div></div><div class="hidden"><div id="flat-record-count" class="text-xs font-semibold text-indigo-700"></div></div><div class="bg-white rounded-xl border shadow-sm overflow-hidden"><div class="overflow-x-auto"><table class="min-w-full text-xs"><thead class="bg-slate-100"><tr>${conf.heads.map(h=>`<th class="px-3 py-3 text-left whitespace-nowrap text-[10px] uppercase">${h}</th>`).join('')}</tr></thead><tbody id="flat-list-body" class="divide-y"></tbody></table></div><div id="flat-list-pagination" class="px-4 py-3 border-t"></div></div>`;
  [['flat-record-status',old.s],['flat-type-filter',old.type],['flat-vertical-filter',old.v],['flat-impact-filter',old.impact],['flat-status-filter',old.status],['flat-program-filter',old.p]].forEach(([id,v])=>{const e=document.getElementById(id);if(e)e.value=v;});flatFilterOptions();document.getElementById('flat-initiative-filter').value=old.i;flatFilterOptions();document.getElementById('flat-track-filter').value=old.t;const m=flatMetrics();['total','related','wip','onhold','delay','completed'].forEach(k=>document.getElementById(`flat-kpi-${k}`).innerText=k==='delay'?m.delay:k==='completed'?m.done:m[k]);const rows=flatRecords(),pages=Math.max(1,Math.ceil(rows.length/FLAT_LIST_PAGE_SIZE));flatListCurrentPage=Math.min(flatListCurrentPage,pages);const st=(flatListCurrentPage-1)*FLAT_LIST_PAGE_SIZE,page=rows.slice(st,st+FLAT_LIST_PAGE_SIZE);document.getElementById('flat-record-count').innerText=`${rows.length} ${conf.title}`;document.getElementById('flat-list-body').innerHTML=page.length?page.map(r=>`<tr class="hover:bg-slate-50">${conf.row(r).map(x=>`<td class="px-3 py-3 align-top whitespace-nowrap">${x}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${conf.heads.length}" class="p-12 text-center text-slate-400">No matching records.</td></tr>`;document.getElementById('flat-list-pagination').innerHTML=`<div class="flex justify-between"><span class="text-xs text-slate-500">Showing ${rows.length?st+1:0} to ${Math.min(st+FLAT_LIST_PAGE_SIZE,rows.length)} of ${rows.length}</span><div class="flex gap-2"><button onclick="changeFlatListPage(${flatListCurrentPage-1})" ${flatListCurrentPage<=1?'disabled':''} class="px-3 py-1.5 border rounded disabled:opacity-40">Previous</button><span class="px-3 py-1.5 bg-indigo-600 text-white rounded">${flatListCurrentPage} / ${pages}</span><button onclick="changeFlatListPage(${flatListCurrentPage+1})" ${flatListCurrentPage>=pages?'disabled':''} class="px-3 py-1.5 border rounded disabled:opacity-40">Next</button></div></div>`;lucide.createIcons();
@@ -9590,6 +9593,14 @@ function renderProjects() {
       initiativeMatchesGlobalFilters
     );
 
+  const initiativesByProgram = new Map();
+  globallyMatchingProjects.forEach(project => {
+    if (!project.programId) return;
+    const programId = Number(project.programId);
+    if (!initiativesByProgram.has(programId)) initiativesByProgram.set(programId, []);
+    initiativesByProgram.get(programId).push(project);
+  });
+
   /*
     Keep Initiatives grouped under their
     existing Programs.
@@ -9598,16 +9609,7 @@ function renderProjects() {
     allowedPrograms
       .map(program => {
         const childInitiatives =
-          globallyMatchingProjects
-            .filter(
-              project =>
-                Number(
-                  project.programId
-                ) ===
-                Number(
-                  program.id
-                )
-            )
+          (initiativesByProgram.get(Number(program.id)) || [])
             .sort(
               sortNewestCreatedFirst
             );
@@ -14938,20 +14940,28 @@ bulkEditFields=function(entity){ return originalBulkEditFieldsOverview(entity||a
 const originalBulkDeleteSelectedOverview=bulkDeleteSelected;
 bulkDeleteSelected=async function(){
   if(currentWorkspaceView!=='overview') return originalBulkDeleteSelectedOverview();
-  const previous=currentWorkspaceView; currentWorkspaceView=overviewBulkEntity;
-  try{return await originalBulkDeleteSelectedOverview();}finally{currentWorkspaceView=previous;}
+  const previous=currentWorkspaceView,entity=overviewBulkEntity; currentWorkspaceView=entity;
+  try{const result=await originalBulkDeleteSelectedOverview();if(!bulkWorkspaceSelection[entity]?.size)setOverviewMultiSelect(false);return result;}finally{currentWorkspaceView=previous;}
 };
 const originalBulkDuplicateSelectedOverview=bulkDuplicateSelected;
 bulkDuplicateSelected=async function(){
   if(currentWorkspaceView!=='overview') return originalBulkDuplicateSelectedOverview();
-  const previous=currentWorkspaceView; currentWorkspaceView=overviewBulkEntity;
-  try{return await originalBulkDuplicateSelectedOverview();}finally{currentWorkspaceView=previous;}
+  const previous=currentWorkspaceView,entity=overviewBulkEntity; currentWorkspaceView=entity;
+  try{const result=await originalBulkDuplicateSelectedOverview();if(!bulkWorkspaceSelection[entity]?.size)setOverviewMultiSelect(false);return result;}finally{currentWorkspaceView=previous;}
 };
+let overviewBulkActionInProgress=false;
+const bulkDeleteBeforeSingleFlight=bulkDeleteSelected;
+bulkDeleteSelected=async function(...args){if(overviewBulkActionInProgress)return;overviewBulkActionInProgress=true;try{return await bulkDeleteBeforeSingleFlight.apply(this,args);}finally{overviewBulkActionInProgress=false;}};
+const bulkDuplicateBeforeSingleFlight=bulkDuplicateSelected;
+bulkDuplicateSelected=async function(...args){if(overviewBulkActionInProgress)return;overviewBulkActionInProgress=true;try{return await bulkDuplicateBeforeSingleFlight.apply(this,args);}finally{overviewBulkActionInProgress=false;}};
 const originalSaveBulkEditOverview=saveBulkEdit;
+let overviewBulkEditInProgress=false;
 saveBulkEdit=async function(event){
   if(currentWorkspaceView!=='overview') return originalSaveBulkEditOverview(event);
-  const previous=currentWorkspaceView; currentWorkspaceView=bulkEditEntity||overviewBulkEntity;
-  try{return await originalSaveBulkEditOverview(event);}finally{currentWorkspaceView=previous;}
+  if(overviewBulkEditInProgress)return;
+  overviewBulkEditInProgress=true;
+  const previous=currentWorkspaceView,entity=bulkEditEntity||overviewBulkEntity; currentWorkspaceView=entity;
+  try{const result=await originalSaveBulkEditOverview(event);if(!bulkWorkspaceSelection[entity]?.size)setOverviewMultiSelect(false);return result;}finally{currentWorkspaceView=previous;overviewBulkEditInProgress=false;}
 };
 
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>requestAnimationFrame(decorateOverviewBulkSelection));else requestAnimationFrame(decorateOverviewBulkSelection);
@@ -15017,7 +15027,14 @@ toggleOverviewBulkRow=function(entity,id,checked){
     if(checkbox) checkbox.checked=false;
     return;
   }
+  const eligible=getOverviewFilteredEntities()[entity]||[];
+  if(!eligible.includes(Number(id))){
+    const checkbox=document.querySelector(`.overview-bulk-checkbox[data-entity="${entity}"][data-id="${id}"]`);
+    if(checkbox)checkbox.checked=false;
+    return;
+  }
   originalToggleOverviewBulkRowOptIn(entity,id,checked);
+  syncOverviewSelection();
 };
 
 // Remove the separate Overview bulk banner. Actions live only in the conditional selection banner
@@ -16131,40 +16148,68 @@ function getOverviewFilteredEntities(){
   const programMap=new Map(),initiativeMap=new Map();
   (deliveryFilteredTopLevelItems||[]).forEach(item=>{
     if(item.type==='program'){
-      programMap.set(Number(item.program.id),item.program);
-      (item.childInitiatives||[]).forEach(project=>initiativeMap.set(Number(project.id),project));
-    }else if(item.type==='initiative')initiativeMap.set(Number(item.project.id),item.project);
+      if(item.program?.id!=null)programMap.set(Number(item.program.id),item.program);
+      (item.childInitiatives||[]).forEach(project=>{if(project?.id!=null)initiativeMap.set(Number(project.id),project);});
+    }else if(item.type==='initiative'&&item.project?.id!=null)initiativeMap.set(Number(item.project.id),item.project);
   });
   const initiatives=[...initiativeMap.values()];
+  const uniqueIds=rows=>[...new Set(rows.map(Number).filter(id=>Number.isSafeInteger(id)&&id>0))];
   return {
-    programs:[...programMap.keys()],
-    initiatives:[...initiativeMap.keys()],
-    tracks:initiatives.flatMap(project=>(project.tracks||[]).filter(track=>track.recordStatus!=='deleted').map(track=>Number(track.id))),
-    milestones:initiatives.flatMap(project=>(project.milestones||[]).filter(milestone=>milestone.recordStatus!=='deleted').map(milestone=>Number(milestone.id)))
+    programs:uniqueIds([...programMap.keys()]),
+    initiatives:uniqueIds([...initiativeMap.keys()]),
+    tracks:uniqueIds(initiatives.flatMap(project=>(project.tracks||[]).filter(track=>track.recordStatus!=='deleted').map(track=>track.id))),
+    milestones:uniqueIds(initiatives.flatMap(project=>(project.milestones||[]).filter(milestone=>milestone.recordStatus!=='deleted').map(milestone=>milestone.id)))
   };
 }
-function selectAllOverviewEntity(entity){
+function syncOverviewSelection(entities=getOverviewFilteredEntities()){
+  for(const entity of ['programs','initiatives','tracks','milestones']){
+    const eligible=new Set(entities[entity]||[]),selection=bulkWorkspaceSelection[entity];
+    for(const id of selection)if(!eligible.has(Number(id)))selection.delete(id);
+    document.querySelectorAll(`.overview-bulk-checkbox[data-entity="${entity}"]`).forEach(box=>{box.checked=selection.has(Number(box.dataset.id));});
+  }
+  const selectedEntities=['programs','initiatives','tracks','milestones'].filter(entity=>bulkWorkspaceSelection[entity].size);
+  if(!selectedEntities.includes(overviewBulkEntity))overviewBulkEntity=selectedEntities[0]||'';
+  for(const entity of selectedEntities)if(entity!==overviewBulkEntity)bulkWorkspaceSelection[entity].clear();
+  const group=document.getElementById('overview-select-all-group');
+  for(const entity of ['programs','initiatives','tracks','milestones']){
+    const checkbox=group?.querySelector(`[data-overview-select-all="${entity}"]`),ids=entities[entity]||[];
+    if(!checkbox)continue;
+    const selected=ids.reduce((count,id)=>count+(bulkWorkspaceSelection[entity].has(id)?1:0),0);
+    checkbox.checked=ids.length>0&&selected===ids.length;
+    checkbox.indeterminate=selected>0&&selected<ids.length;
+    checkbox.disabled=ids.length===0;
+    checkbox.setAttribute('aria-checked',checkbox.indeterminate?'mixed':String(checkbox.checked));
+    const count=group.querySelector(`[data-overview-select-count="${entity}"]`);
+    const countText=`${selected} / ${ids.length} ${entity}`;
+    if(count&&count.textContent!==countText)count.textContent=countText;
+  }
+  syncBulkSelectionUI();
+}
+function selectAllOverviewEntity(entity,checked){
+  if(!['programs','initiatives','tracks','milestones'].includes(entity))return;
+  const entities=getOverviewFilteredEntities(),ids=entities[entity]||[],selection=bulkWorkspaceSelection[entity];
   if(overviewBulkEntity&&overviewBulkEntity!==entity)bulkWorkspaceSelection[overviewBulkEntity].clear();
-  overviewBulkEntity=entity;
-  const ids=getOverviewFilteredEntities()[entity]||[];
-  const set=bulkWorkspaceSelection[entity];
-  const allSelected=ids.length>0&&ids.every(id=>set.has(id));
-  if(allSelected)ids.forEach(id=>set.delete(id));else ids.forEach(id=>set.add(id));
+  if(checked){overviewBulkEntity=entity;ids.forEach(id=>selection.add(id));}
+  else{ids.forEach(id=>selection.delete(id));if(!selection.size)overviewBulkEntity='';}
+  syncOverviewSelection(entities);
   renderProjects();
-  showToast(`${ids.length} filtered ${entity} row(s) ${allSelected?'cleared':'selected'}.`,'success');
 }
 function decorateOverviewSelectAll(){
   if(currentWorkspaceView!=='overview'||!overviewMultiSelectEnabled)return;
   const bar=document.getElementById('overview-control-bar');if(!bar)return;
-  let group=document.getElementById('overview-select-all-group');
-  if(group)group.remove();
+  const groups=[...bar.querySelectorAll('#overview-select-all-group')];
+  const group=groups.shift()||document.createElement('div');
+  groups.forEach(node=>node.remove());
+  group.id='overview-select-all-group';
+  group.className='overview-select-all-group';
   const entities=getOverviewFilteredEntities();
-  group=document.createElement('div');group.id='overview-select-all-group';group.className='flex flex-wrap items-center gap-2';
-  group.innerHTML=['programs','initiatives','tracks','milestones'].map(entity=>{
-    const ids=entities[entity],all=ids.length>0&&ids.every(id=>bulkWorkspaceSelection[entity].has(id));
-    return `<button type="button" onclick="selectAllOverviewEntity('${entity}')" class="px-3 py-2 text-xs font-semibold rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">${all?'Clear':'Select'} all ${ids.length} ${entity}</button>`;
-  }).join('');
-  bar.firstElementChild?.appendChild(group);
+  const expectedEntities=['programs','initiatives','tracks','milestones'];
+  const hasExpectedControls=expectedEntities.every(entity=>group.querySelectorAll(`[data-overview-select-all="${entity}"]`).length===1)&&group.querySelectorAll('[data-overview-select-all]').length===expectedEntities.length;
+  if(!hasExpectedControls)group.innerHTML=expectedEntities.map(entity=>
+    `<label class="overview-select-all-option"><input type="checkbox" data-overview-select-all="${entity}" aria-label="Select All ${entity}" onchange="selectAllOverviewEntity('${entity}',this.checked)"><span>Select All</span><span class="overview-select-all-count" data-overview-select-count="${entity}"></span></label>`
+  ).join('');
+  if(group.parentElement!==bar)bar.appendChild(group);
+  syncOverviewSelection(entities);
 }
 
 // Keep Multiple Select wording unchanged everywhere.
@@ -16250,19 +16295,25 @@ document.addEventListener('DOMContentLoaded',updateTodoBadge);
 // TO DO LIST: SUPABASE PERSISTENCE AND REALTIME SYNC OVERRIDE
 // Required table: public.todo_items (see setup SQL provided with this file).
 // ============================================================
-let todoItemsCache=[];
+let todoItemsCache=[],todoItemsLoaded=false,todoPendingCount=0,todoBadgeCountPromise=null;
 let todoRealtimeChannel=null;
 function mapTodoRow(row){return{id:String(row.id),title:row.title||'',note:row.notes||'',priority:row.priority||'Normal',dueDate:row.due_date||'',done:Boolean(row.is_completed),createdAt:row.created_at||'',updatedAt:row.updated_at||'',completedAt:row.completed_at||''};}
 async function getTodoAuthUser(){const {data:{session}}=await supabaseClient.auth.getSession();return session?.user||null;}
 async function loadTodoItemsFromSupabase(showError=true){
   const user=await getTodoAuthUser();
   if(!user){todoItemsCache=[];return false;}
-  const {data,error}=await supabaseClient.from('todo_items').select('*').eq('user_id',user.id).order('created_at',{ascending:false});
+  const {data,error}=await supabaseClient.from('todo_items').select('id,user_id,title,notes,priority,due_date,is_completed,created_at,updated_at,completed_at').eq('user_id',user.id).order('created_at',{ascending:false});
   if(error){console.error('To Do loading failed:',error);if(showError)showToast('Unable to load To Do items: '+error.message,'error');return false;}
-  todoItemsCache=(data||[]).map(mapTodoRow);updateTodoBadge();return true;
+  todoItemsCache=(data||[]).map(mapTodoRow);todoItemsLoaded=true;todoPendingCount=todoItemsCache.filter(item=>!item.done).length;updateTodoBadge();return true;
+}
+async function loadTodoBadgeCountFromSupabase(){
+  if(todoBadgeCountPromise)return todoBadgeCountPromise;
+  const request=(async()=>{const user=await getTodoAuthUser();if(!user){todoPendingCount=0;updateTodoBadge();return false;}const {count,error}=await supabaseClient.from('todo_items').select('id',{count:'exact'}).eq('user_id',user.id).eq('is_completed',false).limit(1);if(error)return false;todoPendingCount=count||0;updateTodoBadge();return true;})();
+  todoBadgeCountPromise=request;
+  try{return await request;}finally{if(todoBadgeCountPromise===request)todoBadgeCountPromise=null;}
 }
 function loadTodoItems(){return todoItemsCache;}
-function updateTodoBadge(){const badge=document.getElementById('todo-list-badge');if(badge)badge.textContent=todoItemsCache.filter(item=>!item.done).length;}
+function updateTodoBadge(){const badge=document.getElementById('todo-list-badge');if(badge)badge.textContent=todoItemsLoaded?todoItemsCache.filter(item=>!item.done).length:todoPendingCount;}
 async function initializeTodoRealtime(){
   const user=await getTodoAuthUser();if(!user||todoRealtimeChannel)return;
   todoRealtimeChannel=supabaseClient.channel(`delivery-hub-todo-${user.id}`).on('postgres_changes',{event:'*',schema:'public',table:'todo_items',filter:`user_id=eq.${user.id}`},async()=>{await loadTodoItemsFromSupabase(false);if(currentWorkspaceView==='todo')renderTodoListPage();}).subscribe(status=>{if(status==='CHANNEL_ERROR')console.error('To Do realtime channel failed.');});
@@ -16280,9 +16331,9 @@ saveTodoItem=async function(event){
 toggleTodoDone=async function(id){const item=todoItemsCache.find(row=>row.id===String(id));if(!item)return;const user=await getTodoAuthUser();if(!user)return;const done=!item.done,{error}=await supabaseClient.from('todo_items').update({is_completed:done,completed_at:done?new Date().toISOString():null,updated_at:new Date().toISOString()}).eq('id',id).eq('user_id',user.id);if(error)return showToast('Unable to update To Do item: '+error.message,'error');await loadTodoItemsFromSupabase(false);renderTodoListPage();};
 deleteTodoItem=async function(id){if(!confirm('Delete this To Do item?'))return;const user=await getTodoAuthUser();if(!user)return;const {error}=await supabaseClient.from('todo_items').delete().eq('id',id).eq('user_id',user.id);if(error)return showToast('Unable to delete To Do item: '+error.message,'error');if(todoEditingId===id)todoEditingId=null;await loadTodoItemsFromSupabase(false);renderTodoListPage();showToast('To Do item deleted.','success');};
 const restoreSessionBeforeTodoSync=restoreSession;
-restoreSession=async function(){const restored=await restoreSessionBeforeTodoSync();if(restored){await loadTodoItemsFromSupabase(false);await initializeTodoRealtime();}return restored;};
+restoreSession=async function(){const restored=await restoreSessionBeforeTodoSync();if(restored)await loadTodoBadgeCountFromSupabase();return restored;};
 const loginUserBeforeTodoSync=loginUser;
-loginUser=async function(){const result=await loginUserBeforeTodoSync();if(currentUser){await loadTodoItemsFromSupabase(false);await initializeTodoRealtime();}return result;};
+loginUser=async function(){const result=await loginUserBeforeTodoSync();if(currentUser)await loadTodoBadgeCountFromSupabase();return result;};
 window.addEventListener('beforeunload',()=>{if(todoRealtimeChannel)supabaseClient.removeChannel(todoRealtimeChannel);});
 </script>
 
@@ -16324,8 +16375,16 @@ window.addEventListener('beforeunload',()=>{if(todoRealtimeChannel)supabaseClien
 <script>
 let plannerTemplates=[],plannerRows=[],activePlannerId=null;
 const plannerDynamicRules=[['INITIATIVE_BUSINESS_OWNER','Initiative - Business Owner'],['INITIATIVE_ASSIGNED_TO','Initiative - Assigned To'],['INITIATIVE_NAME','Initiative - Name'],['INITIATIVE_VERTICAL','Initiative - Vertical'],['PROGRAM_OWNER','Program - Owner'],['PROGRAM_ASSIGNED_TO','Program - Assigned To'],['PROGRAM_NAME','Program - Name'],['PROGRAM_VERTICAL','Program - Vertical']];
-async function loadPlanners(){const r=await supabaseClient.from('project_planner_templates').select('*').order('template_name');if(r.error){showToast('Project Planner database setup required: '+r.error.message,'error');return false;}plannerTemplates=r.data||[];renderPlannerList();return true;}
-async function openProjectPlannerModal(){if(currentUser?.role!=='Admin')return showToast('Only Admin can manage Project Planner.','error');const m=document.getElementById('project-planner-modal');m.classList.remove('hidden');m.classList.add('flex');await loadPlanners();lucide.createIcons();}
+let plannerTemplatesLoadedAt=0,plannerTemplatesLoadPromise=null;
+async function loadPlanners(force=false){
+  if(!force&&plannerTemplatesLoadedAt&&Date.now()-plannerTemplatesLoadedAt<60000){renderPlannerList();return true;}
+  if(plannerTemplatesLoadPromise&&!force)return plannerTemplatesLoadPromise;
+  if(force&&plannerTemplatesLoadPromise)await plannerTemplatesLoadPromise;
+  const request=(async()=>{const r=await supabaseClient.from('project_planner_templates').select('id,template_name,description,is_active,created_by,created_at,updated_at,planner_type_group_id,planner_type_mapping_required').order('template_name');if(r.error){showToast('Project Planner database setup required: '+r.error.message,'error');return false;}plannerTemplates=r.data||[];plannerTemplatesLoadedAt=Date.now();renderPlannerList();return true;})();
+  plannerTemplatesLoadPromise=request;
+  try{return await request;}finally{if(plannerTemplatesLoadPromise===request)plannerTemplatesLoadPromise=null;}
+}
+async function openProjectPlannerModal(){if(currentUser?.role!=='Admin')return showToast('Only Admin can manage Project Planner.','error');const m=document.getElementById('project-planner-modal');m.classList.remove('hidden');m.classList.add('flex');await loadPlanners(true);lucide.createIcons();}
 function closeProjectPlannerModal(){const m=document.getElementById('project-planner-modal');m.classList.add('hidden');m.classList.remove('flex');}
 function renderPlannerList(){
   const list=document.getElementById('planner-list');
@@ -16335,7 +16394,7 @@ function renderPlannerList(){
 }
 function newPlanner(){activePlannerId=null;plannerRows=[];document.getElementById('planner-id').value='';document.getElementById('planner-name').value='';document.getElementById('planner-desc').value='';renderPlannerRows();renderPlannerList();}
 async function selectPlanner(id){const t=plannerTemplates.find(x=>String(x.id)===String(id));if(!t)return;activePlannerId=id;document.getElementById('planner-id').value=id;document.getElementById('planner-name').value=t.template_name;document.getElementById('planner-desc').value=t.description||'';const r=await supabaseClient.from('project_planner_milestones').select('*').eq('template_id',id).eq('is_active',true).order('display_order');if(r.error)return showToast(r.error.message,'error');plannerRows=r.data||[];renderPlannerRows();renderPlannerList();}
-async function savePlanner(e){e.preventDefault();const id=document.getElementById('planner-id').value,payload={template_name:document.getElementById('planner-name').value.trim(),description:document.getElementById('planner-desc').value.trim()||null,is_active:true,updated_at:new Date().toISOString(),...deliveryPlannerGroupFields()};const r=id?await supabaseClient.from('project_planner_templates').update(payload).eq('id',id).select().single():await supabaseClient.from('project_planner_templates').insert({...payload,created_by:currentUser?.email||null}).select().single();if(r.error)return showToast(r.error.message,'error');activePlannerId=r.data.id;await loadPlanners();await selectPlanner(r.data.id);showToast('Planner saved.','success');}
+async function savePlanner(e){e.preventDefault();const id=document.getElementById('planner-id').value,payload={template_name:document.getElementById('planner-name').value.trim(),description:document.getElementById('planner-desc').value.trim()||null,is_active:true,updated_at:new Date().toISOString(),...deliveryPlannerGroupFields()};const r=id?await supabaseClient.from('project_planner_templates').update(payload).eq('id',id).select().single():await supabaseClient.from('project_planner_templates').insert({...payload,created_by:currentUser?.email||null}).select().single();if(r.error)return showToast(r.error.message,'error');activePlannerId=r.data.id;await loadPlanners(true);await selectPlanner(r.data.id);showToast('Planner saved.','success');}
 function addPlannerRow(){plannerRows.push({display_order:plannerRows.length+1,milestone_action:'',owner_mode:'DYNAMIC',owner_rule:'INITIATIVE_BUSINESS_OWNER',owner_fixed_value:'',dependency_mode:'DYNAMIC',dependency_rule:'INITIATIVE_BUSINESS_OWNER',dependency_fixed_value:'',days:1});renderPlannerRows();}
 function setPR(i,k,v){plannerRows[i][k]=v;}
 function ruleEditor(i,r,k){const mode=r[k+'_mode']||'FIXED',val=r[k+'_fixed_value']||'';return `<div class="grid grid-cols-[100px_minmax(0,1fr)] gap-1"><select onchange="setPR(${i},'${k}_mode',this.value);renderPlannerRows()" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white"><option ${mode==='FIXED'?'selected':''}>FIXED</option><option ${mode==='DYNAMIC'?'selected':''}>DYNAMIC</option></select>${mode==='DYNAMIC'?`<select onchange="setPR(${i},'${k}_rule',this.value)" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white">${plannerDynamicRules.map(x=>`<option value="${x[0]}" ${(r[k+'_rule']||'')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select>`:`<input value="${escapeHtml(val)}" oninput="setPR(${i},'${k}_fixed_value',this.value)" list="planner-users" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white" placeholder="Fixed value">`}</div>`;}
@@ -16359,7 +16418,7 @@ async function savePlannerTemplateAll(event){
     if(saved.error)throw saved.error;
     activePlannerId=saved.data.id;
     await persistDeliveryPlannerRows(activePlannerId,plannerRows);
-    await loadPlanners();
+    await loadPlanners(true);
     await selectPlanner(activePlannerId);
     showToast('Planner template and milestone rules saved.','success');
   }catch(error){showToast(error.message||'Unable to save Planner template.','error');}
@@ -16374,7 +16433,7 @@ async function deletePlannerTemplate(id){
   const result=await supabaseClient.from('project_planner_templates').update({is_active:false,updated_at:new Date().toISOString()}).eq('id',id);
   if(result.error)return showToast(result.error.message,'error');
   if(String(activePlannerId)===String(id))newPlanner();
-  await loadPlanners();
+  await loadPlanners(true);
   showToast('Planner template deleted.','success');
 }
 function resolvePlannerRule(mode,rule,fixed,i,p){if(mode!=='DYNAMIC')return fixed||'';return({INITIATIVE_BUSINESS_OWNER:i.businessOwner,INITIATIVE_ASSIGNED_TO:i.assignedTo,INITIATIVE_NAME:i.name,INITIATIVE_VERTICAL:i.vertical,PROGRAM_OWNER:p?.owner,PROGRAM_ASSIGNED_TO:p?.assignedTo,PROGRAM_NAME:p?.name,PROGRAM_VERTICAL:p?.vertical})[rule]||'';}
@@ -16494,7 +16553,7 @@ function decoratePlannerDraft(){
     lucide.createIcons();
   });
 }
-const renderProjectsBeforeProjectPlanner=renderProjects;renderProjects=function(){const x=renderProjectsBeforeProjectPlanner();if(currentUser)loadPlanners().then(()=>requestAnimationFrame(decoratePlannerDraft));return x;};
+const renderProjectsBeforeProjectPlanner=renderProjects;renderProjects=function(){const x=renderProjectsBeforeProjectPlanner();if(currentUser&&document.querySelector('#projects-container button[aria-label="Discard draft milestone"]')){if(plannerTemplatesLoadedAt&&Date.now()-plannerTemplatesLoadedAt<60000)requestAnimationFrame(decoratePlannerDraft);else loadPlanners().then(()=>requestAnimationFrame(decoratePlannerDraft));}return x;};
 </script>
 
 
@@ -17838,6 +17897,19 @@ if (typeof Chart !== 'undefined') Chart.register(analyticsProfessionalColorScale
     todo:{'todo-search':''}
   };
   function pageKey(){if(currentWorkspaceView==='overview')return'overview';if(['programs','initiatives','tracks','milestones'].includes(currentWorkspaceView))return'flat';if(currentWorkspaceView==='daily')return'daily';if(currentWorkspaceView==='analytics')return'analytics';if(currentWorkspaceView==='todo')return'todo';return'';}
+  let overviewSearchTimer=0,flatSearchTimer=0;
+  document.addEventListener('input',event=>{
+    const input=event.target;
+    if(input?.id==='filter-search'){
+      event.stopImmediatePropagation();
+      if(overviewSearchTimer)clearTimeout(overviewSearchTimer);
+      overviewSearchTimer=setTimeout(()=>{overviewSearchTimer=0;if(currentWorkspaceView==='overview')resetDeliveryPagination();},160);
+    }else if(input?.id==='flat-search'){
+      event.stopImmediatePropagation();
+      if(flatSearchTimer)clearTimeout(flatSearchTimer);
+      flatSearchTimer=setTimeout(()=>{flatSearchTimer=0;if(['programs','initiatives','tracks','milestones'].includes(currentWorkspaceView)){flatListCurrentPage=1;renderFlatWorkspacePage();}},160);
+    }
+  },true);
   function activeCount(key){return Object.entries(defaults[key]||{}).reduce((count,[id,value])=>{const el=document.getElementById(id);return count+(el&&String(el.value)!==String(value)?1:0);},0);}
   window.resetCurrentPageFilters=function(){
     const key=pageKey();Object.entries(defaults[key]||{}).forEach(([id,value])=>{const el=document.getElementById(id);if(el)el.value=value;});
@@ -18238,7 +18310,7 @@ body.analytics-view-active #main-content>main{padding-top:0!important}
   const originalReset=window.resetAnalyticsFilters;
   window.resetAnalyticsFilters=function(){const search=document.getElementById('analytics-search'),critical=document.getElementById('analytics-critical'),review=document.getElementById('analytics-review');if(search)search.value='';if(critical)critical.value='';if(review)review.value='';return originalReset.apply(this,arguments);};
   const originalShow=window.showAnalyticsView;
-  window.showAnalyticsView=function(){const result=originalShow.apply(this,arguments);requestAnimationFrame(()=>{install();renderAnalyticsDashboard();});return result;};
+  window.showAnalyticsView=function(){const result=originalShow.apply(this,arguments);requestAnimationFrame(install);return result;};
   document.addEventListener('DOMContentLoaded',()=>requestAnimationFrame(install));requestAnimationFrame(install);
 })();
 </script>
@@ -18275,7 +18347,7 @@ body.analytics-view-active #main-content>main{padding-top:0!important}
   const originalInitiativeMatch=window.initiativeMatchesGlobalFilters;
   window.initiativeMatchesGlobalFilters=function(project){if(!originalInitiativeMatch.apply(this,arguments))return false;const s=dateState.overview,deadline=project.revisedEndDate||project.targetEndDate||'',actual=project.actualEndDate||'';return inRange(deadline,s.deadlineFrom,s.deadlineTo)&&inRange(actual,s.actualFrom,s.actualTo);};
   const originalFlatRecords=window.flatRecords;
-  window.flatRecords=function(){const s=dateState.flat;return originalFlatRecords.apply(this,arguments).filter(row=>{const dates=valuesForFlat(row);return inRange(dates.deadline,s.deadlineFrom,s.deadlineTo)&&inRange(dates.actual,s.actualFrom,s.actualTo);});};
+  window.flatRecords=function(){const s=dateState.flat,rows=flatRowsForRender||originalFlatRecords.apply(this,arguments);flatRowsForRender=null;return rows.filter(row=>{const dates=valuesForFlat(row);return inRange(dates.deadline,s.deadlineFrom,s.deadlineTo)&&inRange(dates.actual,s.actualFrom,s.actualTo);});};
   const originalAnalyticsFiltered=window.filteredAnalyticsInitiatives;
   window.filteredAnalyticsInitiatives=function(){const s=dateState.analytics;return originalAnalyticsFiltered.apply(this,arguments).filter(item=>inRange(item.revisedEndDate||item.targetEndDate||'',s.deadlineFrom,s.deadlineTo)&&inRange(item.actualEndDate||'',s.actualFrom,s.actualTo));};
   const originalDailyRows=window.getAllFilteredDailyTrackerRows;
@@ -19201,22 +19273,24 @@ body:not(.overview-multi-select-active) #projects-container .selection-banner {
   function updateOverviewMultiSelectButton(){
     const button=document.getElementById('overview-multi-select-toggle');
     if(!button)return;
-    button.setAttribute('aria-pressed',String(overviewMultiSelectEnabled));
-    button.className=overviewMultiSelectEnabled
+    const className=overviewMultiSelectEnabled
       ? 'inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white border border-indigo-600'
       : 'inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg bg-white text-slate-700 border border-slate-300 hover:bg-slate-50';
-    button.innerHTML='<i data-lucide="list-checks" class="w-4 h-4"></i>Multiple Select';
+    if(button.getAttribute('aria-pressed')!==String(overviewMultiSelectEnabled))button.setAttribute('aria-pressed',String(overviewMultiSelectEnabled));
+    if(button.className!==className)button.className=className;
+    if(button.textContent.trim()!=='Multiple Select')button.innerHTML='<i data-lucide="list-checks" class="w-4 h-4"></i>Multiple Select';
   }
 
   window.setOverviewMultiSelect=function(enabled){
-    overviewMultiSelectEnabled=Boolean(enabled);
+    const next=Boolean(enabled),changed=overviewMultiSelectEnabled!==next;
+    overviewMultiSelectEnabled=next;
     document.body.classList.toggle('overview-multi-select-active',overviewMultiSelectEnabled);
+    updateOverviewMultiSelectButton();
+    if(!changed)return;
 
     if(!overviewMultiSelectEnabled){
       clearEveryOverviewSelection();
     }
-
-    updateOverviewMultiSelectButton();
 
     requestAnimationFrame(function(){
       if(overviewMultiSelectEnabled){
@@ -20943,6 +21017,39 @@ body.daily-tracker-view-active #workspace-flat-page>div:not(:first-child):not(#d
   isolation: auto !important;
   box-shadow: 0 1px 2px rgba(15, 23, 42, .05) !important;
 }
+#overview-control-bar { flex-wrap: wrap !important; justify-content: flex-start !important; min-width: 0; }
+#overview-select-all-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  flex: 1 1 100%;
+  gap: .5rem;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.overview-select-all-option {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: .5rem;
+  min-width: 0;
+  min-height: 38px;
+  padding: .4rem .6rem;
+  border: 1px solid #cbd5e1;
+  border-radius: .5rem;
+  background: #fff;
+  color: #334155;
+  font-size: .75rem;
+  cursor: pointer;
+}
+.overview-select-all-option input { flex: 0 0 16px; width: 16px; height: 16px; margin: 0; accent-color: #4f46e5; }
+.overview-select-all-count { min-width: 0; margin-left: auto; color: #64748b; text-align: right; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  #overview-select-all-group { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 420px) {
+  #overview-select-all-group { grid-template-columns: minmax(0, 1fr); }
+}
 .shared-workspace-multiselect-banner { min-height: 58px; }
 body.daily-tracker-view-active #daily-multi-actions #daily-multi-count {
   margin-right: 0 !important;
@@ -20977,12 +21084,23 @@ body.daily-tracker-view-active #daily-multi-actions { order: 3 !important; }
       ?bar.querySelector('#daily-multi-count')
       :[...bar.querySelectorAll('span')].find(item=>item!==toggle&&!item.querySelector('button'));
     const keep=new Set([toggle,instruction].filter(Boolean));
-    const controls=[...bar.querySelectorAll('button')].filter(button=>!keep.has(button)&&!button.hasAttribute('data-shared-hierarchy-control'));
+    const selectAllGroups=kind==='overview'?[...bar.querySelectorAll('#overview-select-all-group')]:[];
+    const selectAllGroup=selectAllGroups.shift()||null;
+    selectAllGroups.forEach(group=>group.remove());
+    const controls=[...bar.querySelectorAll('button')].filter(button=>!keep.has(button)&&!selectAllGroup?.contains(button)&&!button.hasAttribute('data-shared-hierarchy-control'));
     const enabled=kind==='overview'?overviewMultiSelectEnabled:kind==='daily'?dailyMultiSelectEnabled:toggle.getAttribute('aria-pressed')==='true';
+    const isNormalized=bar.classList.contains('shared-workspace-multiselect-banner')&&bar.firstElementChild?.contains(toggle)&&(!selectAllGroup||selectAllGroup.parentElement===bar)&&bar.children.length===(kind==='overview'&&selectAllGroup?3:2);
+    if(isNormalized){
+      const className=enabled?activeButtonClass:inactiveButtonClass,label=kind==='overview'?'Multiple Select':enabled?'Multiple Select On':'Multiple Select';
+      if(toggle.className!==className)toggle.className=className;
+      if(toggle.getAttribute('aria-pressed')!==String(enabled))toggle.setAttribute('aria-pressed',String(enabled));
+      if(toggle.textContent.trim()!==label)toggle.innerHTML=`<i data-lucide="list-checks" class="w-4 h-4"></i>${label}`;
+      return;
+    }
     const left=document.createElement('div');
-    left.className='flex items-center gap-2';
+    left.className='shared-multiselect-left flex items-center gap-2';
     const right=document.createElement('div');
-    right.className='flex items-center gap-2';
+    right.className='shared-multiselect-right flex items-center gap-2';
     const label=instruction||document.createElement('span');
     if(!instruction)label.textContent='Enable to select Programs, Initiatives, Tracks, or Milestones.';
     if(kind==='daily'&&!dailySelectedMilestones.size)label.textContent='Enable to select Programs, Initiatives, Tracks, or Milestones.';
@@ -21003,7 +21121,7 @@ body.daily-tracker-view-active #daily-multi-actions { order: 3 !important; }
     }
     right.append(...controls);
     bar.className=`${bannerClass} shared-workspace-multiselect-banner`;
-    bar.replaceChildren(left,right);
+    bar.replaceChildren(left,...(selectAllGroup?[selectAllGroup]:[]),right);
   }
 
   function pageFilter(view){
@@ -22005,7 +22123,11 @@ Database RLS and refresh/login persistence must be tested after applying the SQL
   const originalBulkValue=renderBulkEditValueInput;
   window.renderBulkEditValueInput=function(){if(document.getElementById('bulk-edit-field')?.value!=='planner_type_id')return originalBulkValue.apply(this,arguments);const area=document.getElementById('bulk-edit-value-area'),ids=selectedBulkIds(),records=ids.map(locate).filter(Boolean);const current=records.length&&records.every(row=>key(row.milestone.plannerTypeId)===key(records[0].milestone.plannerTypeId))?key(records[0].milestone.plannerTypeId):'';const permitted=milestonePlannerTypes.active('').filter(type=>records.every(({project,milestone})=>{const used=(kpiMilestoneRows||[]).some(row=>key(row.initiative_id)===key(project.id)&&key(row.id)!==key(milestone.id)&&key(row.planner_type_id)===key(type.id)&&integrity.active(row));return !used||key(milestone.plannerTypeId)===key(type.id);}));const historical=milestonePlannerTypes.state.values.find(type=>key(type.id)===current);if(historical&&!permitted.some(type=>key(type.id)===current))permitted.push(historical);area.innerHTML='<label class="block font-semibold">Milestone Planner Type<select id="bulk-edit-value" class="mt-1 w-full border rounded-lg px-3 py-2"><option value="">No Change</option><option value="__CLEAR__">Not Mapped / Remove Mapping</option>'+permitted.map(type=>`<option value="${escapeHtml(key(type.id))}" ${type.is_active===false?'disabled':''}>${escapeHtml(type.value_name)}${type.is_active===false?' (Inactive)':''}</option>`).join('')+'</select></label>';};
   const originalBulkSave=saveBulkEdit;
-  window.saveBulkEdit=async function(event){event?.preventDefault?.();if(document.getElementById('bulk-edit-field')?.value!=='planner_type_id')return originalBulkSave.apply(this,arguments);const value=document.getElementById('bulk-edit-value')?.value;if(!value)return;const ids=selectedBulkIds().slice(),button=document.getElementById('bulk-edit-save');button.disabled=true;try{await saveTypes(ids,value==='__CLEAR__'?null:value);closeBulkEditModal();clearBulkSelection();if(currentWorkspaceView==='overview')setOverviewMultiSelect(false);else if(currentWorkspaceView==='daily')setDailyMultiSelect(false);else if(typeof toggleFlatMultiSelect==='function'&&document.querySelector('#flat-multi-control button[aria-pressed="true"]'))toggleFlatMultiSelect();await loadInitiativesFromSupabase();renderProjects();if(currentWorkspaceView!=='overview')renderFlatWorkspacePage();showToast('Selected Planner Type mappings saved.','success');}catch(error){showToast(error.message,'error');}finally{button.disabled=false;}};
+  let plannerTypeBulkSaveInProgress=false;
+  window.saveBulkEdit=async function(event){event?.preventDefault?.();if(document.getElementById('bulk-edit-field')?.value!=='planner_type_id')return originalBulkSave.apply(this,arguments);if(plannerTypeBulkSaveInProgress)return;const value=document.getElementById('bulk-edit-value')?.value;if(!value)return;plannerTypeBulkSaveInProgress=true;const ids=selectedBulkIds().slice(),button=document.getElementById('bulk-edit-save');button.disabled=true;try{await saveTypes(ids,value==='__CLEAR__'?null:value);closeBulkEditModal();clearBulkSelection();if(currentWorkspaceView==='overview')setOverviewMultiSelect(false);else if(currentWorkspaceView==='daily')setDailyMultiSelect(false);else if(typeof toggleFlatMultiSelect==='function'&&document.querySelector('#flat-multi-control button[aria-pressed="true"]'))toggleFlatMultiSelect();await loadInitiativesFromSupabase();renderProjects();if(currentWorkspaceView!=='overview')renderFlatWorkspacePage();showToast('Selected Planner Type mappings saved.','success');}catch(error){showToast(error.message,'error');}finally{plannerTypeBulkSaveInProgress=false;button.disabled=false;}};
+  const saveBulkEditWithPlannerType=window.saveBulkEdit;
+  let bulkEditSubmissionInProgress=false;
+  window.saveBulkEdit=async function(...args){if(bulkEditSubmissionInProgress)return;bulkEditSubmissionInProgress=true;try{return await saveBulkEditWithPlannerType.apply(this,args);}finally{bulkEditSubmissionInProgress=false;}};
   window.milestoneTypeEditing={decorate,modalControl,saveTypes,label,schedule};
   const verifiedFiles=new WeakSet();
   async function validateImport(file){
@@ -22079,6 +22201,503 @@ Only after the detection query returns no duplicates, run milestone-type-unique-
 Reload the application after migration. Nullable mappings and archived/deleted records are excluded from consumption; restore is validated again.
 Imports support Milestone Planner Type ID. Use IDs from the master, not display names. Conflict messages include the Initiative, spreadsheet row, Planner Type, and conflicting Milestone.
 </script>
+<style id="weekly-monthly-review-style">
+:root{--system-paper:#f4f1e8;--system-ink:#18343a;--system-teal:#12565b;--system-maroon:#74313b;--system-line:#c8d0cc}
+#system-reports-page{font-size:.82rem;color:#263238}
+#system-reports-page [hidden]{display:none!important}
+.system-report-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:.65rem;margin:.8rem 0}
+.system-report-toolbar label{display:flex;flex:1 1 150px;flex-direction:column;gap:.28rem;min-width:140px;font-size:.73rem;font-weight:650}
+#system-reports-page input,#system-reports-page select,#system-reports-page button{font:inherit}
+#system-reports-page input,#system-reports-page select{border:1px solid #bdc9c7;border-radius:5px;background:white;padding:.48rem .55rem;min-width:0}
+#system-reports-page button{display:inline-flex;align-items:center;justify-content:center;gap:.35rem;border:1px solid #bdc9c7;border-radius:5px;background:white;padding:.48rem .65rem;color:#26464a;font-weight:650;cursor:pointer}
+#system-reports-page button:hover{background:#edf4f2;border-color:#589095}
+#system-reports-page button:disabled{opacity:.5;cursor:not-allowed}
+#system-reports-page button svg{width:16px;height:16px}
+.system-report-header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;border-bottom:2px solid var(--system-teal);padding:.7rem 0}
+.system-report-header h2{font-size:1.2rem;font-weight:750;color:var(--system-ink)}
+.system-report-description{color:#5f6d6d;font-size:.76rem;margin-top:.18rem}
+.system-report-controls{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:.65rem 1rem;border-bottom:1px solid #d6ddda;padding:1rem 0}
+.system-report-controls label{display:flex;flex-direction:column;gap:.28rem;font-size:.72rem;font-weight:650;min-width:0}
+.system-report-controls select[multiple]{min-height:76px}
+.system-report-sections{display:grid;grid-template-columns:repeat(4,minmax(160px,1fr));gap:.4rem 1rem;padding:.75rem 0;border-bottom:1px solid #d6ddda}
+.system-report-sections label,.system-report-config-sections label{display:flex;align-items:center;gap:.45rem;font-weight:500}
+.system-report-sections input,.system-report-config-sections input{accent-color:var(--system-teal)}
+.system-report-range-note{grid-column:1/-1;color:#47666a;font-size:.72rem}
+.system-report-alert{min-height:1.3rem;margin:.5rem 0;color:#485c60;white-space:pre-line}
+.system-report-alert[data-error=true]{color:#a3303e}
+.system-report-preview-shell{overflow:auto;background:#dfe5e2;border:1px solid #c7d1ce;border-radius:5px;padding:1rem;min-height:420px}
+.system-report-page{box-sizing:border-box;width:1120px;min-height:792px;aspect-ratio:1.414;margin:0 auto 1rem;padding:40px 48px 34px;background:var(--system-paper);color:var(--system-ink);box-shadow:0 4px 16px #27363a24;overflow:hidden;display:flex;flex-direction:column;transform-origin:top center}
+.system-report-page h3{color:var(--system-maroon);font-size:1.15rem;font-weight:750;margin:0 0 .55rem}
+.system-report-page h4{color:var(--system-teal);font-size:.86rem;font-weight:750;margin:.55rem 0 .3rem}
+.system-report-page .system-page-brand{font-size:.68rem;color:#547276;font-weight:700;text-transform:uppercase}
+.system-report-page .system-page-meta{font-size:.71rem;color:#516368;margin:.15rem 0 .65rem}
+.system-report-page .system-page-footer{display:flex;justify-content:space-between;gap:1rem;margin-top:auto;border-top:1px solid var(--system-line);padding-top:.4rem;font-size:.64rem;color:#607174}
+.system-report-page table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:.66rem;line-height:1.25}
+.system-report-page th{background:var(--system-teal);color:#fff;text-align:left;font-weight:700}
+.system-report-page th,.system-report-page td{border:1px solid var(--system-line);padding:.34rem .38rem;vertical-align:top;overflow-wrap:anywhere;white-space:pre-line}
+.system-report-page tbody tr:nth-child(even){background:#ebe9df}
+.system-report-cover{justify-content:center;padding:70px 80px}
+.system-report-cover h2{font-size:2.1rem;line-height:1.15;color:var(--system-ink);max-width:780px}
+.system-report-cover .system-cover-accent{height:6px;width:155px;background:var(--system-maroon);margin:1.35rem 0}
+.system-report-cover .system-cover-period{font-size:1.1rem;color:var(--system-teal);font-weight:700}
+.system-report-divider{justify-content:center;text-align:center;background:#e9e5da}
+.system-report-divider h2{font-size:2rem;color:var(--system-teal);margin:.65rem auto}
+.system-report-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;margin:.6rem 0}
+.system-report-kpi{border:1px solid var(--system-line);background:#fbfaf5;padding:.48rem;border-top:3px solid var(--system-teal)}
+.system-report-kpi strong{display:block;font-size:1.05rem;color:var(--system-ink)}
+.system-report-kpi span{font-size:.63rem;color:#647276}
+.system-report-pager{display:flex;flex-wrap:wrap;align-items:center;gap:.35rem;margin:.7rem 0}
+.system-report-pager button[aria-current="page"]{background:var(--system-teal)!important;color:white!important}
+.system-report-status{font-size:.72rem;color:#53676a;margin-left:auto}
+.system-report-small{font-size:.67rem;color:#607174}
+.system-report-config{width:min(850px,94vw);max-height:90vh;overflow:auto;border:0;border-radius:6px;padding:1.2rem;box-shadow:0 24px 65px #0f172a55}
+.system-report-config::backdrop{background:#0f172a80}
+.system-report-config h3{font-size:1rem;font-weight:750;color:var(--system-ink)}
+.system-report-config-sections{display:grid;grid-template-columns:repeat(3,minmax(150px,1fr));gap:.45rem;margin:.75rem 0}
+.system-report-config label{font-size:.75rem}
+.system-report-print-root{display:none}
+@media(max-width:900px){.system-report-controls{grid-template-columns:repeat(2,minmax(140px,1fr))}.system-report-sections{grid-template-columns:repeat(2,minmax(140px,1fr))}.system-report-page{margin-left:0;margin-right:0}}
+@media(max-width:560px){.system-report-controls{grid-template-columns:1fr}.system-report-sections{grid-template-columns:1fr}.system-report-header{flex-direction:column}}
+@media print{body.system-report-printing>*:not(#system-report-print-root){display:none!important}#system-report-print-root{display:block!important}.system-print-page{page-break-after:always;break-after:page;width:100%;min-height:185mm;padding:12mm;background:var(--system-paper);color:var(--system-ink)}.system-print-page:last-child{page-break-after:auto}.system-print-page table{width:100%;border-collapse:collapse;font-size:8pt;table-layout:fixed}.system-print-page th{background:var(--system-teal)!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}.system-print-page th,.system-print-page td{border:1px solid #aebbb8;padding:4px;vertical-align:top;overflow-wrap:anywhere;white-space:pre-wrap}.system-print-page tr{break-inside:avoid}.system-print-page h2{color:var(--system-maroon)}}
+</style>
+<script id="weekly-monthly-review-supabase-sql" type="text/plain">
+begin;
+create table if not exists public.system_report_config (
+  report_code text primary key check (report_code = 'WEEKLY_MONTHLY_REVIEW'),
+  report_name text not null default 'Weekly & Monthly Review',
+  description text not null default 'Factual weekly and monthly delivery review from current Delivery Hub data.',
+  is_active boolean not null default true check (is_active),
+  default_export_profile text not null default 'Executive' check (default_export_profile in ('Executive','Detailed')),
+  default_sections jsonb not null default '["executiveSummary","statusMatrix","initiativeLists","programHighlights","risks","milestoneRoadmap"]'::jsonb,
+  allowed_sections jsonb not null default '["executiveSummary","statusMatrix","initiativeLists","initiativeReview","programHighlights","milestoneRoadmap","plannerTypeRoadmap","risks"]'::jsonb,
+  default_filters jsonb not null default '{"scope":"active"}'::jsonb,
+  display_order integer not null default 1,
+  week_start integer not null default 1 check (week_start between 1 and 7),
+  allow_period_override boolean not null default false,
+  planner_type_value_field text not null default 'deadline',
+  planner_type_aggregation text not null default 'latest',
+  created_by uuid references auth.users(id), created_at timestamptz not null default now(),
+  modified_by uuid references auth.users(id), updated_at timestamptz not null default now()
+);
+alter table public.system_report_config enable row level security;
+revoke all on public.system_report_config from anon;
+grant select,insert,update on public.system_report_config to authenticated;
+create or replace function public.delivery_reports_is_admin()
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.user_master member
+    where member.is_active = true and member.role = 'Admin'
+      and (member.auth_user_id = auth.uid() or
+        (member.auth_user_id is null and lower(trim(member.email)) = lower(auth.jwt()->>'email')))
+  );
+$$;
+revoke all on function public.delivery_reports_is_admin() from public;
+grant execute on function public.delivery_reports_is_admin() to authenticated;
+drop policy if exists system_report_config_read on public.system_report_config;
+create policy system_report_config_read on public.system_report_config for select to authenticated
+  using (is_active or public.delivery_reports_is_admin());
+drop policy if exists system_report_config_admin on public.system_report_config;
+create policy system_report_config_admin on public.system_report_config for all to authenticated
+  using (public.delivery_reports_is_admin()) with check (public.delivery_reports_is_admin());
+insert into public.system_report_config(report_code) values ('WEEKLY_MONTHLY_REVIEW') on conflict (report_code) do nothing;
+commit;
+</script>
+<script id="weekly-monthly-review-system-report">
+(()=>{
+  'use strict';
+  const code='WEEKLY_MONTHLY_REVIEW',reportName='Weekly & Monthly Review';
+  const sectionLabels={executiveSummary:'Executive Summary',statusMatrix:'Status Summary Matrix',initiativeLists:'Initiative Lists',initiativeReview:'Detailed Initiative Review',programHighlights:'Program / Project Highlights',milestoneRoadmap:'Milestone Roadmap',plannerTypeRoadmap:'Planner Type Roadmap',risks:'Risks and Required Support'};
+  const executiveSections=['executiveSummary','statusMatrix','initiativeLists','programHighlights','risks','milestoneRoadmap'];
+  const detailedSections=Object.keys(sectionLabels);
+  const dateValueFields={start_date:'Start Date',deadline:'Deadline',completion_date:'Completion Date',status:'Status',owner:'Owner',deviation_days:'Deviation Days'};
+  const defaultPlannerAggregation=field=>field==='start_date'?'earliest':field==='deviation_days'?'max':['deadline','completion_date'].includes(field)?'latest':'last_sequence';
+  const defaults=()=>({report_code:code,report_name:reportName,description:'Factual weekly and monthly delivery review from current Delivery Hub data.',is_active:true,default_export_profile:'Executive',default_sections:executiveSections.filter(key=>sectionLabels[key]),allowed_sections:detailedSections,default_filters:{scope:'active'},display_order:1,week_start:1,allow_period_override:false,planner_type_value_field:'deadline',planner_type_aggregation:'latest'});
+  const state={config:defaults(),configAvailable:false,configError:'',data:null,model:null,params:null,lastRunAt:null,pageIndex:0,zoom:'0.8',lastDepartments:['__all'],busy:false,exporting:false,runSequence:0};
+  const key=value=>value==null?'':String(value),esc=value=>escapeHtml(key(value)),root=()=>document.getElementById('system-reports-page');
+  const toIsoDay=date=>`${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+  function timeZone(){return window.DELIVERY_BUSINESS_TIMEZONE||currentUser?.business_timezone||currentUser?.time_zone||Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC';}
+  function calendarDate(value,zone=timeZone()){
+    if(value==null||value==='')return '';
+    const raw=String(value).trim();if(/^\d{4}-\d{2}-\d{2}$/.test(raw))return raw;
+    const date=new Date(raw);if(Number.isNaN(date.getTime()))return '';
+    const parts=new Intl.DateTimeFormat('en-CA',{timeZone:zone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(date),values=Object.fromEntries(parts.map(part=>[part.type,part.value]));
+    return values.year&&values.month&&values.day?`${values.year}-${values.month}-${values.day}`:'';
+  }
+  function dateParts(value){const match=/^(\d{4})-(\d{2})-(\d{2})$/.exec(key(value));return match?{year:Number(match[1]),month:Number(match[2]),day:Number(match[3])}:null;}
+  function compareCalendarDate(left,right){const a=dateParts(left),b=dateParts(right);if(!a&&!b)return 0;if(!a)return 1;if(!b)return -1;return Date.UTC(a.year,a.month-1,a.day)-Date.UTC(b.year,b.month-1,b.day);}
+  function addDays(value,count){const parts=dateParts(value);if(!parts)return '';const date=new Date(Date.UTC(parts.year,parts.month-1,parts.day+count));return `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,'0')}-${String(date.getUTCDate()).padStart(2,'0')}`;}
+  function monthStart(value){const parts=dateParts(value);return parts?`${parts.year}-${String(parts.month).padStart(2,'0')}-01`:'';}
+  function monthEnd(value){const parts=dateParts(value);if(!parts)return '';return `${parts.year}-${String(parts.month).padStart(2,'0')}-${String(new Date(Date.UTC(parts.year,parts.month,0)).getUTCDate()).padStart(2,'0')}`;}
+  function nextMonth(value){const parts=dateParts(value);if(!parts)return '';const date=new Date(Date.UTC(parts.year,parts.month,1));return `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,'0')}-01`;}
+  function runToday(){return calendarDate(new Date().toISOString());}
+  function periods(reviewType,runDate,weekStart=1){
+    const safeRun=calendarDate(runDate)||runToday();
+    if(reviewType==='Weekly'){
+      const parts=dateParts(safeRun),weekday=new Date(Date.UTC(parts.year,parts.month-1,parts.day)).getUTCDay()||7,startOffset=(weekday-weekStart+7)%7,currentStart=addDays(safeRun,-startOffset),lastStart=addDays(currentStart,-7),lastEnd=addDays(currentStart,-1),nextStart=addDays(currentStart,7);
+      return {defaultStart:lastStart,defaultEnd:lastEnd,nextStart,nextEnd:addDays(nextStart,6),anchor:safeRun};
+    }
+    const currentMonthStart=monthStart(safeRun),defaultStart=addDays(currentMonthStart,-1),nextStart=nextMonth(defaultStart);
+    return {defaultStart:monthStart(defaultStart),defaultEnd:monthEnd(defaultStart),nextStart,nextEnd:monthEnd(nextStart),anchor:safeRun};
+  }
+  function normalizeName(value){return key(value).normalize('NFKC').toLowerCase().replace(/[‐‑‒–—−]/g,'-').replace(/\s*-\s*/g,' ').replace(/[.,;:!?()[\]{}"'“”‘’]+/g,' ').trim().replace(/\s+/g,' ');}
+  function stableId(left,right){return key(left).localeCompare(key(right),undefined,{numeric:true,sensitivity:'base'});}
+  function archived(row){return ['archived','deleted','inactive'].includes(key(row?.record_status||row?.recordStatus||'').trim().toLowerCase())||row?.is_active===false;}
+  function inScope(row,scope){const isArchived=archived(row),lifecycle=key(row.status||row.rawStatus||row.persistedStatus).trim().toLowerCase();if(scope==='all')return true;if(scope==='archived')return isArchived;return !isArchived&&!['cancelled','canceled','removed'].includes(lifecycle);}
+  function formatDay(value){const day=calendarDate(value);if(!day)return '-';try{return typeof formatDate==='function'?formatDate(day):new Intl.DateTimeFormat('en-GB',{day:'2-digit',month:'short',year:'numeric',timeZone:'UTC'}).format(new Date(`${day}T00:00:00Z`));}catch{return day;}}
+  function displayDateTime(value){if(!value)return '-';try{return new Intl.DateTimeFormat('en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:timeZone()}).format(new Date(value));}catch{return key(value);}}
+  function valueOrDash(value){return value==null||String(value).trim()===''?'-':String(value);}
+  function rawStatus(milestone){
+    try{return typeof getEffectiveMilestoneStatus==='function'?normalizeMilestoneStatus(getEffectiveMilestoneStatus(milestone)):normalizeMilestoneStatus(milestone.status||'Pending');}
+    catch{return normalizeMilestoneStatus(milestone.status||'Pending');}
+  }
+  function priorityFor(row){
+    const stored=row.priority||row.delivery_priority||row.priority_name;if(stored)return String(stored);
+    try{const normalized={...row,name:row.title||row.name||'',revisedEndDate:row.revised_end_date||'',targetEndDate:row.target_end_date||'',actualEndDate:row.actual_end_date||''};return typeof analyticsPriority==='function'?analyticsPriority(normalized):'Other / Blank';}catch{return 'Other / Blank';}
+  }
+  function milestonePriority(row,initiative){return row.priority||row.delivery_priority||row.priority_name||priorityFor(initiative);}
+  function initiativeStatus(row){
+    const normalized={...row,name:row.title||row.name||'',revisedStartDate:row.revised_start_date||'',startDate:row.start_date||'',revisedEndDate:row.revised_end_date||'',targetEndDate:row.target_end_date||'',actualEndDate:row.actual_end_date||''};
+    try{return typeof analyticsStatus==='function'?analyticsStatus(normalized):evaluateProjectStatus(normalized.name,normalized.revisedStartDate||normalized.startDate,normalized.revisedEndDate||normalized.targetEndDate,normalized.actualEndDate)||'Pending';}catch{return row.status||'Pending';}
+  }
+  function dateWithin(day,start,end){return Boolean(day&&start&&end&&day>=start&&day<=end);}
+  function readForm(){
+    const departments=[...document.getElementById('sr-departments').selectedOptions].map(option=>option.value).filter(Boolean),sections=[...document.querySelectorAll('#sr-section-options input:checked')].map(input=>input.value),runDate=calendarDate(document.getElementById('sr-run-date').value),asOfDate=calendarDate(document.getElementById('sr-as-of-date').value),start=calendarDate(document.getElementById('sr-period-start').value),end=calendarDate(document.getElementById('sr-period-end').value);
+    return {reviewType:document.getElementById('sr-review-type').value,runDate,asOfDate,start,end,departments,program:document.getElementById('sr-program').value,initiativeType:document.getElementById('sr-initiative-type').value,deliveryMethod:document.getElementById('sr-delivery-method').value,initiativeStatus:document.getElementById('sr-initiative-status').value,milestoneStatus:document.getElementById('sr-milestone-status').value,owner:document.getElementById('sr-owner').value,assigned:document.getElementById('sr-assigned').value,priority:document.getElementById('sr-priority').value,scope:document.getElementById('sr-scope').value,profile:document.getElementById('sr-profile').value,sections,plannerTypeField:document.getElementById('sr-planner-value').value,plannerAggregation:document.getElementById('sr-planner-aggregation').value,diagnostics:currentUser?.role==='Admin'&&Boolean(document.getElementById('sr-planner-diagnostics')?.checked)};
+  }
+  function setStatus(text,error=false){const element=document.getElementById('sr-status');if(element){element.textContent=text;element.dataset.error=String(error);}}
+  function selectedAll(departments){return departments.includes('__all');}
+  function selectedDepartmentNames(params,data){const active=(data.departments||[]).map(row=>key(row.value_name)).filter(Boolean);if(selectedAll(params.departments))return [...new Set(active)].sort(stableId);return [...new Set(params.departments.filter(value=>active.includes(value)))].sort(stableId);}
+  function makeOption(value,label,selected){return `<option value="${esc(value)}" ${selected?'selected':''}>${esc(label)}</option>`;}
+  function setSelectOptions(id,items,selectedValue,multiple=false){const select=document.getElementById(id);if(!select)return;const selected=multiple?new Set(selectedValue||[]):new Set([key(selectedValue)]);select.innerHTML=(multiple?'':makeOption('','All',!selected.size||selected.has('')))+items.map(item=>makeOption(item[0],item[1],selected.has(key(item[0])))).join('');if(multiple)for(const option of select.options)option.selected=selected.has(option.value);}
+  function initialRows(){return {programs:programs||[],initiatives:kpiInitiativeRows||[],milestones:kpiMilestoneRows||[],tracks:(projects||[]).flatMap(project=>(project.tracks||[]).map(track=>({...track,initiative_id:project.id}))),departments:(masterValues||[]).filter(row=>row.master_type==='DEPARTMENT'&&row.is_active===true),initiativeTypes:(masterValues||[]).filter(row=>row.master_type==='INITIATIVE_TYPE'&&row.is_active===true),plannerTypes:window.milestonePlannerTypes?.state.values||[],plannerTypeGroups:window.milestonePlannerTypes?.state.groups||[],templateRows:[],templates:[],users:userMaster||[]};}
+  function renderFilters(data=state.data||initialRows()){
+    const params=state.params||{},departments=(data.departments||[]).filter(row=>row.is_active===true).map(row=>[key(row.value_name),key(row.value_name)]).filter(row=>row[0]).sort((a,b)=>stableId(a[0],b[0]));
+    const chosen=Array.isArray(params.departments)?params.departments:['__all'];setSelectOptions('sr-departments',[["__all",'All Departments'],...departments],chosen,true);
+    const programsList=(data.programs||[]).filter(row=>!archived(row)).map(row=>[key(row.id),row.program_name||row.name||`Program ${row.id}`]);setSelectOptions('sr-program',programsList,params.program||'');
+    const initiativeTypes=(data.initiativeTypes||[]).map(row=>[key(row.value_name),key(row.value_name)]);setSelectOptions('sr-initiative-type',initiativeTypes,params.initiativeType||'');
+    const initiatives=data.initiatives||[],unique=values=>[...new Set(values.map(key).filter(Boolean))].sort(stableId).map(value=>[value,value]);
+    setSelectOptions('sr-delivery-method',unique(initiatives.map(row=>row.delivery_method)),params.deliveryMethod||'');
+    setSelectOptions('sr-initiative-status',unique(initiatives.map(initiativeStatus)),params.initiativeStatus||'');
+    setSelectOptions('sr-milestone-status',unique((data.milestones||[]).map(rawStatus)),params.milestoneStatus||'');
+    setSelectOptions('sr-owner',unique(initiatives.map(row=>row.business_owner)),params.owner||'');
+    setSelectOptions('sr-assigned',unique(initiatives.map(row=>row.assigned_to)),params.assigned||'');
+    setSelectOptions('sr-priority',unique(initiatives.map(priorityFor)),params.priority||'');
+  }
+  function setSections(sections){const allowed=new Set(state.config.allowed_sections||detailedSections);document.getElementById('sr-section-options').innerHTML=detailedSections.filter(section=>allowed.has(section)).map(section=>`<label><input type="checkbox" value="${section}" ${sections.includes(section)?'checked':''}>${sectionLabels[section]}</label>`).join('');}
+  function ensurePage(){
+    if(!root()||root().querySelector('#sr-controls'))return;
+    root().innerHTML=`<div class="system-report-header"><div><p class="system-page-brand">Delivery Hub / System Reports</p><h2>${reportName}</h2><p class="system-report-description">A factual weekly and monthly review built from current Programs, Initiatives, Tracks, Milestones, and Planner mappings.</p><p class="system-report-small">Exports: Excel, PDF, Word, PowerPoint</p></div><div class="system-report-toolbar"><button id="sr-config-open" type="button" data-admin-only hidden><i data-lucide="settings-2"></i>Admin Configuration</button><button id="sr-export" type="button" disabled><i data-lucide="download"></i>Export</button></div></div>
+      <div id="sr-controls" class="system-report-controls"><label>Review Type<select id="sr-review-type"><option>Weekly</option><option>Monthly</option></select></label><label>Run Date<input id="sr-run-date" type="date"></label><label>As-of Date<input id="sr-as-of-date" type="date"></label><label>Reporting Period Start<input id="sr-period-start" type="date"></label><label>Reporting Period End<input id="sr-period-end" type="date"></label><label>Next Review Period<input id="sr-next-period" type="text" readonly></label><label>Program<select id="sr-program"></select></label><label>Department / Vertical<select id="sr-departments" multiple size="3" aria-label="Department or Vertical"></select></label><label>Initiative Type<select id="sr-initiative-type"></select></label><label>Delivery Method<select id="sr-delivery-method"></select></label><label>Initiative Status<select id="sr-initiative-status"></select></label><label>Milestone Status<select id="sr-milestone-status"></select></label><label>Business Owner<select id="sr-owner"></select></label><label>Assigned To<select id="sr-assigned"></select></label><label>Priority<select id="sr-priority"></select></label><label>Active / Archived Scope<select id="sr-scope"><option value="active">Active</option><option value="all">Active and Archived</option><option value="archived">Archived</option></select></label><label>Export Profile<select id="sr-profile"><option>Executive</option><option>Detailed</option></select></label><label>Planner Type Value<select id="sr-planner-value">${Object.entries(dateValueFields).map(([field,label])=>`<option value="${field}">${label}</option>`).join('')}</select></label><label>Duplicate Planner Type Aggregation<select id="sr-planner-aggregation"><option value="latest">Latest Date</option><option value="earliest">Earliest Date</option><option value="first_sequence">First by Milestone Sequence</option><option value="last_sequence">Last by Milestone Sequence</option><option value="all">Show All</option><option value="count">Count</option><option value="max">Maximum Deviation</option><option value="sum">Sum Deviation</option></select></label><label id="sr-diagnostics-label" hidden><span>Show Planner Type Match Diagnostics</span><input id="sr-planner-diagnostics" type="checkbox"></label><p id="sr-period-note" class="system-report-range-note"></p></div>
+      <div class="system-report-sections"><strong>Included Sections</strong><label><input type="checkbox" checked disabled>Cover Page</label><div id="sr-section-options" class="system-report-sections" style="grid-column:1/-1;padding:0;border:0"></div></div>
+      <div class="system-report-toolbar"><button id="sr-run" type="button"><i data-lucide="play"></i>Run Report</button><button id="sr-print" type="button" disabled><i data-lucide="printer"></i>Print Preview</button><span id="sr-last-run" class="system-report-status">Not run in this browser session.</span></div><p id="sr-status" class="system-report-alert" role="status" aria-live="polite"></p><nav id="sr-pager" class="system-report-pager" aria-label="Report pages" hidden></nav><div id="sr-preview-shell" class="system-report-preview-shell"><div id="sr-report-page" class="system-report-page system-report-cover"><p class="system-page-brand">Delivery Hub / System Report</p><h2>${reportName}</h2><p>Select report parameters, then run the report.</p></div></div>
+      <dialog id="sr-config-dialog" class="system-report-config"><form method="dialog" id="sr-config-form"><div class="flex items-center justify-between gap-2"><h3>Admin Configuration / ${reportName}</h3><button type="button" id="sr-config-close" aria-label="Close"><i data-lucide="x"></i></button></div><p class="system-report-small">The system report code and name are fixed. Only defaults and allowed run behavior can be configured.</p><div class="system-report-toolbar"><label>Default Export Profile<select id="sr-config-profile"><option>Executive</option><option>Detailed</option></select></label><label>Week Starts On<select id="sr-config-week-start"><option value="1">Monday</option><option value="7">Sunday</option><option value="6">Saturday</option></select></label><label>Default Active / Archived Scope<select id="sr-config-scope"><option value="active">Active</option><option value="all">Active and Archived</option><option value="archived">Archived</option></select></label><label><span>Allow Admin-Configured Manual Period Override</span><input id="sr-config-period-override" type="checkbox"></label></div><h4 class="font-bold">Default Included Sections</h4><div id="sr-config-sections" class="system-report-config-sections"></div><p id="sr-config-status" class="system-report-alert" role="status"></p><div class="system-report-toolbar"><button id="sr-config-save" type="button"><i data-lucide="save"></i>Save Defaults</button><button id="sr-config-sql" type="button"><i data-lucide="database"></i>Database Setup</button></div></form></dialog>`;
+    const exportFormat=document.createElement('label');exportFormat.className='system-report-toolbar';exportFormat.innerHTML='<span class="system-report-small">Export Format</span><select id="sr-export-format" aria-label="Export Format"><option value="excel">Excel</option><option value="pdf">PDF</option><option value="word">Word</option><option value="powerpoint">PowerPoint</option></select>';document.getElementById('sr-export').before(exportFormat);
+    const plannerDefaults=document.createElement('div');plannerDefaults.className='system-report-toolbar';plannerDefaults.innerHTML=`<label>Default Planner Type Value<select id="sr-config-planner-value">${Object.entries(dateValueFields).map(([field,label])=>`<option value="${field}">${label}</option>`).join('')}</select></label><label>Default Duplicate Aggregation<select id="sr-config-planner-aggregation"><option value="earliest">Earliest Date</option><option value="latest">Latest Date</option><option value="first_sequence">First by Milestone Sequence</option><option value="last_sequence">Last by Milestone Sequence</option><option value="all">Show All</option><option value="count">Count</option><option value="max">Maximum Deviation</option><option value="sum">Sum Deviation</option></select></label>`;document.querySelector('#sr-config-form h4')?.before(plannerDefaults);
+    const departmentDefaults=document.createElement('div');departmentDefaults.className='system-report-toolbar';departmentDefaults.innerHTML=`<label>Default Departments / Verticals<select id="sr-config-departments" multiple size="4"><option value="__all">All Departments</option>${initialRows().departments.filter(row=>row.is_active===true).map(row=>`<option value="${esc(row.value_name)}">${esc(row.value_name)}</option>`).join('')}</select></label>`;document.querySelector('#sr-config-form .system-report-toolbar')?.after(departmentDefaults);
+    const filterDefaults=document.createElement('div');filterDefaults.className='system-report-controls';filterDefaults.innerHTML='<label>Default Program<select id="sr-config-program"></select></label><label>Default Initiative Type<select id="sr-config-initiative-type"></select></label><label>Default Delivery Method<select id="sr-config-delivery-method"></select></label><label>Default Initiative Status<select id="sr-config-initiative-status"></select></label><label>Default Milestone Status<select id="sr-config-milestone-status"></select></label><label>Default Business Owner<select id="sr-config-owner"></select></label><label>Default Assigned To<select id="sr-config-assigned"></select></label><label>Default Priority<select id="sr-config-priority"></select></label>';departmentDefaults.after(filterDefaults);
+    root().addEventListener('change',onChange);root().addEventListener('click',onClick);setSections(state.config.default_sections||executiveSections);renderFilters();lucide.createIcons();
+  }
+  function updatePeriodControls(force=true){
+    const runDate=calendarDate(document.getElementById('sr-run-date').value)||runToday(),reviewType=document.getElementById('sr-review-type').value,range=periods(reviewType,runDate,state.config.week_start||1),start=document.getElementById('sr-period-start'),end=document.getElementById('sr-period-end');
+    if(force||!start.value||!end.value){start.value=range.defaultStart;end.value=range.defaultEnd;}
+    const override=state.config.allow_period_override&&(start.value!==range.defaultStart||end.value!==range.defaultEnd);let nextStart=range.nextStart,nextEnd=range.nextEnd;
+    if(override){if(reviewType==='Weekly'){nextStart=addDays(end.value,1);nextEnd=addDays(nextStart,6);}else{nextStart=nextMonth(start.value);nextEnd=monthEnd(nextStart);}}
+    const next=document.getElementById('sr-next-period');next.value=`${formatDay(nextStart)} to ${formatDay(nextEnd)}`;
+    start.disabled=end.disabled=!Boolean(state.config.allow_period_override);document.getElementById('sr-period-note').textContent=`${reviewType} review anchored to ${formatDay(runDate)} (${timeZone()}). Review period: ${formatDay(start.value)} to ${formatDay(end.value)}. Next review: ${formatDay(nextStart)} to ${formatDay(nextEnd)}.${override?' Manual period override is active.':''}`;
+    return {...range,nextStart,nextEnd,reportStart:start.value,reportEnd:end.value,manualOverride:Boolean(override)};
+  }
+  function initParams(){
+    const today=runToday(),range=periods('Weekly',today,state.config.week_start||1),filter=state.config.default_filters||{};
+    document.getElementById('sr-run-date').value=today;document.getElementById('sr-as-of-date').value=today;document.getElementById('sr-review-type').value='Weekly';document.getElementById('sr-scope').value=filter.scope||'active';document.getElementById('sr-profile').value=state.config.default_export_profile||'Executive';document.getElementById('sr-planner-value').value=state.config.planner_type_value_field||'deadline';document.getElementById('sr-planner-aggregation').value=state.config.planner_type_aggregation||defaultPlannerAggregation(document.getElementById('sr-planner-value').value);state.lastDepartments=['__all'];state.zoom='0.8';
+    updatePeriodControls(true);setSections(state.config.default_sections||executiveSections);state.params={departments:Array.isArray(filter.departments)&&filter.departments.length?filter.departments:['__all'],program:filter.program||'',initiativeType:filter.initiativeType||'',deliveryMethod:filter.deliveryMethod||'',initiativeStatus:filter.initiativeStatus||'',milestoneStatus:filter.milestoneStatus||'',owner:filter.owner||'',assigned:filter.assigned||'',priority:filter.priority||''};renderFilters();
+  }
+  async function readRows(table,required=true){const result=await fetchAllSupabaseRows(table);if(result.error){if(required)throw result.error;return [];}return result.data||[];}
+  async function loadConfig(){
+    state.config=defaults();state.configAvailable=false;state.configError='';
+    const result=await supabaseClient.from('system_report_config').select('*').eq('report_code',code).maybeSingle();
+    if(result.error){state.configError='Admin defaults are not connected. Run the embedded System Reports SQL to enable shared configuration.';return;}
+    if(result.data){state.config={...state.config,...result.data};state.configAvailable=true;}
+  }
+  async function loadData(){
+    if(await loadInitiativesFromSupabase()===false)throw new Error('Unable to refresh authoritative Initiative and Milestone data.');
+    const [masterRows,templates,templateRows]=await Promise.all([readRows('master_values'),readRows('project_planner_templates',false),readRows('project_planner_milestones',false),window.milestonePlannerTypes?.load(true)]);
+    state.data={programs:(programs||[]).map(row=>({...row,program_name:row.name||row.program_name||''})),initiatives:kpiInitiativeRows.slice(),milestones:kpiMilestoneRows.slice(),tracks:(projects||[]).flatMap(project=>(project.tracks||[]).map(track=>({...track,initiative_id:project.id}))),departments:masterRows.filter(row=>row.master_type==='DEPARTMENT'),initiativeTypes:masterRows.filter(row=>row.master_type==='INITIATIVE_TYPE'),templates,templateRows,plannerTypes:window.milestonePlannerTypes?.state.values||[],plannerTypeGroups:window.milestonePlannerTypes?.state.groups||[],users:userMaster||[]};
+    state.data.plannerTypes.sort((a,b)=>Number(a.sequence_no)-Number(b.sequence_no)||stableId(a.id,b.id));state.data.templateRows.sort((a,b)=>Number(a.display_order)-Number(b.display_order)||stableId(a.id,b.id));renderFilters(state.data);return state.data;
+  }
+  function normalizedMilestone(row,initiative,program,data,trackMap,typeMap,params,period){
+    const completionDate=calendarDate(row.completion_date),deadline=calendarDate(row.deadline),futureCompletion=Boolean(completionDate&&completionDate>params.runDate),status=rawStatus({...row,startDate:row.start_date,endDate:row.end_date,deadline}),effectiveStatus=completionDate?'Done':status;
+    const deviationRaw=row.deviation_days??row.deviation??row.total_overall_deviation??'';let deviation=deviationRaw;
+    if((deviation==null||deviation==='')&&typeof getMilestoneTotalOverallDeviation==='function'){try{deviation=getMilestoneTotalOverallDeviation(row);}catch{deviation='';}}
+    const numericDeviation=Number(deviation);const critical=Boolean(row.is_critical||row.critical===true||row.critical==='true'||effectiveStatus==='Critical'),onHold=effectiveStatus==='On-Hold',deviated=effectiveStatus==='Deviated'||Number.isFinite(numericDeviation)&&numericDeviation>0;
+    let classification='Outside Review Period';
+    if(futureCompletion)classification='Invalid Future Completion Date';
+    else if(dateWithin(completionDate,period.reportStart,period.reportEnd))classification='Completed During Review Period';
+    else if(dateWithin(deadline,period.reportStart,period.reportEnd)&&(!completionDate||completionDate>period.reportEnd))classification='Due but Not Completed During Review Period';
+    else if(dateWithin(deadline,period.nextStart,period.nextEnd)&&!completionDate&&effectiveStatus!=='Done')classification='Planned for Next Review Period';
+    else if(deadline&&deadline<params.runDate&&!completionDate)classification='Overdue';
+    else if(onHold)classification='On Hold';else if(critical)classification='Critical';else if(deviated)classification='Deviated';
+    const late=Boolean(completionDate&&deadline&&completionDate>deadline);
+    return {raw:row,id:row.id,sequence:Number(row.sequence_no??row.display_order)||0,initiativeId:initiative.id,initiative:initiative.title||initiative.name||'',initiativeCr:initiative.cr_no||initiative.cr_number||'',programId:initiative.program_id,program:program?.program_name||program?.name||'',department:initiative.vertical||'-',initiativeType:initiative.initiative_type||initiative.type||'',deliveryMethod:initiative.delivery_method||'',trackId:row.track_id??row.trackId??'',track:trackMap.get(key(row.track_id??row.trackId))?.name||trackMap.get(key(row.track_id??row.trackId))?.track_name||'',plannerTypeId:row.planner_type_id??row.plannerTypeId??'',plannerType:typeMap.get(key(row.planner_type_id??row.plannerTypeId))?.value_name||'',templateId:row.template_id||'',templateMilestoneId:row.template_milestone_id||'',action:row.actions||row.action||row.milestone_title||row.title||'',owner:row.owner||row.milestone_owner||'',assigned:row.assigned_to||initiative.assigned_to||'',status:effectiveStatus||'Pending',storedStatus:status,priority:milestonePriority(row,initiative),days:row.days??'',startDate:calendarDate(row.start_date),deadline,completionDate,futureCompletion,deviation:valueOrDash(deviation),critical,onHold,deviated,late,recordStatus:row.record_status||'active',createdAt:row.created_at||'',modifiedAt:row.modified_at||row.updated_at||'',archivedAt:row.archived_at||'',classification};
+  }
+  function buildModel(data,params){
+    const period=periods(params.reviewType,params.runDate,state.config.week_start||1);period.reportStart=params.start;period.reportEnd=params.end;period.manualOverride=state.config.allow_period_override&&(params.start!==period.defaultStart||params.end!==period.defaultEnd);if(period.manualOverride){if(params.reviewType==='Weekly'){period.nextStart=addDays(params.end,1);period.nextEnd=addDays(period.nextStart,6);}else{period.nextStart=nextMonth(params.start);period.nextEnd=monthEnd(period.nextStart);}}
+    if(!params.departments.length)throw new Error('No Departments selected. Select one, more than one, or All Departments.');
+    const departmentNames=selectedDepartmentNames(params,data);if(!departmentNames.length)throw new Error('No active Departments are configured in Department Master.');
+    const programMap=new Map(data.programs.map(row=>[key(row.id),row])),trackMap=new Map(data.tracks.map(row=>[key(row.id),row])),typeMap=new Map(data.plannerTypes.map(row=>[key(row.id),row]));
+    const initiatives=data.initiatives.filter(row=>inScope(row,params.scope)&&departmentNames.includes(key(row.vertical))&&isVerticalAllowed(row.vertical)).filter(row=>!params.program||key(row.program_id)===params.program).filter(row=>!params.initiativeType||key(row.initiative_type||row.type)===params.initiativeType).filter(row=>!params.deliveryMethod||key(row.delivery_method)===params.deliveryMethod).filter(row=>!params.owner||key(row.business_owner)===params.owner).filter(row=>!params.assigned||key(row.assigned_to)===params.assigned).filter(row=>!params.initiativeStatus||initiativeStatus(row)===params.initiativeStatus).filter(row=>!params.priority||priorityFor(row)===params.priority);
+    const initiativeMap=new Map(initiatives.map(row=>[key(row.id),row])),milestones=data.milestones.filter(row=>initiativeMap.has(key(row.initiative_id))&&inScope(row,params.scope)).map(row=>normalizedMilestone(row,initiativeMap.get(key(row.initiative_id)),programMap.get(key(initiativeMap.get(key(row.initiative_id)).program_id)),data,trackMap,typeMap,params,period)).filter(row=>!params.milestoneStatus||row.status===params.milestoneStatus);
+    const milestoneByInitiative=new Map();for(const milestone of milestones){if(!milestoneByInitiative.has(key(milestone.initiativeId)))milestoneByInitiative.set(key(milestone.initiativeId),[]);milestoneByInitiative.get(key(milestone.initiativeId)).push(milestone);}
+    const initiativeRecords=initiatives.map(row=>{
+      const program=programMap.get(key(row.program_id)),initiativeMilestones=milestoneByInitiative.get(key(row.id))||[],eligible=initiativeMilestones.filter(item=>!item.onHold),completed=initiativeMilestones.filter(item=>item.status==='Done').length,progress=eligible.length?Math.round(completed*100/eligible.length):0;
+      const normalized={...row,name:row.title||row.name||'',revisedStartDate:row.revised_start_date||'',startDate:row.start_date||'',revisedEndDate:row.revised_end_date||'',targetEndDate:row.target_end_date||'',actualEndDate:row.actual_end_date||''};
+      return {raw:row,id:row.id,cr:row.cr_no||row.cr_number||'',name:normalized.name,program:program?.program_name||program?.name||'Unmapped',programId:row.program_id,department:row.vertical||'-',type:row.initiative_type||row.type||'',deliveryMethod:row.delivery_method||'',owner:row.business_owner||'',assigned:row.assigned_to||'',status:initiativeStatus(normalized)||'Pending',priority:priorityFor(row),start:calendarDate(row.start_date),target:calendarDate(row.revised_end_date||row.target_end_date),benefit:row.business_benefit||row.measurable_impact||row.impact_category||'',description:row.description||row.brief_description||'',progress,milestones:initiativeMilestones,completed:initiativeMilestones.filter(item=>dateWithin(item.completionDate,period.reportStart,period.reportEnd)).sort((a,b)=>compareCalendarDate(a.completionDate,b.completionDate)||a.sequence-b.sequence||stableId(a.id,b.id)),planned:initiativeMilestones.filter(item=>dateWithin(item.deadline,period.nextStart,period.nextEnd)&&item.status!=='Done'&&!item.futureCompletion).sort((a,b)=>compareCalendarDate(a.deadline,b.deadline)||a.sequence-b.sequence||stableId(a.id,b.id)),dueLastWeek:initiativeMilestones.filter(item=>dateWithin(item.deadline,period.reportStart,period.reportEnd)&&(!item.completionDate||item.completionDate>period.reportEnd)),overdue:initiativeMilestones.filter(item=>item.deadline&&item.deadline<params.runDate&&!item.completionDate),onHold:initiativeMilestones.filter(item=>item.onHold),critical:initiativeMilestones.filter(item=>item.critical),deviated:initiativeMilestones.filter(item=>item.deviated)};
+    }).sort((a,b)=>stableId(a.department,b.department)||stableId(a.program,b.program)||stableId(a.name,b.name)||stableId(a.id,b.id));
+    const selectedIds=new Set(initiativeRecords.map(row=>key(row.id))),allMilestones=milestones.filter(row=>selectedIds.has(key(row.initiativeId))).sort((a,b)=>stableId(a.department,b.department)||stableId(a.program,b.program)||stableId(a.initiative,b.initiative)||compareCalendarDate(a.startDate,b.startDate)||compareCalendarDate(a.deadline,b.deadline)||a.sequence-b.sequence||stableId(a.id,b.id));
+    const initiativesByDepartment=new Map();for(const initiative of initiativeRecords){if(!initiativesByDepartment.has(initiative.department))initiativesByDepartment.set(initiative.department,[]);initiativesByDepartment.get(initiative.department).push(initiative);}
+    const selectedPrograms=new Map(data.programs.filter(row=>initiativeRecords.some(init=>key(init.programId)===key(row.id))).map(row=>[key(row.id),row]));
+    const completed=allMilestones.filter(item=>dateWithin(item.completionDate,period.reportStart,period.reportEnd)),dueNotComplete=allMilestones.filter(item=>dateWithin(item.deadline,period.reportStart,period.reportEnd)&&(!item.completionDate||item.completionDate>period.reportEnd)),planned=allMilestones.filter(item=>dateWithin(item.deadline,period.nextStart,period.nextEnd)&&item.status!=='Done'&&!item.futureCompletion),overdue=allMilestones.filter(item=>item.deadline&&item.deadline<params.runDate&&!item.completionDate),onHoldNext=planned.filter(item=>item.onHold),criticalNext=planned.filter(item=>item.critical||item.deviated);
+    const eligible=allMilestones.filter(item=>!item.onHold),done=allMilestones.filter(item=>item.status==='Done'),statusOrder=['Pending','In-Queue','WIP','On-Hold','Deviated','Critical','Delay','Overdue','Done'];
+    const matchesStatus=(item,status)=>status==='WIP'?['WIP','In Progress'].includes(item.status):item.status===status;
+    const matrix=[];const priorityValues=[...new Set(allMilestones.map(row=>row.priority||'Other / Blank'))].sort(stableId);for(const priority of priorityValues){const row=[priority];for(const status of statusOrder)row.push(allMilestones.filter(item=>item.priority===priority&&matchesStatus(item,status)).length);row.push(allMilestones.filter(item=>item.priority===priority).length);matrix.push(row);}
+    const totals=['Grand Total',...statusOrder.map(status=>allMilestones.filter(item=>matchesStatus(item,status)).length),allMilestones.length];
+    const summary={programs:selectedPrograms.size,initiatives:initiativeRecords.length,milestones:allMilestones.length,done:done.length,onHold:allMilestones.filter(item=>item.onHold).length,pending:allMilestones.filter(item=>item.status==='Pending').length,deviated:allMilestones.filter(item=>item.deviated).length,critical:allMilestones.filter(item=>item.critical).length,wip:allMilestones.filter(item=>['WIP','In Progress'].includes(item.status)).length,inQueue:allMilestones.filter(item=>item.status==='In-Queue').length,completedDuring:completed.length,dueNotCompleted:dueNotComplete.length,plannedNext:planned.length,progress:eligible.length?Math.round(done.length*100/eligible.length):0};
+    const risks=[...new Map([...overdue.map(row=>[row,'Overdue']),...dueNotComplete.map(row=>[row,'Due Last Week but Not Completed']),...onHoldNext.map(row=>[row,'On Hold Due Next Review Period']),...criticalNext.map(row=>[row,row.critical?'Critical Next-Period Plan':'Deviated Next-Period Plan']),...allMilestones.filter(row=>row.critical).map(row=>[row,'Critical']),...allMilestones.filter(row=>row.deviated).map(row=>[row,'Deviated']),...allMilestones.filter(row=>row.futureCompletion).map(row=>[row,'Invalid Future Completion Date'])].map(([row,label])=>[key(row.id),{...row,riskLabel:label}])).values()].sort((a,b)=>stableId(a.department,b.department)||stableId(a.program,b.program)||stableId(a.initiative,b.initiative)||stableId(a.deadline,b.deadline)||a.sequence-b.sequence||stableId(a.id,b.id));
+    const model={reportCode:code,reportName,runDate:params.runDate,asOfDate:params.asOfDate,reviewType:params.reviewType,reviewStart:period.reportStart,reviewEnd:period.reportEnd,nextStart:period.nextStart,nextEnd:period.nextEnd,timeZone:timeZone(),manualOverride:period.manualOverride,departments:departmentNames,profile:params.profile,sections:params.sections,filters:{program:params.program,initiativeType:params.initiativeType,deliveryMethod:params.deliveryMethod,initiativeStatus:params.initiativeStatus,milestoneStatus:params.milestoneStatus,owner:params.owner,assigned:params.assigned,priority:params.priority,scope:params.scope},summary,initiativeRecords,initiativesByDepartment,programs:[...selectedPrograms.values()],milestones:allMilestones,completed,dueNotComplete,planned,overdue,onHoldNext,criticalNext,risks,matrix,matrixTotals:totals,plannerTypes:[],plannerRows:[],plannerDiagnostics:[],pages:[],generatedAt:new Date().toISOString()};
+    buildPlannerRoadmap(model,data,params);buildReportPages(model,params);return model;
+  }
+  function aggregatePlannerMatches(matches,field,mode){
+    if(!matches.length)return '-';const sorted=matches.slice().sort((a,b)=>a.sequence-b.sequence||stableId(a.id,b.id));if(mode==='count')return String(sorted.length);if(mode==='all')return sorted.map(item=>formatPlannerValue(item,field)).join('\n');
+    if(mode==='first_sequence')return formatPlannerValue(sorted[0],field);if(mode==='last_sequence')return formatPlannerValue(sorted[sorted.length-1],field);
+    if(field==='deviation_days'&&mode==='sum')return String(sorted.reduce((sum,item)=>sum+(Number(item.deviation)||0),0));if(field==='deviation_days'&&mode==='max')return String(Math.max(...sorted.map(item=>Number(item.deviation)||0)));
+    if(mode==='earliest'||mode==='latest'){const dated=sorted.filter(item=>item[field]&&dateParts(item[field])).sort((a,b)=>stableId(a[field],b[field]));return dated.length?formatPlannerValue(dated[mode==='earliest'?0:dated.length-1],field):'-';}
+    return formatPlannerValue(sorted[sorted.length-1],field);
+  }
+  function formatPlannerValue(item,field){if(field==='status')return valueOrDash(item.status);if(field==='owner')return valueOrDash(item.owner||item.assigned);if(field==='deviation_days')return valueOrDash(item.deviation);return formatDay(item[field]);}
+  function buildPlannerRoadmap(model,data,params){
+    const templateMap=new Map(data.templateRows.map(row=>[key(row.id),row])),typeMap=new Map(data.plannerTypes.map(row=>[key(row.id),row])),rawMilestoneMap=new Map(data.milestones.map(row=>[key(row.id),row])),templatesUsed=new Set(model.milestones.map(row=>key(row.templateId)).filter(Boolean));
+    for(const initiative of model.initiativeRecords){const templateId=key(initiative.raw.template_id||initiative.raw.change_request_template_id);if(templateId)templatesUsed.add(templateId);}
+    const candidateRules=data.templateRows.filter(row=>row.is_active!==false&&row.planner_type_id),templateRules=candidateRules.filter(row=>!templatesUsed.size||templatesUsed.has(key(row.template_id))),legacyTypesByName=new Map(),usedTypeIds=new Set(templateRules.map(row=>key(row.planner_type_id)));
+    for(const rule of templateRules){const name=normalizeName(rule.milestone_action||rule.milestone_title);if(!name)continue;if(!legacyTypesByName.has(name))legacyTypesByName.set(name,new Set());legacyTypesByName.get(name).add(key(rule.planner_type_id));}
+    for(const row of model.milestones)if(row.plannerTypeId)usedTypeIds.add(key(row.plannerTypeId));
+    const orderedTypes=[...usedTypeIds].map(id=>typeMap.get(id)).filter(Boolean).sort((a,b)=>stableId(data.plannerTypeGroups.find(group=>key(group.id)===key(a.group_id))?.group_name,data.plannerTypeGroups.find(group=>key(group.id)===key(b.group_id))?.group_name)||Number(a.sequence_no)-Number(b.sequence_no)||stableId(a.id,b.id));
+    model.plannerTypes=orderedTypes;
+    model.plannerRows=model.initiativeRecords.map(initiative=>{
+      const rawMilestones=model.milestones.filter(row=>key(row.initiativeId)===key(initiative.id)),values={};
+      for(const type of orderedTypes){const rules=templateRules.filter(rule=>key(rule.planner_type_id)===key(type.id)),matched=[];
+        for(const milestone of rawMilestones){let source='';if(milestone.plannerTypeId){if(key(milestone.plannerTypeId)===key(type.id)){matched.push({...milestone,_matchSource:'Planner Type ID'});source='Planner Type ID';}}
+          else{const raw=rawMilestoneMap.get(key(milestone.id)),linked=templateMap.get(key(milestone.templateMilestoneId));if(linked&&key(linked.planner_type_id)===key(type.id)){matched.push({...milestone,_matchSource:'Planner Type ID'});source='Planner Type ID';}
+            else{const action=normalizeName(raw?.actions||raw?.action||raw?.milestone_title),candidates=legacyTypesByName.get(action);if(candidates?.size===1&&candidates.has(key(type.id))){matched.push({...milestone,_matchSource:'Normalized Legacy Name Match'});source='Normalized Legacy Name Match';}}
+          }
+          if(params.diagnostics&&source)model.plannerDiagnostics.push({initiative:initiative.name,milestone:milestone.action,type:type.value_name,source,duplicate:false});
+        }
+        if(matched.length>1&&matched.some(row=>row._matchSource==='Normalized Legacy Name Match')&&params.diagnostics)model.plannerDiagnostics.push({initiative:initiative.name,milestone:matched.map(row=>row.action).join(' | '),type:type.value_name,source:'Duplicate Legacy Match',duplicate:true});
+        values[key(type.id)]=aggregatePlannerMatches(matched,params.plannerTypeField,params.plannerAggregation);
+      }
+      if(params.diagnostics)for(const milestone of rawMilestones){if(milestone.plannerTypeId)continue;const raw=rawMilestoneMap.get(key(milestone.id)),linked=templateMap.get(key(milestone.templateMilestoneId));if(linked?.planner_type_id)continue;const candidates=legacyTypesByName.get(normalizeName(raw?.actions||raw?.action||raw?.milestone_title));if(candidates?.size===1)continue;model.plannerDiagnostics.push({initiative:initiative.name,milestone:milestone.action,type:candidates?.size?([...candidates].map(id=>typeMap.get(id)?.value_name||id).join(' | ')):'-',source:candidates?.size?'Duplicate Legacy Match':'Not Matched',duplicate:Boolean(candidates?.size)});}
+      return {department:initiative.department,program:initiative.program,initiative:initiative.name,id:initiative.id,values};
+    });
+  }
+  function wrapCellLines(value,width=92){
+    const output=[];for(const paragraph of key(value||'-').split('\n')){const words=paragraph.split(/\s+/).filter(Boolean);let line='';for(let word of words){while(word.length>width){if(line){output.push(line);line='';}output.push(word.slice(0,width));word=word.slice(width);}if(line&&line.length+word.length+1>width){output.push(line);line=word;}else line=line?`${line} ${word}`:word;}output.push(line||'-');}return output.length?output:['-'];
+  }
+  function splitLongRows(rows,linesPerRow=7){
+    return rows.flatMap(row=>{const chunks=row.map(cell=>{const lines=wrapCellLines(cell);const parts=[];for(let offset=0;offset<lines.length;offset+=linesPerRow)parts.push(lines.slice(offset,offset+linesPerRow).join('\n'));return parts;});const count=Math.max(1,...chunks.map(parts=>parts.length));return Array.from({length:count},(_,index)=>chunks.map((parts,column)=>parts[index]??(index&&column===0?'CONTINUED':'-')));});
+  }
+  function addTablePages(model,title,headers,rows,pageSize=10,emptyMessage='No matching report data.'){
+    if(!rows.length){model.pages.push({kind:'table',title,headers,rows:[],emptyMessage,department:''});return;}
+    const readableRows=splitLongRows(rows);for(let offset=0;offset<readableRows.length;offset+=pageSize)model.pages.push({kind:'table',title,headers,rows:readableRows.slice(offset,offset+pageSize),department:'',part:Math.floor(offset/pageSize)+1});
+  }
+  function completionNarrative(items){return items.length?items.map(item=>`${item.action||'-'} — completed ${formatDay(item.completionDate)}${item.late?' (late)':''}`).join('\n'):'-';}
+  function plannedNarrative(items){return items.length?items.map(item=>`${item.action||'-'} — due ${formatDay(item.deadline)}${item.onHold?' (On Hold)':''}${item.critical?' (Critical)':''}${item.deviated?' (Deviated)':''}`).join('\n'):'-';}
+  function buildReportPages(model,params){
+    const summary=model.summary,meta={reviewType:model.reviewType,reviewStart:model.reviewStart,reviewEnd:model.reviewEnd,nextStart:model.nextStart,nextEnd:model.nextEnd,runDate:model.runDate,asOfDate:model.asOfDate,departments:model.departments,profile:model.profile};
+    model.pages=[{kind:'cover',title:reportName,meta,summary:[`${model.reviewType} Status Update`,`Review period: ${formatDay(model.reviewStart)} to ${formatDay(model.reviewEnd)}`,`Next review: ${formatDay(model.nextStart)} to ${formatDay(model.nextEnd)}`,`Run Date: ${formatDay(model.runDate)} | As-of Date: ${formatDay(model.asOfDate)}`,`Department scope: ${model.departments.join(', ')}`,`Export Profile: ${model.profile}`]}];
+    const byDepartment=[...model.initiativesByDepartment.entries()].filter(([,items])=>items.length).sort((a,b)=>stableId(a[0],b[0]));
+    if(model.departments.length>1)for(const [department,items] of byDepartment)model.pages.push({kind:'divider',title:department,department,meta,summary:[`${new Set(items.map(item=>key(item.programId))).size} Program(s)`,` ${items.length} Initiative(s)`,`Review period: ${formatDay(model.reviewStart)} to ${formatDay(model.reviewEnd)}`]});
+    if(params.sections.includes('executiveSummary'))model.pages.push({kind:'summary',title:'Executive Summary',meta,kpis:[['Programs',summary.programs],['Initiatives',summary.initiatives],['Milestones',summary.milestones],['Done',summary.done],['On Hold',summary.onHold],['Pending',summary.pending],['Deviated',summary.deviated],['Critical',summary.critical],['Work in Progress',summary.wip],['In Queue',summary.inQueue],['Completed During Review',summary.completedDuring],['Due but Not Completed',summary.dueNotCompleted],['Planned Next Period',summary.plannedNext],['Overall Completion',`${summary.progress}%`]],summary:[`Weekly progress is based on Completion Date from ${formatDay(model.reviewStart)} through ${formatDay(model.reviewEnd)}.`,`Next-period plans are based on incomplete Milestones with Deadline from ${formatDay(model.nextStart)} through ${formatDay(model.nextEnd)}.`]});
+    if(params.sections.includes('statusMatrix'))addTablePages(model,'Status Summary Matrix',['Priority','Pending','In Queue','Work in Progress','On Hold','Deviated','Critical','Delay','Overdue','Done','Grand Total'],[...model.matrix,model.matrixTotals],18,'No Milestone status data for the selected scope.');
+    if(params.sections.includes('initiativeLists')){
+      const categories=[['Completed',row=>row.status==='Done'],['In Progress',row=>['WIP','In Progress'].includes(row.status)],['On Hold',row=>row.status==='On-Hold'||row.onHold.length>0],['Deviated',row=>['Deviation','Deviated'].includes(row.status)||row.deviated.length>0],['Critical',row=>row.status==='Critical'||row.critical.length>0],['In Queue / Pipeline',row=>row.status==='In-Queue']];
+      for(const [title,matches] of categories){const rows=model.initiativeRecords.filter(matches).map(row=>[row.cr||row.id,row.name,row.program,row.department,row.status,`${row.progress}%`,`Completed ${row.completed.length}; Next ${row.planned.length}; Overdue ${row.overdue.length}; On Hold ${row.onHold.length}; Critical ${row.critical.length}`]);addTablePages(model,`${title} Initiatives`,['Initiative ID / CR','Initiative','Program','Department / Vertical','Status','Completion','Factual Update'],rows,10,`No ${title.toLowerCase()} Initiatives in the selected scope.`);}
+    }
+    if(params.sections.includes('initiativeReview')){
+      const rows=model.initiativeRecords.map(row=>[row.name||'-',valueOrDash(row.description),completionNarrative(row.completed),plannedNarrative(row.planned),row.status||'-',`Start ${formatDay(row.start)}\nTarget ${formatDay(row.target)}`,valueOrDash(row.benefit),[...row.overdue.map(item=>`Overdue: ${item.action}`),...row.onHold.map(item=>`On Hold: ${item.action}`),...row.critical.map(item=>`Critical: ${item.action}`),...row.deviated.map(item=>`Deviated: ${item.action}`)].join('\n')||'-']);addTablePages(model,'Detailed Initiative Review',['Initiative Name','Brief Description','Progress Made During Review Period','Planned for Next Review Period','Status','Timeline','Business Benefit','Challenges / Support Required'],rows,6,'No matching Initiatives.');
+    }
+    if(params.sections.includes('programHighlights'))for(const program of model.programs.sort((a,b)=>stableId(a.program_name||a.name,b.program_name||b.name))){const name=program.program_name||program.name||`Program ${program.id}`,items=model.initiativeRecords.filter(row=>key(row.programId)===key(program.id)),rows=items.map(item=>[item.name,item.department,item.status,`${item.progress}%`,completionNarrative(item.completed),plannedNarrative(item.planned),[...item.overdue.map(row=>`Overdue: ${row.action}`),...item.onHold.map(row=>`On Hold: ${row.action}`),...item.critical.map(row=>`Critical: ${row.action}`)].join('\n')||'-']);addTablePages(model,`Program / Project Highlights: ${name}`,['Initiative','Department / Vertical','Status','Completion','Completed During Review','Planned Next Period','Challenges / Support'],rows,7,'No Initiatives in this Program.');}
+    if(params.sections.includes('milestoneRoadmap')){const rows=model.milestones.map(row=>[row.department,row.program,row.initiative,row.cr||row.initiativeId,row.classification==='Completed During Review Period'?formatDay(row.completionDate):formatDay(row.deadline),row.action,row.plannerType||'Unmapped',row.track||'-',row.owner||row.assigned||'-',row.status,row.days,formatDay(row.startDate),formatDay(row.deadline),formatDay(row.completionDate),row.deviation,row.critical?'Yes':'-',row.classification]);addTablePages(model,'Milestone Roadmap',['Department / Vertical','Program','Initiative','ID / CR','Date','Milestone / Action','Planner Type','Track','Owner','Status','Duration','Start Date','Deadline','Completion Date','Deviation Days','Critical','Review Classification'],rows,8,'No Milestones in the selected scope.');}
+    if(params.sections.includes('plannerTypeRoadmap')){const headers=['Department / Vertical','Program','Initiative','Initiative ID',...model.plannerTypes.map(row=>row.value_name)];const rows=model.plannerRows.map(row=>[row.department,row.program,row.initiative,row.id,...model.plannerTypes.map(type=>row.values[key(type.id)]||'-')]);if(params.diagnostics)headers.push('Match Diagnostics');addTablePages(model,'Planner Type Roadmap',headers,rows.map(row=>params.diagnostics?[...row,model.plannerDiagnostics.map(item=>`${item.initiative}: ${item.type} (${item.source})`).join('\n')||'-']:row),7,model.plannerTypes.length?'No Planner Type rows.':'No mapped Planner Types for the selected scope.');}
+    if(params.sections.includes('risks')){const rows=model.risks.map(row=>[row.riskLabel,row.department,row.program,row.initiative,row.action,row.status,formatDay(row.deadline),row.owner||row.assigned||'-',valueOrDash(row.raw?.required_action),formatDay(row.raw?.required_target_date)]);addTablePages(model,'Risks and Required Support',['Issue','Department / Vertical','Program','Initiative','Milestone','Status','Target Date','Owner','Required Action','Target Date'],rows,10,'No Critical, Deviated, On Hold, overdue, or due-but-incomplete Milestones.');}
+  }
+  function renderTable(headers,rows,emptyMessage){return `<table><thead><tr>${headers.map(header=>`<th scope="col">${esc(header)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(cell=>`<td>${esc(valueOrDash(cell))}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${headers.length}">${esc(emptyMessage||'No report data found.')}</td></tr>`}</tbody></table>`;}
+  function renderCurrentPage(){
+    const model=state.model,page=model?.pages[state.pageIndex];if(!page)return;
+    const meta=`${model.reviewType} | ${formatDay(model.reviewStart)} to ${formatDay(model.reviewEnd)} | ${model.departments.join(', ')}`;let content='';
+    if(page.kind==='cover')content=`<p class="system-page-brand">Project Milestone Delivery Hub / System Report</p><div class="system-cover-accent"></div><h2>${esc(page.title)}</h2><p class="system-report-cover-period">${esc(page.summary[0])}</p><p class="system-page-meta">${esc(page.summary[1])}<br>${esc(page.summary[2])}</p><p class="system-page-meta">${esc(page.summary[3])}<br>${esc(page.summary[4])}<br>${esc(page.summary[5])}</p>`;
+    else if(page.kind==='divider')content=`<p class="system-page-brand">Department Review</p><h2>${esc(page.department)}</h2><p class="system-page-meta">${esc(formatDay(model.reviewStart))} to ${esc(formatDay(model.reviewEnd))}</p><div class="system-report-kpis">${page.summary.map(line=>`<div class="system-report-kpi"><strong>${esc(line.split(' ')[0])}</strong><span>${esc(line.substring(line.indexOf(' ')+1))}</span></div>`).join('')}</div>`;
+    else if(page.kind==='summary')content=`<h3>${esc(page.title)}</h3><div class="system-report-kpis">${page.kpis.map(([label,value])=>`<div class="system-report-kpi"><strong>${esc(value)}</strong><span>${esc(label)}</span></div>`).join('')}</div>${page.summary.map(text=>`<p class="system-page-meta">${esc(text)}</p>`).join('')}`;
+    else content=`<h3>${esc(page.title)}${page.part>1?` (continued ${page.part})`:''}</h3>${renderTable(page.headers,page.rows,page.emptyMessage)}`;
+    const diagnostic=model.manualOverride?'<span>Manual period override</span>':'';
+    document.getElementById('sr-report-page').className=`system-report-page ${page.kind==='cover'?'system-report-cover':''} ${page.kind==='divider'?'system-report-divider':''}`;
+    document.getElementById('sr-report-page').innerHTML=`${page.kind==='cover'?'':`<p class="system-page-brand">${esc(reportName)} | ${esc(meta)}</p>`}${content}<div class="system-page-footer"><span>${esc(reportName)} | ${esc(meta)}</span><span>${diagnostic}${diagnostic?' | ':''}Page ${state.pageIndex+1} of ${model.pages.length}</span></div>`;
+    document.getElementById('sr-report-page').style.zoom=state.zoom;
+    const pager=document.getElementById('sr-pager');pager.hidden=model.pages.length<=1;pager.innerHTML=`<button type="button" data-sr-page="-1" ${state.pageIndex===0?'disabled':''} title="Previous page"><i data-lucide="chevron-left"></i>Previous</button><label class="system-report-small">Page <select id="sr-page-select" aria-label="Current report page">${model.pages.map((item,index)=>`<option value="${index}" ${index===state.pageIndex?'selected':''}>${index+1}. ${esc(item.title)}</option>`).join('')}</select> / ${model.pages.length}</label><button type="button" data-sr-page="next" ${state.pageIndex===model.pages.length-1?'disabled':''} title="Next page">Next<i data-lucide="chevron-right"></i></button><label class="system-report-small">Zoom <select id="sr-zoom"><option value="0.65">65%</option><option value="0.8" selected>80%</option><option value="1">100%</option><option value="1.15">115%</option></select></label><button type="button" data-sr-fit="width">Fit to Width</button><button type="button" data-sr-fit="page">Fit to Page</button>`;
+    document.getElementById('sr-report-page').style.zoom=document.getElementById('sr-zoom')?.value||'0.8';
+    document.getElementById('sr-print').disabled=false;document.getElementById('sr-export').disabled=state.exporting;lucide.createIcons();
+  }
+  function formatMetadataLine(model){return `Review period: ${formatDay(model.reviewStart)} to ${formatDay(model.reviewEnd)} | Next: ${formatDay(model.nextStart)} to ${formatDay(model.nextEnd)} | Run: ${formatDay(model.runDate)} | As-of: ${formatDay(model.asOfDate)} | Department: ${model.departments.join(', ')} | Profile: ${model.profile}`;}
+  function sheetRows(title,headers,rows){return [[title],['Review Period',`${formatDay(state.model.reviewStart)} to ${formatDay(state.model.reviewEnd)}`],['Next Review Period',`${formatDay(state.model.nextStart)} to ${formatDay(state.model.nextEnd)}`],[],headers,...(rows.length?rows:[['-']])];}
+  async function exportExcel(model){
+    if(!window.ExcelJS)throw new Error('Excel library failed to load.');const workbook=new window.ExcelJS.Workbook();workbook.creator=currentUser?.name||'Delivery Hub';workbook.title=reportName;workbook.subject=formatMetadataLine(model);workbook.created=new Date();
+    const details=[['Report',reportName],['Report Code',code],['Review Type',model.reviewType],['Reporting Period',`${model.reviewStart} to ${model.reviewEnd}`],['Next Review Period',`${model.nextStart} to ${model.nextEnd}`],['Run Date',model.runDate],['As-of Date',model.asOfDate],['Departments',model.departments.join(', ')],['Export Profile',model.profile],['Filters',JSON.stringify(model.filters)],['Generated',model.generatedAt]];
+    const sheets=[['Report Summary',details],['Department Summary',[['Department','Programs','Initiatives','Milestones','Done','On Hold','Completion'],...model.departments.map(department=>{const items=model.initiativesByDepartment.get(department)||[],miles=items.flatMap(item=>item.milestones);return [department,new Set(items.map(row=>key(row.programId))).size,items.length,miles.length,miles.filter(row=>row.status==='Done').length,miles.filter(row=>row.onHold).length,`${miles.filter(row=>row.status==='Done').length}/${miles.filter(row=>!row.onHold).length}`];})]],['Initiative Detail',sheetRows('Initiative Detail',['Department','Program','Initiative ID','CR','Initiative','Type','Delivery Method','Status','Priority','Owner','Assigned To','Completion %','Start','Target','Business Benefit'],model.initiativeRecords.map(row=>[row.department,row.program,row.id,row.cr,row.name,row.type,row.deliveryMethod,row.status,row.priority,row.owner,row.assigned,`${row.progress}%`,row.start,row.target,row.benefit]))],['Progress Made',sheetRows('Progress Made',['Department','Program','Initiative','Milestone ID','Sequence','Milestone','Completed','Track','Planner Type','Owner','Status','Deadline','On Time'],model.completed.map(row=>[row.department,row.program,row.initiative,row.id,row.sequence,row.action,row.completionDate,row.track,row.plannerType,row.owner,row.status,row.deadline,row.late?'No':'Yes']))],['Planned Next Period',sheetRows('Planned Next Period',['Department','Program','Initiative','Milestone ID','Sequence','Milestone','Deadline','Track','Planner Type','Owner','Status','Priority','Critical','Deviation'],model.planned.map(row=>[row.department,row.program,row.initiative,row.id,row.sequence,row.action,row.deadline,row.track,row.plannerType,row.owner,row.status,row.priority,row.critical?'Yes':'No',row.deviation]))],['Milestone Roadmap',sheetRows('Milestone Roadmap',['Department','Program','Initiative','Initiative ID','Milestone ID','Sequence','Action / Deliverable','Planner Type ID','Planner Type','Track','Owner','Status','Days','Start Date','Deadline','Completion Date','Deviation Days','Critical','Review Classification'],model.milestones.map(row=>[row.department,row.program,row.initiative,row.initiativeId,row.id,row.sequence,row.action,row.plannerTypeId,row.plannerType,row.track,row.owner,row.status,row.days,row.startDate,row.deadline,row.completionDate,row.deviation,row.critical?'Yes':'No',row.classification]))],['Risk and Support',sheetRows('Risk and Support',['Issue','Department','Program','Initiative','Milestone ID','Milestone','Status','Deadline','Owner','Required Action','Target Date'],model.risks.map(row=>[row.riskLabel,row.department,row.program,row.initiative,row.id,row.action,row.status,row.deadline,row.owner,row.raw?.required_action||'-',row.raw?.required_target_date||'-']))]];
+    if(model.sections.includes('programHighlights'))sheets.push(['Program Highlights',[['Department','Program','Initiative','Status','Completion','Progress Made','Planned Next Period','Challenges / Support'],...model.initiativeRecords.map(row=>[row.department,row.program,row.name,row.status,`${row.progress}%`,completionNarrative(row.completed),plannedNarrative(row.planned),[...row.overdue.map(item=>`Overdue: ${item.action}`),...row.onHold.map(item=>`On Hold: ${item.action}`),...row.critical.map(item=>`Critical: ${item.action}`)].join('\n')||'-'])]]);
+    if(model.plannerTypes.length&&model.sections.includes('plannerTypeRoadmap'))sheets.push(['Planner Type Roadmap',sheetRows('Planner Type Roadmap',['Department','Program','Initiative','Initiative ID',...model.plannerTypes.map(type=>type.value_name)],model.plannerRows.map(row=>[row.department,row.program,row.initiative,row.id,...model.plannerTypes.map(type=>row.values[key(type.id)]||'-')]))]);
+    const allowedSheets=new Set(['Report Summary']);if(model.sections.includes('executiveSummary'))allowedSheets.add('Department Summary');if(model.sections.includes('initiativeLists')||model.sections.includes('initiativeReview'))allowedSheets.add('Initiative Detail');if(model.sections.includes('initiativeReview')){allowedSheets.add('Progress Made');allowedSheets.add('Planned Next Period');}if(model.sections.includes('milestoneRoadmap'))allowedSheets.add('Milestone Roadmap');if(model.sections.includes('programHighlights'))allowedSheets.add('Program Highlights');if(model.sections.includes('risks'))allowedSheets.add('Risk and Support');if(model.sections.includes('plannerTypeRoadmap')&&model.plannerTypes.length)allowedSheets.add('Planner Type Roadmap');for(let index=sheets.length-1;index>=0;index--)if(!allowedSheets.has(sheets[index][0]))sheets.splice(index,1);
+    for(const [name,rows] of sheets){const worksheet=workbook.addWorksheet(name.slice(0,31)),headerRow=name==='Report Summary'?0:name==='Department Summary'?1:5;for(const row of rows)worksheet.addRow(row.map(value=>typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)?new Date(`${value}T00:00:00Z`):value));
+      const columnCount=Math.max(...rows.map(row=>row.length),1);for(let column=1;column<=columnCount;column++)worksheet.getColumn(column).width=name==='Report Summary'?32:24;
+      if(headerRow){worksheet.views=[{state:'frozen',ySplit:headerRow}];const header=worksheet.getRow(headerRow);header.font={bold:true,color:{argb:'FFFFFFFF'}};header.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF12565B'}};header.alignment={vertical:'top',wrapText:true};worksheet.autoFilter={from:{row:headerRow,column:1},to:{row:worksheet.rowCount,column:columnCount}};}
+      worksheet.eachRow(row=>row.eachCell(cell=>{cell.alignment={vertical:'top',wrapText:true};if(cell.value instanceof Date)cell.numFmt='dd-mmm-yyyy';}));}
+    const buffer=await workbook.xlsx.writeBuffer(),blob=new Blob([buffer],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`Weekly_Monthly_Review_${model.reviewStart}_${model.reviewEnd}.xlsx`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  function exportPageSplits(model,maxRows,maxColumns=8){
+    const output=[];for(const page of model.pages){if(page.kind!=='table'||!page.headers.length){output.push(page);continue;}const fixed=Math.min(3,page.headers.length),groups=[];if(page.headers.length<=maxColumns)groups.push(page.headers.map((_,index)=>index));else for(let start=fixed;start<page.headers.length;start+=maxColumns-fixed)groups.push([...Array.from({length:fixed},(_,index)=>index),...Array.from({length:Math.min(maxColumns-fixed,page.headers.length-start)},(_,index)=>start+index)]);const rowChunks=[];for(let start=0;start<page.rows.length;start+=maxRows)rowChunks.push(page.rows.slice(start,start+maxRows));if(!rowChunks.length)rowChunks.push([]);for(let groupIndex=0;groupIndex<groups.length;groupIndex++)for(let rowIndex=0;rowIndex<rowChunks.length;rowIndex++){const columns=groups[groupIndex];output.push({...page,title:page.title+(groups.length>1?` (columns ${groupIndex+1}/${groups.length})`:''),headers:columns.map(index=>page.headers[index]),rows:rowChunks[rowIndex].map(row=>columns.map(index=>row[index])),emptyMessage:page.emptyMessage});}}
+    return output;
+  }
+  function exportPdf(model){
+    if(!window.jspdf?.jsPDF)throw new Error('PDF library failed to load.');const pdf=new window.jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4'}),pages=exportPageSplits(model,12,8),width=277;
+    pages.forEach((page,index)=>{if(index)pdf.addPage();const meta=formatMetadataLine(model);pdf.setFillColor(244,241,232);pdf.rect(0,0,297,210,'F');pdf.setTextColor(18,86,91);pdf.setFontSize(page.kind==='cover'?20:14);pdf.text(page.kind==='cover'?reportName:page.title,10,17,{maxWidth:width});pdf.setTextColor(64,78,80);pdf.setFontSize(8);pdf.text(meta,10,23,{maxWidth:width});let y=32;
+      if(page.kind==='cover'||page.kind==='divider'||page.kind==='summary'){for(const line of page.summary||[]) {const lines=pdf.splitTextToSize(line,width);pdf.text(lines,12,y);y+=lines.length*5+3;}if(page.kpis){pdf.setFontSize(9);for(let start=0;start<page.kpis.length;start+=4){pdf.text(page.kpis.slice(start,start+4).map(([label,value])=>`${label}: ${value}`).join('     '),12,y);y+=8;}}}
+      if(page.headers?.length){const colWidth=width/page.headers.length;pdf.setFontSize(Math.max(5,Math.min(8,70/page.headers.length)));const draw=(row,header=false)=>{const lines=row.map(value=>pdf.splitTextToSize(key(value),colWidth-2));const height=Math.max(5,...lines.map(item=>item.length*3.2+2));pdf.setFillColor(header?18:255,header?86:255,header?91:255);if(header)pdf.setTextColor(255,255,255);else pdf.setTextColor(35,50,53);lines.forEach((items,col)=>{pdf.rect(10+col*colWidth,y,colWidth,height,'FD');pdf.text(items,11+col*colWidth,y+3.5);});y+=height;};draw(page.headers,true);for(const row of page.rows||[]){if(y>190){pdf.addPage();y=18;draw(page.headers,true);}draw(row,false);}if(!page.rows?.length){pdf.setTextColor(70,85,88);pdf.text(page.emptyMessage||'No report data found.',12,y+6);}}
+      pdf.setFontSize(7);pdf.setTextColor(80,95,97);pdf.text(`${reportName} | ${index+1} / ${pages.length}`,10,204);
+    });pdf.save(`Weekly_Monthly_Review_${model.reviewStart}_${model.reviewEnd}.pdf`);
+  }
+  async function exportWord(model){
+    if(!window.docx)throw new Error('Word library failed to load.');const {Document,Packer,Paragraph,Table,TableRow,TableCell,WidthType,PageBreak}=window.docx,children=[];children.push(new Paragraph({text:reportName,heading:'Title'}),new Paragraph({text:formatMetadataLine(model)}));
+    for(const page of exportPageSplits(model,12,8)){children.push(new Paragraph({text:page.title,heading:'Heading1'}));if(page.summary)for(const text of page.summary)children.push(new Paragraph({text}));if(page.kpis)for(const [label,value] of page.kpis)children.push(new Paragraph({text:`${label}: ${value}`}));if(page.headers?.length){const rows=[page.headers,...(page.rows.length?page.rows:[['-']])].map((row,index)=>new TableRow({tableHeader:index===0,children:row.map(value=>new TableCell({children:[new Paragraph({text:key(value)||'-'})]}))}));children.push(new Table({width:{size:100,type:WidthType.PERCENTAGE},rows}));}children.push(new Paragraph({children:[new PageBreak()]}));}
+    const doc=new Document({sections:[{properties:{page:{size:{orientation:'landscape',width:16838,height:11906},margin:{top:720,bottom:720,left:720,right:720}}},children}]}),blob=await Packer.toBlob(doc),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`Weekly_Monthly_Review_${model.reviewStart}_${model.reviewEnd}.docx`;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+  function exportPowerPoint(model){
+    if(!window.PptxGenJS)throw new Error('PowerPoint library failed to load.');const pptx=new window.PptxGenJS();pptx.layout='LAYOUT_WIDE';pptx.author=currentUser?.name||'';pptx.subject=formatMetadataLine(model);pptx.title=reportName;
+    for(const page of exportPageSplits(model,9,8)){const slide=pptx.addSlide();slide.background={color:'F4F1E8'};slide.addText(page.kind==='cover'?reportName:page.title,{x:.45,y:.3,w:12.4,h:.55,fontFace:'Aptos Display',fontSize:page.kind==='cover'?26:19,bold:true,color:'74313B'});slide.addText(formatMetadataLine(model),{x:.45,y:.92,w:12.2,h:.35,fontSize:8,color:'516368'});let y=1.45;
+      if(page.summary)for(const line of page.summary){slide.addText(line,{x:.7,y,w:11.9,h:.4,fontSize:12,color:'18343A',breakLine:false});y+=.5;}if(page.kpis){const chunks=[];for(let i=0;i<page.kpis.length;i+=4)chunks.push(page.kpis.slice(i,i+4));for(const chunk of chunks){slide.addText(chunk.map(([label,value])=>`${label}: ${value}`).join('     '),{x:.65,y,w:12,h:.45,fontSize:12,bold:true,color:'12565B'});y+=.52;}}
+      if(page.headers?.length){const rows=[page.headers,...(page.rows.length?page.rows:[['-']])].map((row,index)=>row.map(value=>({text:key(value)||'-',options:{bold:index===0,fill:index===0?'12565B':undefined,color:index===0?'FFFFFF':'18343A',fontSize:Math.max(5,Math.min(9,60/page.headers.length))}})));slide.addTable(rows,{x:.4,y,w:12.5,h:5.4,fontSize:Math.max(5,Math.min(9,60/page.headers.length)),border:{pt:.4,color:'C8D0CC'},margin:.04,autoPage:true,autoPageRepeatHeader:true,autoPageSlideStartY:1.5});}
+      slide.addText(`${reportName} | ${pptx._slides.length}`,{x:.45,y:7.15,w:12,h:.2,fontSize:7,color:'607174'});
+    }return pptx.writeFile({fileName:`Weekly_Monthly_Review_${model.reviewStart}_${model.reviewEnd}.pptx`});
+  }
+  function printPreview(model){
+    if(!currentUser)throw new Error('Sign in to print System Reports.');
+    const printWindow=window.open('','_blank');if(!printWindow)throw new Error('Allow the print preview window to open.');const content=model.pages.map((page,index)=>{const body=page.kind==='cover'?`<h1>${esc(reportName)}</h1><h2>${esc(page.summary[0])}</h2>${page.summary.slice(1).map(line=>`<p>${esc(line)}</p>`).join('')}`:page.kind==='divider'?`<h1>${esc(page.department)}</h1>${page.summary.map(line=>`<p>${esc(line)}</p>`).join('')}`:page.kind==='summary'?`<h2>${esc(page.title)}</h2><p>${page.kpis.map(([label,value])=>`${esc(label)}: ${esc(value)}`).join(' | ')}</p>${page.summary.map(line=>`<p>${esc(line)}</p>`).join('')}`:`<h2>${esc(page.title)}</h2>${renderTable(page.headers,page.rows,page.emptyMessage)}`;return `<article class="system-print-page"><small>${esc(reportName)} | ${esc(formatMetadataLine(model))}</small>${body}<footer>${index+1} / ${model.pages.length}</footer></article>`;}).join('');
+    printWindow.document.open();printWindow.document.write(`<!doctype html><html><head><title>${esc(reportName)}</title><style>@page{size:landscape;margin:12mm}body{font-family:Arial,sans-serif;color:#18343a}.system-print-page{page-break-after:always;break-after:page;min-height:180mm;padding:8mm;background:#f4f1e8}.system-print-page:last-child{page-break-after:auto}.system-print-page table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:8pt}.system-print-page th{background:#12565b;color:#fff}.system-print-page th,.system-print-page td{border:1px solid #c8d0cc;padding:4px;vertical-align:top;overflow-wrap:anywhere;white-space:pre-wrap}.system-print-page tr{break-inside:avoid}h1,h2{color:#74313b}footer{margin-top:10mm;font-size:8pt}</style></head><body>${content}<script>window.onload=()=>window.print()<\/script></body></html>`);printWindow.document.close();
+  }
+  async function exportCurrent(){
+    if(!currentUser)throw new Error('Sign in to export System Reports.');if(state.exporting)throw new Error('An export is already running.');if(!state.model)throw new Error('Run the report before exporting.');state.exporting=true;document.getElementById('sr-export').disabled=true;const format=document.getElementById('sr-export-format')?.value||'excel';
+    try{if(format==='excel')await exportExcel(state.model);else if(format==='pdf')exportPdf(state.model);else if(format==='word')await exportWord(state.model);else if(format==='powerpoint')await exportPowerPoint(state.model);else throw new Error('Unsupported export format.');setStatus(`${format.toUpperCase()} export generated from the current report model.`);}
+    catch(error){setStatus(`Export generation failed: ${error.message}`,true);}finally{state.exporting=false;document.getElementById('sr-export').disabled=!state.model;}
+  }
+  async function runReport(){
+    if(!currentUser)throw new Error('Sign in to run System Reports.');if(state.busy)return;const params=readForm();if(!params.runDate||!params.asOfDate)throw new Error('Run Date and As-of Date are required.');if(!params.start||!params.end||params.start>params.end)throw new Error('Invalid reporting period. Start Date must not be after End Date.');if(!params.departments.length)throw new Error('No Departments selected.');
+    state.busy=true;state.model=null;state.params=params;state.runSequence++;document.getElementById('sr-run').disabled=true;document.getElementById('sr-export').disabled=true;document.getElementById('sr-print').disabled=true;setStatus('Loading current Delivery Hub data...');
+    try{const data=await loadData();if(!data.initiatives.length){state.model=null;setStatus('No report data found.');return;}const model=buildModel(data,params);state.model=model;state.pageIndex=0;state.lastRunAt=new Date().toISOString();renderCurrentPage();document.getElementById('sr-last-run').textContent=`Last run this session: ${displayDateTime(state.lastRunAt)}`;const notes=[];if(!model.initiativeRecords.length)notes.push('No report data found for the selected filters.');if(!model.summary.completedDuring)notes.push('No Milestones completed during the review period.');if(!model.summary.plannedNext)notes.push('No Milestones planned for the next review period.');const missingCompletion=model.milestones.filter(row=>!row.completionDate&&!row.futureCompletion).length,missingDeadline=model.milestones.filter(row=>!row.deadline).length;if(missingCompletion)notes.push(`${missingCompletion} Milestone(s) have no valid Completion Date.`);if(missingDeadline)notes.push(`${missingDeadline} Milestone(s) have no valid Deadline.`);setStatus(`${model.summary.initiatives} Initiative(s), ${model.summary.milestones} Milestone(s), ${model.pages.length} page(s).${notes.length?' '+notes.join(' '):''}${model.manualOverride?' Manual reporting period override is active.':''}`);}
+    catch(error){setStatus(error.message||'Unable to run the report.',true);}
+    finally{state.busy=false;document.getElementById('sr-run').disabled=false;document.getElementById('sr-export').disabled=!state.model;document.getElementById('sr-print').disabled=!state.model;}
+  }
+  function showSql(){const sql=document.getElementById('weekly-monthly-review-supabase-sql')?.textContent?.trim();if(!sql)throw new Error('System Report setup SQL is unavailable.');const dialog=document.getElementById('sr-config-dialog'),status=document.getElementById('sr-config-status');status.textContent='Run this minimal migration in the Supabase SQL Editor, then reopen Admin Configuration.';dialog.querySelector('#sr-setup-sql')?.remove();const host=document.createElement('pre');host.id='sr-setup-sql';host.style.cssText='white-space:pre-wrap;max-height:260px;overflow:auto;background:#f1f5f9;padding:.6rem;font-size:.65rem';host.textContent=sql;status.after(host);}
+  async function authorizeAdmin(){if(!currentUser||currentUser.role!=='Admin')throw new Error('Only Admin users may change System Report defaults.');if(typeof deliveryRequireAdmin!=='function')throw new Error('Admin authorization is unavailable.');return deliveryRequireAdmin();}
+  async function openConfig(){
+    try{
+      await authorizeAdmin();const dialog=document.getElementById('sr-config-dialog'),filters=state.config.default_filters||{},source=state.data||initialRows(),unique=values=>[...new Set(values.map(key).filter(Boolean))].sort(stableId).map(value=>[value,value]);
+      document.getElementById('sr-config-profile').value=state.config.default_export_profile||'Executive';document.getElementById('sr-config-week-start').value=String(state.config.week_start||1);document.getElementById('sr-config-scope').value=filters.scope||'active';document.getElementById('sr-config-period-override').checked=state.config.allow_period_override===true;document.getElementById('sr-config-planner-value').value=state.config.planner_type_value_field||'deadline';document.getElementById('sr-config-planner-aggregation').value=state.config.planner_type_aggregation||defaultPlannerAggregation(document.getElementById('sr-config-planner-value').value);
+      setSelectOptions('sr-config-departments',[['__all','All Departments'],...(source.departments||[]).filter(row=>row.is_active===true).map(row=>[key(row.value_name),key(row.value_name)])],filters.departments||['__all'],true);
+      setSelectOptions('sr-config-program',(source.programs||[]).filter(row=>!archived(row)).map(row=>[key(row.id),row.program_name||row.name||`Program ${row.id}`]),filters.program||'');
+      setSelectOptions('sr-config-initiative-type',(source.initiativeTypes||[]).filter(row=>row.is_active===true).map(row=>[key(row.value_name),key(row.value_name)]),filters.initiativeType||'');
+      setSelectOptions('sr-config-delivery-method',unique((source.initiatives||[]).map(row=>row.delivery_method)),filters.deliveryMethod||'');setSelectOptions('sr-config-initiative-status',unique((source.initiatives||[]).map(initiativeStatus)),filters.initiativeStatus||'');setSelectOptions('sr-config-milestone-status',unique((source.milestones||[]).map(rawStatus)),filters.milestoneStatus||'');setSelectOptions('sr-config-owner',unique((source.initiatives||[]).map(row=>row.business_owner)),filters.owner||'');setSelectOptions('sr-config-assigned',unique((source.initiatives||[]).map(row=>row.assigned_to)),filters.assigned||'');setSelectOptions('sr-config-priority',unique((source.initiatives||[]).map(priorityFor)),filters.priority||'');
+      document.getElementById('sr-config-sections').innerHTML=detailedSections.map(section=>`<label><input type="checkbox" value="${section}" ${(state.config.default_sections||[]).includes(section)?'checked':''}>${sectionLabels[section]}</label>`).join('');document.getElementById('sr-config-status').textContent=state.configError||'';dialog.showModal();lucide.createIcons();
+    }catch(error){setStatus(error.message,true);}
+  }
+  async function saveConfig(){
+    const user=await authorizeAdmin();if(!state.configAvailable)throw new Error('System Report configuration table is not available. Use Database Setup first.');
+    const sections=[...document.querySelectorAll('#sr-config-sections input:checked')].map(input=>input.value),departments=[...document.getElementById('sr-config-departments').selectedOptions].map(option=>option.value),departmentDefaults=departments.includes('__all')?['__all']:departments,defaultFilters={scope:document.getElementById('sr-config-scope').value,departments:departmentDefaults,program:document.getElementById('sr-config-program').value,initiativeType:document.getElementById('sr-config-initiative-type').value,deliveryMethod:document.getElementById('sr-config-delivery-method').value,initiativeStatus:document.getElementById('sr-config-initiative-status').value,milestoneStatus:document.getElementById('sr-config-milestone-status').value,owner:document.getElementById('sr-config-owner').value,assigned:document.getElementById('sr-config-assigned').value,priority:document.getElementById('sr-config-priority').value},payload={default_export_profile:document.getElementById('sr-config-profile').value,week_start:Number(document.getElementById('sr-config-week-start').value),default_filters:defaultFilters,allow_period_override:document.getElementById('sr-config-period-override').checked,planner_type_value_field:document.getElementById('sr-config-planner-value').value,planner_type_aggregation:document.getElementById('sr-config-planner-aggregation').value,default_sections:sections,modified_by:user.id,updated_at:new Date().toISOString()};
+    if(!sections.length)throw new Error('Select at least one default section.');if(sections.some(section=>!detailedSections.includes(section)))throw new Error('An invalid section was selected.');
+    const result=await supabaseClient.from('system_report_config').update(payload).eq('report_code',code).select().single();if(result.error)throw result.error;state.config={...state.config,...result.data};document.getElementById('sr-config-dialog').close();initParams();renderFilters();setStatus('System Report defaults saved. The report name and system code remain fixed.');
+  }
+  function invalidatePreview(){state.model=null;document.getElementById('sr-export').disabled=true;document.getElementById('sr-print').disabled=true;document.getElementById('sr-pager').hidden=true;document.getElementById('sr-report-page').innerHTML='<p class="system-page-brand">Delivery Hub / System Report</p><h2>Select report parameters, then run the report.</h2>';}
+  function onChange(event){
+    const target=event.target;if(target.id==='sr-review-type'||target.id==='sr-run-date'){updatePeriodControls(true);invalidatePreview();return;}
+    if(target.id==='sr-period-start'||target.id==='sr-period-end'){updatePeriodControls(false);invalidatePreview();return;}
+    if(target.id==='sr-export-format')return;
+    if(target.id==='sr-page-select'){state.pageIndex=Math.max(0,Math.min((state.model?.pages.length||1)-1,Number(target.value)||0));renderCurrentPage();return;}
+    if(target.id==='sr-zoom'){state.zoom=target.value;document.getElementById('sr-report-page').style.zoom=state.zoom;return;}
+    if(target.id==='sr-departments'){let values=[...target.selectedOptions].map(option=>option.value),previous=state.lastDepartments||['__all'];if(values.includes('__all')&&values.length>1){values=previous.includes('__all')?values.filter(value=>value!=='__all'):['__all'];for(const option of target.options)option.selected=values.includes(option.value);}state.lastDepartments=values;invalidatePreview();return;}
+    if(target.id==='sr-planner-value'){document.getElementById('sr-planner-aggregation').value=defaultPlannerAggregation(target.value);invalidatePreview();return;}
+    if(target.id==='sr-profile'){setSections(target.value==='Detailed'?detailedSections:executiveSections.filter(key=>sectionLabels[key]));invalidatePreview();return;}
+    if(target.matches('#sr-section-options input')){invalidatePreview();return;}
+    if(target.id.startsWith('sr-'))invalidatePreview();
+  }
+  async function onClick(event){
+    const button=event.target.closest('button');if(!button)return;
+    try{
+      if(button.id==='sr-run'){await runReport();return;}if(button.id==='sr-export'){await exportCurrent();return;}if(button.id==='sr-print'){if(!state.model)throw new Error('Run the report before opening Print Preview.');printPreview(state.model);return;}
+      if(button.id==='sr-config-open'){openConfig();return;}if(button.id==='sr-config-close'){document.getElementById('sr-config-dialog').close();return;}if(button.id==='sr-config-save'){await saveConfig();return;}if(button.id==='sr-config-sql'){showSql();return;}
+      if(button.dataset.srPage!==undefined){const requested=button.dataset.srPage;state.pageIndex=requested==='next'?Math.min(state.model.pages.length-1,state.pageIndex+1):requested==='-1'?Math.max(0,state.pageIndex-1):Math.max(0,Math.min(state.model.pages.length-1,Number(requested)));renderCurrentPage();return;}
+      if(button.dataset.srFit){const widthFit=Math.min(1.15,Math.max(.35,(document.getElementById('sr-preview-shell').clientWidth-48)/1120)),pageFit=Math.min(widthFit,Math.max(.35,(window.innerHeight-230)/792));state.zoom=String(button.dataset.srFit==='width'?widthFit:pageFit);renderCurrentPage();return;}
+    }catch(error){setStatus(error.message||'Unable to complete the System Report action.',true);}
+  }
+  async function initialize(){
+    ensurePage();if(!currentUser){setStatus('Sign in to run System Reports.',true);return;}
+    document.getElementById('sr-config-open').hidden=currentUser.role!=='Admin';document.getElementById('sr-diagnostics-label').hidden=currentUser.role!=='Admin';
+    const identity=`${key(currentUser.id)}:${key(currentUser.email)}`;if(state.user!==identity){state.user=identity;state.model=null;state.data=null;state.lastRunAt=null;document.getElementById('sr-last-run').textContent='Not run in this browser session.';await loadConfig();initParams();}
+    const start=document.getElementById('sr-period-start');start.disabled=document.getElementById('sr-period-end').disabled=!Boolean(state.config.allow_period_override);
+    await window.milestonePlannerTypes?.load();renderFilters(state.data||initialRows());if(state.configError)setStatus(state.configError);
+  }
+  function activateNavigation(view){document.querySelectorAll('.workspace-page-link').forEach(button=>{const active=button.id===`workspace-nav-${view}`;button.classList.toggle('bg-slate-800',active);button.classList.toggle('text-indigo-300',active);button.classList.toggle('text-slate-400',!active);});}
+  async function showPage(){
+    if(!currentUser){setStatus('Sign in to run System Reports.',true);return;}
+    const hiddenElements=typeof getWorkspaceOverviewElements==='function'?getWorkspaceOverviewElements():[];hiddenElements.forEach(element=>{element.dataset.reportWorkspaceHidden='true';element.classList.add('hidden');});
+    for(const id of ['workspace-flat-page','analytics-page','report-builder-page','custom-reports-page','overview-control-bar','overview-selection-actions'])document.getElementById(id)?.classList.add('hidden');
+    document.getElementById('overview-selection-actions')?.remove();document.body.classList.add('report-workspace-active');currentWorkspaceView='system_reports';root().classList.remove('hidden');const title=document.getElementById('workspace-page-title');if(title)title.textContent='System Reports';
+    for(const id of ['btn-page-import','btn-page-export','btn-new-program','btn-new-project']){const button=document.getElementById(id);if(button)button.style.display='none';}
+    activateNavigation('system_reports');await initialize();window.scrollTo(0,0);
+  }
+  function closePage(){root()?.classList.add('hidden');document.body.classList.remove('system-report-printing');}
+  const previousWorkspace=window.showWorkspaceView,previousAnalytics=window.showAnalyticsView;
+  window.showWorkspaceView=function(view){if(view==='system_reports')return showPage();closePage();return previousWorkspace.apply(this,arguments);};
+  window.showAnalyticsView=function(){closePage();return previousAnalytics.apply(this,arguments);};
+  root()?.addEventListener('change',onChange);root()?.addEventListener('click',onClick);
+  window.weeklyMonthlyReviewSystemReport={code,defaults,periods,calendarDate,buildModel,loadData,run:runReport,export:exportCurrent,print:printPreview,getModel:()=>state.model,show:showPage};
+  supabaseClient.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT'){state.data=null;state.model=null;state.params=null;state.config=defaults();state.configAvailable=false;state.user=null;closePage();}});
+})();
+</script>
+<!--
+Performance review: 2026-10-14
+Measured in the authenticated local Chromium session with 42 active Initiatives, 774 active Milestones, 6 Programs, and 84 Tracks. Timings are single-run observations, not production SLAs.
+
+Observed bottlenecks and changes:
+- This file is approximately 1.28 MB with 105 inline scripts and 47 style blocks; loading every module and export library remains a startup cost.
+- Core hierarchy loading fetched Programs, Initiatives, Milestones, and Tracks sequentially with SELECT *. Independent reads now run concurrently; Program and Track reads use live-schema column projections; child rows are grouped by Initiative in one pass.
+- Overview grouping previously rescanned all Initiatives for each Program. It now groups once by program_id.
+- Project Planner templates were read repeatedly during Overview rendering. They are now loaded on demand, cached for 60 seconds, and refreshed on modal open and after template mutations.
+- To Do task rows are loaded only when its page opens. Startup uses a user-scoped exact pending count with one returned ID.
+- Overview and flat text searches are debounced. Flat metrics and grid rendering reuse the same filtered rows, and Program relationships use a Set.
+- Analytics navigation previously invoked two complete base renders; it now invokes one and retains the same advanced charts.
+
+Observed measurements:
+- Initial Overview readiness: 5.9 s baseline and 5.3 s after changes in separate reloads; request count fell from 13 to 11. Timing varied with Supabase/CDN response latency.
+- Program grid navigation: 624 ms baseline, 487 ms after changes. A burst search now renders once per completed query.
+- Dashboard entry: 3.9 s baseline, 2.9 s after; KPI values and six charts matched. Instrumentation confirms one base render and one advanced-chart render.
+- Project Planner open: 3.0 s baseline, 1.8 s after; cached template columns and Admin validation remain in place.
+- A 20x in-memory dataset (120 Programs, 900 Initiatives, 1,680 Tracks, 21,520 Milestones) preserved the 15,480 active Milestone total and 25-row / 620-page grid. Grid render fell from 6.8 s to 3.4 s after row reuse. No Supabase data was changed by the stress test.
+- Weekly System Report still returned 42 Initiatives and 774 Milestones. Report generation remains on-demand.
+
+Index review:
+- No indexes were added. The HTML contains existing indexes for Planner Type mappings, report provenance, and related catalog lookups, but it cannot enumerate the live database catalog or run EXPLAIN against the deployed schema. Do not add speculative indexes.
+- In the Supabase SQL Editor, inspect current indexes with:
+  SELECT tablename,indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND tablename IN ('programs','initiatives','milestones','milestone_tracks','project_planner_templates','project_planner_milestones','todo_items') ORDER BY tablename,indexname;
+- For slow paged reads, run EXPLAIN (ANALYZE, BUFFERS) on the exact observed query shape, for example:
+  EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM public.milestones ORDER BY id LIMIT 1000 OFFSET 1000;
+  EXPLAIN (ANALYZE, BUFFERS) SELECT id FROM public.project_planner_milestones WHERE template_id='<template-id>' AND is_active=true ORDER BY display_order;
+
+Remaining scale work: Overview, Dashboard, and report sources still hydrate the complete Initiative/Milestone hierarchy because current global filters, KPIs, audit/history, and report calculations consume it. Server-side pagination, on-demand child loading, virtualized hierarchy rows, Supabase aggregation/RPCs, and lazy-loading external libraries need separate contract/performance work with production query plans and large-dataset validation before changing visible behavior.
+-->
 </body>
 </html>
  
