@@ -16,6 +16,21 @@
 <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <style>
+    :is(#program-modal, #project-modal) a { text-decoration: none; color: #464feb; }
+    :is(#program-modal, #project-modal) tr :is(th, td) { border: 1px solid #e6e6e6; }
+    :is(#program-modal, #project-modal) tr th { background-color: #f5f5f5; }
+    .engineer-picker { position: relative; min-width: 0; font-weight: 400; }
+    .engineer-picker summary { list-style: none; cursor: pointer; }
+    .engineer-picker summary::-webkit-details-marker { display: none; }
+    .engineer-picker summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .engineer-picker details[open] summary { outline: 2px solid #818cf8; outline-offset: 1px; }
+    .engineer-picker details:not([open]) .engineer-user-menu { display: none; }
+    .engineer-user-menu { position: absolute; z-index: 80; top: 100%; left: 0; width: 100%; margin-top: 4px; border: 1px solid #cbd5e1; border-radius: 8px; background: white; box-shadow: 0 8px 20px #00000014; padding: 4px; color: #334155; }
+    .engineer-user-options { max-height: 180px; overflow-y: auto; }
+    .engineer-user-options button { display: block; width: 100%; padding: 8px; text-align: left; white-space: normal; overflow-wrap: anywhere; }
+    .engineer-user-options button[hidden] { display: none; }
+    .engineer-user-options button:not(:disabled):is(:hover, :focus) { background: #eef2ff; outline: none; }
+    .engineer-user-options button:disabled { color: #94a3b8; }
     .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: #f8fafc; }
@@ -1023,6 +1038,11 @@ ACTIVE VALUES
         >
       </div>
 
+      <div>
+        <label for="pg-purpose" class="block font-semibold text-slate-700 mb-1">Purpose</label>
+        <textarea id="pg-purpose" rows="2" maxlength="10000" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-violet-500 resize-y whitespace-pre-wrap"></textarea>
+      </div>
+
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div>
           <label class="block font-semibold text-slate-700 mb-1">
@@ -1349,6 +1369,10 @@ ACTIVE VALUES
           <label class="block font-semibold text-slate-700 mb-1">Project Name - Epic *</label>
           <input type="text" id="p-name" required placeholder="e.g. Optimize Billing Cycle TAT by optimizing Process & Tech Enablement" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
         </div>
+        <div>
+          <label for="p-description" class="block font-semibold text-slate-700 mb-1">Description</label>
+          <textarea id="p-description" rows="2" maxlength="10000" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 resize-y whitespace-pre-wrap"></textarea>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
             <label class="block font-semibold text-slate-700 mb-1">Type (LOV) *</label>
@@ -1547,6 +1571,11 @@ ACTIVE VALUES
         <div>
           <label class="block font-semibold text-slate-700 mb-1">Milestone - Actions / Deliverables *</label>
           <textarea id="m-actions" rows="2" required placeholder="Specific concrete steps to execute this milestone..." class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"></textarea>
+        </div>
+
+        <div>
+          <label for="m-remarks" class="block font-semibold text-slate-700 mb-1">Remarks</label>
+          <textarea id="m-remarks" rows="4" maxlength="10000" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 whitespace-pre-wrap break-words" placeholder="Add milestone remarks..."></textarea>
         </div>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2122,7 +2151,6 @@ async function loadUsersFromSupabase() {
   const { data, error } = await supabaseClient
     .from('user_master')
     .select('*')
-    .eq('is_active', true)
     .order('full_name', { ascending: true });
 
   if (error) {
@@ -2131,7 +2159,8 @@ async function loadUsersFromSupabase() {
     return false;
   }
 
-  userMaster = (data || []).map(row => ({
+  engineerAssignments.users = data || [];
+  userMaster = (data || []).filter(row => row.is_active === true).map(row => ({
   id:
     Number(row.id),
 
@@ -2272,7 +2301,7 @@ async function loadInitiativesFromSupabase() {
   const [programResult, initiativeResult, milestoneResult, trackResult] = await Promise.all([
     supabaseClient
       .from('programs')
-      .select('id,sequence_no,created_at,created_by_name,created_by,modified_by_name,modified_by,updated_at,archived_by_name,archived_by,archived_at,program_name,program_owner,assigned_to,vertical,start_date,target_end_date,revised_start_date,revised_end_date,actual_end_date,impact_category,measurable_impact,business_benefit,program_status,program_age,is_active')
+      .select('*')
       .eq('is_active', true)
       .order('id', { ascending: true }),
     fetchAllSupabaseRows('initiatives'),
@@ -2380,6 +2409,9 @@ async function loadInitiativesFromSupabase() {
 
   programs =
     programRows.map(row => ({
+      purpose: row.purpose || '',
+      functional_engineer_id: row.functional_engineer_id ?? null,
+      technical_engineer_id: row.technical_engineer_id ?? null,
       id:
   Number(row.id),
 
@@ -2454,6 +2486,9 @@ name:
 
   projects =
     initiativeRows.map(row => ({
+      description: row.description || '',
+      functional_engineer_id: row.functional_engineer_id ?? null,
+      technical_engineer_id: row.technical_engineer_id ?? null,
       id:
   Number(row.id),
 
@@ -2683,12 +2718,15 @@ programId:
               milestone.kpi || '',
 
             remarks:
-              milestone.remarks || ''
+              milestone.remarks || '',
+            milestoneRemarks:
+              milestone.milestone_remarks || ''
           }))
     }));
 
   projects.forEach(project => (project.milestones || []).forEach(normalizeMilestoneDeviationSchedule));
   projects.forEach(applyDerivedMilestoneSequence);
+  await synchronizeInitiativeRevisedEndDates();
 
   populateProgramDropdown();
   renderProjects();
@@ -2697,6 +2735,33 @@ programId:
   });
 
   return true;
+}
+
+async function synchronizeInitiativeRevisedEndDates(initiatives = projects) {
+  for (const initiative of initiatives || []) {
+    if (initiative.recordStatus === 'deleted') continue;
+    const targetEndDate = String(initiative.targetEndDate || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(targetEndDate)) continue;
+
+    const deadlines = (initiative.milestones || [])
+      .filter(milestone => milestone.recordStatus !== 'deleted')
+      .map(milestone => String(milestone.deadline || milestone.endDate || '').slice(0, 10))
+      .filter(deadline => /^\d{4}-\d{2}-\d{2}$/.test(deadline));
+    if (!deadlines.some(deadline => deadline > targetEndDate)) continue;
+
+    const latestDeadline = deadlines.sort().at(-1);
+    if (latestDeadline === initiative.revisedEndDate) continue;
+
+    const { error } = await supabaseClient
+      .from('initiatives')
+      .update({ revised_end_date: latestDeadline })
+      .eq('id', Number(initiative.id));
+    if (error) {
+      console.error(`Unable to synchronize Revised End Date for Initiative ${initiative.id}:`, error);
+      continue;
+    }
+    initiative.revisedEndDate = latestDeadline;
+  }
 }
 
 function toggleSidebarGroup(
@@ -6272,6 +6337,95 @@ function clearAllProgramInitiatives() {
   updateProgramInitiativeSummary();
 }
 
+const engineerAssignments = {
+  users: [],
+  fields: ['functional_engineer_id', 'technical_engineer_id'],
+  labels: ['Functional Engineer', 'Technical Engineer'],
+  importPayload(row, prefix = '', record = null) {
+    return Object.fromEntries(this.fields.flatMap((field, index) => {
+      const heading = prefix + this.labels[index] + ' ID';
+      if (!Object.hasOwn(row, heading) || String(row[heading] ?? '').trim() === '') return [];
+      const value = String(row[heading]).trim();
+      if (String(record?.[field] ?? '') !== value && !this.users.some(user => String(user.id) === value && user.is_active === true)) throw new Error(`${heading}: select an active User Master ID.`);
+      return [[field, Number(value)]];
+    }));
+  },
+  display(id) {
+    if (id == null || id === '') return 'Not Assigned';
+    const user = this.users.find(item => String(item.id) === String(id));
+    return user?.full_name || `User #${id}`;
+  },
+  picker(id, value = '', allowClear = true) {
+    const selected = String(value ?? '');
+    const users = this.users.filter(user => user.is_active === true || String(user.id) === selected);
+    const options = users.map(user => `<option value="${escapeHtml(String(user.id))}" ${String(user.id) === selected ? 'selected' : ''} ${user.is_active !== true ? 'disabled' : ''}>${escapeHtml(user.full_name || user.email || String(user.id))}${user.is_active !== true ? ' (Inactive)' : ''}</option>`).join('');
+    const empty = allowClear ? 'Not Assigned' : '-- Choose a user --';
+    const user = users.find(item => String(item.id) === selected);
+    const label = user ? (user.full_name || user.email || String(user.id)) + (user.is_active !== true ? ' (Inactive)' : '') : empty;
+    const buttons = `<button type="button" data-engineer-value="" onclick="engineerAssignments.choose(this)">${empty}</button>` + users.map(user => `<button type="button" data-engineer-value="${escapeHtml(String(user.id))}" ${user.is_active !== true ? 'disabled' : ''} onclick="engineerAssignments.choose(this)">${escapeHtml(user.full_name || user.email || String(user.id))}${user.is_active !== true ? ' (Inactive)' : ''}</button>`).join('');
+    return `<div class="engineer-picker"><select id="${id}" hidden onchange="engineerAssignments.sync(this)"><option value="">${empty}</option>${options}</select><details ontoggle="engineerAssignments.toggle(this)" onkeydown="engineerAssignments.keydown(event)"><summary class="flex items-center justify-between gap-2 w-full px-3 py-2 border rounded-lg bg-white text-slate-700"><span>${escapeHtml(label)}</span><i data-lucide="chevron-down" class="w-3 h-3 shrink-0" aria-hidden="true"></i></summary><div class="engineer-user-menu"><input type="search" aria-label="Search users" placeholder="Search users" class="w-full px-2 py-1.5 border rounded mb-1" oninput="engineerAssignments.search(this)"><div class="engineer-user-options">${buttons}<div class="engineer-no-users px-2 py-2 text-slate-500" role="status" hidden>No matching users</div></div></div></details></div>`;
+  },
+  search(input) {
+    const query = input.value.trim().toLocaleLowerCase();
+    const buttons = [...input.closest('.engineer-picker').querySelectorAll('[data-engineer-value]')];
+    for (const button of buttons) button.hidden = !!query && !button.textContent.toLocaleLowerCase().includes(query);
+    input.closest('.engineer-picker').querySelector('.engineer-no-users').hidden = buttons.some(button => !button.hidden);
+  },
+  sync(select) {
+    select.closest('.engineer-picker').querySelector('summary > span').textContent = select.selectedOptions[0]?.textContent || 'Not Assigned';
+  },
+  choose(button) {
+    const host = button.closest('.engineer-picker'), select = host.querySelector('select');
+    select.value = button.dataset.engineerValue;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    host.querySelector('details').open = false;
+    host.querySelector('summary').focus();
+  },
+  toggle(details) {
+    if (!details.open) return;
+    document.querySelectorAll('.engineer-picker details[open]').forEach(other => { if (other !== details) other.open = false; });
+    const input = details.querySelector('input[type="search"]');
+    input.value = ''; this.search(input); input.focus();
+  },
+  keydown(event) {
+    const details = event.currentTarget;
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); details.open = false; details.querySelector('summary').focus(); }
+    if (details.open && event.key === 'Enter' && event.target.matches('input[type="search"]')) {
+      event.preventDefault();
+      const button = [...details.querySelectorAll('[data-engineer-value]')].find(button => !button.disabled && !button.hidden);
+      if (button) this.choose(button);
+      return;
+    }
+    if (!details.open || !['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+    event.preventDefault();
+    const buttons = [...details.querySelectorAll('[data-engineer-value]')].filter(button => !button.disabled && !button.hidden);
+    const index = buttons.indexOf(document.activeElement), direction = event.key === 'ArrowDown' ? 1 : -1;
+    buttons[(index + direction + buttons.length) % buttons.length]?.focus();
+  },
+  mount(formId, prefix, record) {
+    const form = document.getElementById(formId);
+    let host = form.querySelector('.engineer-form-fields');
+    if (!host) {
+      host = document.createElement('div');
+      host.className = 'engineer-form-fields grid grid-cols-1 sm:grid-cols-2 gap-3';
+    }
+    document.getElementById(`${prefix}-assigned-to`).closest('.grid').after(host);
+    host.innerHTML = this.fields.map((field, index) => `<div><label for="${prefix}-${field}" class="block font-semibold text-slate-700 mb-1">${index === 0 ? 'Functional User' : 'Technical User'}</label>${this.picker(`${prefix}-${field}`, record?.[field])}</div>`).join('');
+    const textField = prefix === 'pg' ? 'purpose' : 'description';
+    document.getElementById(`${prefix}-${textField}`).value = record?.[textField] || '';
+  },
+  payload(prefix, record) {
+    return Object.fromEntries(this.fields.flatMap(field => {
+      const control = document.getElementById(`${prefix}-${field}`);
+      if (!control) return [];
+      const value = control.value;
+      const previous = String(record?.[field] ?? '');
+      if (value && value !== previous && !this.users.some(user => String(user.id) === value && user.is_active === true)) throw new Error('Select an active engineer.');
+      return [[field, value ? Number(value) : null]];
+    }));
+  }
+};
+
 function openProgramModal(
   editId = null
 ) {
@@ -6416,6 +6570,7 @@ document
   renderProgramInitiativeSelection(
     editId
   );
+  engineerAssignments.mount('program-form', 'pg', programs.find(item => String(item.id) === String(editId)));
 
   const modal =
     document.getElementById(
@@ -6524,7 +6679,8 @@ revisedEndDate || targetEndDate;
   );
 
   const databaseRecord = {
-
+    ...engineerAssignments.payload('pg', programs.find(item => String(item.id) === String(programId))),
+    purpose: document.getElementById('pg-purpose').value.trim() || null,
     program_name:
       programName,
 
@@ -7521,6 +7677,7 @@ renderAsAgile
                       <th class="py-2.5 px-3 min-w-[220px]">Milestone - Actions</th>  
                       <th class="py-2.5 px-3 min-w-[140px]">Milestone Owner</th>
                       <th class="py-2.5 px-3 min-w-[140px]">Dependency</th>
+                      <th class="py-2.5 px-3 min-w-[180px] max-w-[360px]">Remarks</th>
                       <th class="py-2.5 px-3 min-w-[120px] text-center">Status</th>
                       <th class="py-2.5 px-3 min-w-[80px]">Days</th>
                       <th class="py-2.5 px-3 min-w-[90px]">Start Date</th>
@@ -7583,6 +7740,7 @@ group
                             ${getMilestoneUserCell(m.owner)}
                           </td>
                           <td class="py-2.5 px-3">${getMilestoneUserCell(m.dependency)}</td>
+                          <td class="py-2.5 px-3 min-w-[180px] max-w-[360px] whitespace-pre-wrap break-words">${renderMilestoneRemarks(m.milestoneRemarks)}</td>
                           <td class="py-2.5 px-3 whitespace-nowrap text-center">
   ${getStatusBadge(mStat)}
 </td>
@@ -7912,6 +8070,7 @@ function renderTrackMilestones(project, milestones, trackId = null) {
             <th class="py-2.5 px-3 min-w-[200px]">Actions / Deliverables</th>
             <th class="py-2.5 px-3 min-w-[130px]">Owner</th>
             <th class="py-2.5 px-3 min-w-[140px]">Dependency</th>
+            <th class="py-2.5 px-3 min-w-[180px] max-w-[360px]">Remarks</th>
             <th class="py-2.5 px-3 min-w-[120px] text-center">Status</th>
             <th class="py-2.5 px-3 min-w-[80px]">Days</th>
             <th class="py-2.5 px-3 min-w-[90px]">Start Date</th>
@@ -7955,6 +8114,7 @@ function renderTrackMilestones(project, milestones, trackId = null) {
                   ${getMilestoneUserCell(m.owner)}
                 </td>
                 <td class="py-2.5 px-3">${getMilestoneUserCell(m.dependency)}</td>
+                <td class="py-2.5 px-3 min-w-[180px] max-w-[360px] whitespace-pre-wrap break-words">${renderMilestoneRemarks(m.milestoneRemarks)}</td>
                 <td class="py-2.5 px-3 whitespace-nowrap text-center">${getStatusBadge(mStat)}</td>
                 <td class="py-2.5 px-3 font-mono text-slate-700">${escapeHtml(m.days || '-')}</td>
                 <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(m.startDate)}</td>
@@ -7983,7 +8143,7 @@ function renderTrackMilestones(project, milestones, trackId = null) {
         ${canEdit && trackId ? `
           <tfoot class="border-t border-slate-200 bg-slate-50">
             <tr>
-              <td colspan="13" class="px-3 py-2">
+              <td colspan="14" class="px-3 py-2">
                 <button
                   type="button"
                   onclick="addMilestoneInline(${project.id}, ${trackId})"
@@ -8159,17 +8319,18 @@ async function saveInlineMilestone(projectId, milestoneId, options = {}) {
   if (!project || !milestone) return false;
   const el = name => document.getElementById(`${name}-${milestoneId}`);
   const val = name => el(name)?.value.trim() || '';
-  const actions=val('inline-actions'), owner=val('inline-owner'), dependency=val('inline-dependency'), days=val('inline-days'), startDate=val('inline-start-date'), completionDate=val('inline-completion-date');
+  const actions=val('inline-actions'), owner=val('inline-owner'), dependency=val('inline-dependency'), remarks=val('inline-remarks'), days=val('inline-days'), startDate=val('inline-start-date'), completionDate=val('inline-completion-date');
   const impactBelow = el('inline-impact-below')?.checked === true;
   if(!actions){showToast('Actions and Milestoner Owner are required.','error');el('inline-actions')?.focus();return false;}
   if(!owner){showToast('Actions and Milestoner Owner are required.','error');el('inline-owner')?.focus();return false;}
+  if(remarks.length>MAX_MILESTONE_REMARKS_LENGTH){showToast(`Remarks cannot exceed ${MAX_MILESTONE_REMARKS_LENGTH.toLocaleString()} characters.`,'error');el('inline-remarks')?.focus();return false;}
   if(startDate&&completionDate&&completionDate<startDate){showToast('Completion Date cannot be before Start Date.','error');el('inline-completion-date')?.focus();return false;}
   const duplicate=(project.milestones||[]).some(item=>Number(item.id)!==Number(milestoneId||0)&&item.recordStatus!=='deleted'&&Number(item.trackId||0)===Number(milestone.trackId||0)&&String(item.actions||item.title||'').trim().toLowerCase()===actions.toLowerCase());
   if(duplicate){showToast('An active Milestone with the same action already exists in this Initiative and Track.','error');el('inline-actions')?.focus();return false;}
   const schedule=calculateMilestoneSchedule(milestone,{days,startDate});
   const endDate=schedule.endDate, deadline=schedule.deadline;
   const status=getEffectiveMilestoneStatus({...milestone,days,startDate,endDate,deadline,completionDate});
-  const milestoneRecord={actions,owner,dependency:dependency||null,days:normalizeMilestoneDays(days),start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,completion_date:completionDate||null,status,deviation_days:calculateDeviation(deadline,startDate,completionDate)||null,record_status:milestone.recordStatus||'active'};
+  const milestoneRecord={actions,owner,dependency:dependency||null,milestone_remarks:remarks||null,days:normalizeMilestoneDays(days),start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,completion_date:completionDate||null,status,deviation_days:calculateDeviation(deadline,startDate,completionDate)||null,record_status:milestone.recordStatus||'active'};
   const plannerTypeControl=el('inline-planner-type');if(plannerTypeControl)milestoneRecord.planner_type_id=plannerTypeControl.value||null;
   if(schedule.hasHistory)Object.assign(milestoneRecord,{start_date:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),deviation_days:schedule.deviationDays,remarks:schedule.remarks});
   const isDraft=Number(milestoneId)<0;
@@ -8185,11 +8346,12 @@ async function saveInlineMilestone(projectId, milestoneId, options = {}) {
     const {data,error}=result;
     if(error){showToast(`Unable to save Milestone: ${error.message}`,'error');return false;}
     if(data&&Object.hasOwn(data,'planner_type_id'))milestone.plannerTypeId=data.planner_type_id;
-    Object.assign(milestone,{id:Number(data?.id??milestone.id),sequenceNo:Number(data?.sequence_no??sequenceNo)||sequenceNo,recordStatus:data?.record_status||milestone.recordStatus||'active',actions:data?.actions??actions,owner:data?.owner??owner,dependency:data?.dependency??dependency,days:data?.days??days,startDate:data?.start_date??startDate,endDate:data?.end_date??endDate,deadline:data?.deadline??deadline,completionDate:data?.completion_date??completionDate,status:data?.status??status,deviationDays:(data?.deviation_days??calculateDeviation(deadline,startDate,completionDate))||null,createdBy:data?.created_by_name??data?.created_by??milestone.createdBy??'',createdAt:data?.created_at??milestone.createdAt??'',modifiedBy:data?.modified_by_name??data?.updated_by_name??data?.modified_by??data?.updated_by??milestone.modifiedBy??'',updatedAt:data?.modified_at??data?.updated_at??milestone.updatedAt??'',archivedBy:data?.archived_by_name??data?.archived_by??milestone.archivedBy??'',archivedAt:data?.archived_at??milestone.archivedAt??''});
+    Object.assign(milestone,{id:Number(data?.id??milestone.id),sequenceNo:Number(data?.sequence_no??sequenceNo)||sequenceNo,recordStatus:data?.record_status||milestone.recordStatus||'active',actions:data?.actions??actions,owner:data?.owner??owner,dependency:data?.dependency??dependency,milestoneRemarks:data?.milestone_remarks??remarks,days:data?.days??days,startDate:data?.start_date??startDate,endDate:data?.end_date??endDate,deadline:data?.deadline??deadline,completionDate:data?.completion_date??completionDate,status:data?.status??status,deviationDays:(data?.deviation_days??calculateDeviation(deadline,startDate,completionDate))||null,createdBy:data?.created_by_name??data?.created_by??milestone.createdBy??'',createdAt:data?.created_at??milestone.createdAt??'',modifiedBy:data?.modified_by_name??data?.updated_by_name??data?.modified_by??data?.updated_by??milestone.modifiedBy??'',updatedAt:data?.modified_at??data?.updated_at??milestone.updatedAt??'',archivedBy:data?.archived_by_name??data?.archived_by??milestone.archivedBy??'',archivedAt:data?.archived_at??milestone.archivedAt??''});
     if(schedule.hasHistory)Object.assign(milestone,{startDate:data?.start_date??schedule.startDate,days:data?.days??schedule.days,deviationDays:data?.deviation_days??schedule.deviationDays,remarks:data?.remarks??schedule.remarks});
     if(isDraft)kpiMilestoneRows.push({...data});else{const ri=kpiMilestoneRows.findIndex(r=>Number(r.id)===Number(milestone.id));if(ri>=0)kpiMilestoneRows[ri]={...kpiMilestoneRows[ri],...data};}
     inlineMilestoneEditId=null;
     if(impactBelow && !await cascadeTrackMilestoneSchedule(project,milestone.id))return false;
+    await synchronizeInitiativeRevisedEndDates([project]);
     if(addNextRow){const savedId=milestone.id,savedTrackId=milestone.trackId||null;addMilestoneInline(projectId,savedTrackId,null,savedId);requestAnimationFrame(()=>{window.scrollTo(scrollX,scrollY);requestAnimationFrame(()=>{const input=document.getElementById(`inline-actions-${inlineMilestoneEditId}`);input?.focus({preventScroll:true});input?.scrollIntoView({block:'nearest',inline:'nearest'});});});}
     else{renderProjects();requestAnimationFrame(()=>window.scrollTo(scrollX,scrollY));}
     showToast('Milestone saved successfully.','success');return true;
@@ -8259,6 +8421,7 @@ function addMilestoneInline(projectId, trackId = null, legacyTrackId = null, ins
     trackId: normalizedTrackId,
     title: 'Milestone',
     actions: '',
+    milestoneRemarks: '',
     owner: '',
     dependency: '',
     days: '',
@@ -8466,6 +8629,15 @@ async function moveMilestoneDown(projectId, milestoneId) {
 
 
 function toggleInlineDeviationFields(milestoneId){const el=document.getElementById(`inline-deviation-fields-${milestoneId}`);if(!el)return;el.classList.toggle('hidden',!document.getElementById(`inline-deviated-${milestoneId}`)?.checked);}
+const MAX_MILESTONE_REMARKS_LENGTH = 10000;
+function normalizeMilestoneRemarks(value) {
+  return String(value ?? '').trim();
+}
+function renderMilestoneRemarks(value) {
+  const text = String(value ?? '');
+  return text.trim() ? escapeHtml(text) : '-';
+}
+
 function renderInlineMilestoneRow(project, milestone, canEdit) {
   const id = milestone.id;
   const isDraft = Number(id) < 0;
@@ -8501,6 +8673,7 @@ function renderInlineMilestoneRow(project, milestone, canEdit) {
       <td class="py-2 px-3 milestone-action-text"><textarea id="inline-actions-${id}" rows="2" class="milestone-cell-control milestone-action-input w-full px-2 py-1 border rounded">${escapeHtml(milestone.actions || '')}</textarea></td>
       <td class="py-2 px-3"><select id="inline-owner-${id}" class="milestone-cell-control w-full px-2 py-1 border rounded bg-white">${getMilestoneUserOptions(milestone.owner || '')}</select></td>
       <td class="py-2 px-3"><select id="inline-dependency-${id}" class="milestone-cell-control w-full px-2 py-1 border rounded bg-white">${getMilestoneUserOptions(milestone.dependency || '')}</select></td>
+      <td class="py-2 px-3 min-w-[180px]"><textarea id="inline-remarks-${id}" rows="3" maxlength="10000" aria-label="Milestone Remarks" class="milestone-cell-control w-full min-w-[160px] px-2 py-1 border rounded whitespace-pre-wrap break-words">${escapeHtml(milestone.milestoneRemarks || '')}</textarea></td>
       <td class="py-2 px-3 text-center">${getStatusBadge(status || '-')}</td>
       <td class="py-2 px-3"><input id="inline-days-${id}" value="${escapeHtml(days)}" placeholder="5 / TBD / -" oninput="updateInlineMilestoneRuntimeDates(${id})" onchange="updateInlineMilestoneRuntimeDates(${id})" class="milestone-cell-control w-full px-2 py-1 border rounded"></td>
       <td class="py-2 px-3"><input id="inline-start-date-${id}" type="date" value="${escapeHtml(milestone.startDate || '')}" oninput="updateInlineMilestoneRuntimeDates(${id})" onchange="updateInlineMilestoneRuntimeDates(${id})" class="milestone-cell-control w-full px-2 py-1 border rounded">${milestoneScheduleImpactControl(`inline-impact-below-${id}`)}</td>
@@ -8987,7 +9160,8 @@ const milestoneStatuses =
     project.impactCategory,
     project.measurableImpact,
     project.businessBenefit,
-    project.deliveryMethod
+    project.deliveryMethod,
+    ...engineerAssignments.fields.map(field => project[field] == null ? '' : engineerAssignments.display(project[field]))
   ]
     .filter(Boolean)
     .join(' ')
@@ -9181,7 +9355,8 @@ function programMatchesGlobalFilters(
     program.vertical,
     program.impactCategory,
     program.measurableImpact,
-    program.businessBenefit
+    program.businessBenefit,
+    ...engineerAssignments.fields.map(field => program[field] == null ? '' : engineerAssignments.display(program[field]))
   ]
     .filter(Boolean)
     .join(' ')
@@ -9456,8 +9631,8 @@ function entityImportHeaders(view) {
 
 function entityExportRows(view) {
   const value = item => item ?? '';
-  if (view === 'programs') return programs.map(p => [value(p.name),value(p.owner),value(p.assignedTo),value(p.vertical),value(p.startDate),value(p.targetEndDate),value(p.revisedStartDate),value(p.revisedEndDate),value(p.actualEndDate),value(p.impactCategory),value(p.measurableImpact),value(p.businessBenefit)]);
-  if (view === 'initiatives') return projects.map(i => [value(programs.find(p=>Number(p.id)===Number(i.programId))?.name),value(i.name),value(i.type),value(i.crNo),value(i.vertical),value(i.deliveryMethod),value(i.businessOwner),value(i.assignedTo),value(i.startDate),value(i.targetEndDate),value(i.revisedStartDate),value(i.revisedEndDate),value(i.actualEndDate),value(i.impactCategory),value(i.measurableImpact),value(i.businessBenefit)]);
+  if (view === 'programs') return programs.map(p => [value(p.name),value(p.purpose),value(p.owner),value(p.assignedTo),value(p.vertical),value(p.startDate),value(p.targetEndDate),value(p.revisedStartDate),value(p.revisedEndDate),value(p.actualEndDate),value(p.impactCategory),value(p.measurableImpact),value(p.businessBenefit)]);
+  if (view === 'initiatives') return projects.map(i => [value(programs.find(p=>Number(p.id)===Number(i.programId))?.name),value(i.name),value(i.description),value(i.type),value(i.crNo),value(i.vertical),value(i.deliveryMethod),value(i.businessOwner),value(i.assignedTo),value(i.startDate),value(i.targetEndDate),value(i.revisedStartDate),value(i.revisedEndDate),value(i.actualEndDate),value(i.impactCategory),value(i.measurableImpact),value(i.businessBenefit)]);
   return projects.flatMap(i => (i.tracks||[]).map(t => [value(i.name),value(t.name),value(t.displayOrder)]));
 }
 
@@ -9473,8 +9648,8 @@ function downloadCurrentPageTemplate() {
   if (currentImportView === 'overview' || currentImportView === 'milestones') return downloadWorkbookTemplate();
   if (typeof XLSX === 'undefined') return showToast('Excel library is not available.','error');
   const samples = {
-    programs:[['Sample Program','Sample Owner','Sample Assignee','Finance','2026-09-01','2026-12-31','','','','Efficiency','Quantitative','Sample benefit']],
-    initiatives:[['Sample Program','Sample Initiative','Project','CR-1001','Finance','Waterfall','Sample Owner','Sample Assignee','2026-09-01','2026-12-31','','','','Efficiency','Quantitative','Sample benefit']],
+    programs:[['Sample Program','Sample purpose','Sample Owner','Sample Assignee','Finance','2026-09-01','2026-12-31','','','','Efficiency','Quantitative','Sample benefit','','']],
+    initiatives:[['Sample Program','Sample Initiative','Sample description','Project','CR-1001','Finance','Waterfall','Sample Owner','Sample Assignee','2026-09-01','2026-12-31','','','','Efficiency','Quantitative','Sample benefit','','']],
     tracks:[['Sample Initiative','Sample Track',1]]
   };
   const workbook = XLSX.utils.book_new();
@@ -9516,7 +9691,7 @@ async function importProgramsOnly(rows) {
     const name=String(row['Program Name*']||'').trim(); if(!name) throw new Error('Program Name is required.');
     const sequence_no=await getNextProgramSequence();
     const start=normalizeExcelDate(row['Start Date']), end=normalizeExcelDate(row['Target End Date']), actual=normalizeExcelDate(row['Actual End Date']);
-    const {error}=await supabaseClient.from('programs').insert({sequence_no,program_name:name,program_owner:row['Program Owner']||null,assigned_to:row['Program Assigned To']||null,vertical:row['Vertical*']||null,start_date:start||null,target_end_date:end||null,revised_start_date:normalizeExcelDate(row['Revised Start Date'])||null,revised_end_date:normalizeExcelDate(row['Revised End Date'])||null,actual_end_date:actual||null,impact_category:row['Impact Category']||null,measurable_impact:row['Measurable Impact']||null,business_benefit:row['Business Benefit']||null,program_status:evaluateProjectStatus(name,start,end,actual),is_active:true,updated_at:new Date().toISOString()});
+    const {error}=await supabaseClient.from('programs').insert({...engineerAssignments.importPayload(row),sequence_no,program_name:name,purpose:row.Purpose||null,program_owner:row['Program Owner']||null,assigned_to:row['Program Assigned To']||null,vertical:row['Vertical*']||null,start_date:start||null,target_end_date:end||null,revised_start_date:normalizeExcelDate(row['Revised Start Date'])||null,revised_end_date:normalizeExcelDate(row['Revised End Date'])||null,actual_end_date:actual||null,impact_category:row['Impact Category']||null,measurable_impact:row['Measurable Impact']||null,business_benefit:row['Business Benefit']||null,program_status:evaluateProjectStatus(name,start,end,actual),is_active:true,updated_at:new Date().toISOString()});
     if(error) throw error;
   }
 }
@@ -9537,7 +9712,7 @@ async function importInitiativesOnly(rows) {
     const name=String(row['Initiative Name*']||'').trim(); if(!name) throw new Error('Initiative Name is required.');
     const programName=String(row['Program Name']||'').trim().toLowerCase(); const program=programs.find(p=>String(p.name).trim().toLowerCase()===programName);
     const sequence_no=await getNextInitiativeSequence(); const start=normalizeExcelDate(row['Start Date']), end=normalizeExcelDate(row['Target End Date']), actual=normalizeExcelDate(row['Actual End Date']);
-    const {error}=await supabaseClient.from('initiatives').insert({sequence_no,program_id:program?.id||null,title:name,initiative_type:row['Type*']||null,cr_no:row['CR No']||null,vertical:row['Vertical*']||null,delivery_method:row['Delivery Method*']||'Waterfall',business_owner:row['Business Owner*']||null,assigned_to:row['Assigned To*']||null,start_date:start||null,target_end_date:end||null,revised_start_date:normalizeExcelDate(row['Revised Start Date'])||null,revised_end_date:normalizeExcelDate(row['Revised End Date'])||null,actual_end_date:actual||null,impact_category:row['Impact Category*']||null,measurable_impact:row['Measurable Impact*']||null,business_benefit:row['Business Benefit*']||null,initiative_status:evaluateProjectStatus(name,start,end,actual),record_status:'active',updated_at:new Date().toISOString()});
+    const {error}=await supabaseClient.from('initiatives').insert({...engineerAssignments.importPayload(row),sequence_no,program_id:program?.id||null,title:name,description:row.Description||null,initiative_type:row['Type*']||null,cr_no:row['CR No']||null,vertical:row['Vertical*']||null,delivery_method:row['Delivery Method*']||'Waterfall',business_owner:row['Business Owner*']||null,assigned_to:row['Assigned To*']||null,start_date:start||null,target_end_date:end||null,revised_start_date:normalizeExcelDate(row['Revised Start Date'])||null,revised_end_date:normalizeExcelDate(row['Revised End Date'])||null,actual_end_date:actual||null,impact_category:row['Impact Category*']||null,measurable_impact:row['Measurable Impact*']||null,business_benefit:row['Business Benefit*']||null,initiative_status:evaluateProjectStatus(name,start,end,actual),record_status:'active',updated_at:new Date().toISOString()});
     if(error) throw error;
   }
   if (verticalValidationFailures.length) alert(formatInitiativeVerticalValidationSummary(validRows.length, verticalValidationFailures));
@@ -10554,6 +10729,7 @@ document
   handleInitiativeDeliveryMethodChange();
 }
 
+  engineerAssignments.mount('project-form', 'p', projects.find(item => String(item.id) === String(editId)));
   document
     .getElementById(
       'project-modal'
@@ -10602,6 +10778,11 @@ function editProject(projectId) {
     document.getElementById(
       'project-id'
     ).value;
+  const permissionRecord = projects.find(project => String(project.id) === projectId);
+  if (!currentUser || (projectId ? !permissionRecord || permissionRecord.recordStatus === 'deleted' || !canEditInitiative(permissionRecord) : !canCreateInitiative())) {
+    showToast('You do not have permission to save this Initiative.', 'error');
+    return;
+  }
 
   const name =
     document.getElementById(
@@ -10716,6 +10897,8 @@ function editProject(projectId) {
     );
 
   const databaseRecord = {
+    ...engineerAssignments.payload('p', existingProject),
+    description: document.getElementById('p-description').value.trim() || null,
     program_id:
       document.getElementById(
         'p-program-id'
@@ -11180,6 +11363,7 @@ function openMilestoneModal(
   milestone.actions ||
   milestone.title ||
   '';
+    document.getElementById('m-remarks').value = milestone.milestoneRemarks || '';
 
     setMilestoneUserValue('m-owner', milestone.owner || '');
     setMilestoneUserValue('m-dependency', milestone.dependency || '');
@@ -11759,11 +11943,18 @@ const title =
     document.getElementById(
       'm-days'
     ).value.trim();
+  const milestoneRemarks = normalizeMilestoneRemarks(document.getElementById('m-remarks').value);
 
   const completionDate =
     document.getElementById(
       'm-completion-date'
     ).value;
+
+  if (milestoneRemarks.length > MAX_MILESTONE_REMARKS_LENGTH) {
+    showToast(`Remarks cannot exceed ${MAX_MILESTONE_REMARKS_LENGTH.toLocaleString()} characters.`, 'error');
+    document.getElementById('m-remarks').focus();
+    return;
+  }
 
   if (!actions) {
   showToast(
@@ -11885,6 +12076,7 @@ if (milestoneId) {
       completionDate || null,
 
     deviation_days: schedule.hasHistory?schedule.deviationDays:calculateDeviation(deadline,startDate,completionDate) || null,
+    milestone_remarks: milestoneRemarks || null,
     record_status: existingMilestone?.recordStatus || 'active',
     ...(document.getElementById('m-planner-type')?{planner_type_id:document.getElementById('m-planner-type').value||null}:{}),
     ...(schedule.hasHistory?{remarks:schedule.remarks}:{})
@@ -12006,11 +12198,11 @@ function normalizeExcelDate(value) {
 
 function unifiedExcelHeaders() {
   return [
-    'Program Name', 'Program Owner', 'Program Assigned To', 'Program Vertical',
+    'Program Name', 'Program Purpose', 'Program Owner', 'Program Assigned To', 'Program Vertical',
     'Program Start Date', 'Program Target End Date', 'Program Revised Start Date',
     'Program Revised End Date', 'Program Actual End Date', 'Program Impact Category',
     'Program Measurable Impact', 'Program Business Benefit',
-    'Initiative Name*', 'Initiative Type*', 'CR No', 'Initiative Vertical*',
+    'Initiative Name*', 'Initiative Description', 'Initiative Type*', 'CR No', 'Initiative Vertical*',
     'Delivery Method*', 'Business Owner*', 'Assigned To*', 'Initiative Start Date',
     'Initiative Target End Date', 'Initiative Revised Start Date',
     'Initiative Revised End Date', 'Initiative Actual End Date',
@@ -12018,7 +12210,8 @@ function unifiedExcelHeaders() {
     'Initiative Business Benefit*', 'Track Name', 'Track Display Order',
     'Track ID', 'Milestone ID', 'Track - User Story', 'Milestone - Actions',
     'Milestoner Owner', 'Dependency', 'Days', 'Milestone Start Date',
-    'Completion Date'
+    'Completion Date', 'Program Functional Engineer ID', 'Program Technical Engineer ID',
+    'Initiative Functional Engineer ID', 'Initiative Technical Engineer ID'
   ];
 }
 
@@ -12038,7 +12231,7 @@ function exportToExcel() {
     );
 
     if (initiatives.length === 0) {
-      rows.push(headers.map((header, index) => index === 0 ? quote(program.name) : ''));
+      rows.push(headers.map(header => header === 'Program Name' ? quote(program.name) : header === 'Program Purpose' ? quote(program.purpose) : ''));
       return;
     }
 
@@ -12046,10 +12239,10 @@ function exportToExcel() {
       const tracks = initiative.tracks || [];
       const milestones = initiative.milestones || [];
       const base = [
-        quote(program.name), quote(program.owner), quote(program.assignedTo), quote(program.vertical),
+        quote(program.name), quote(program.purpose), quote(program.owner), quote(program.assignedTo), quote(program.vertical),
         quote(program.startDate), quote(program.targetEndDate), quote(program.revisedStartDate),
         quote(program.revisedEndDate), quote(program.actualEndDate), quote(program.impactCategory),
-        quote(program.measurableImpact), quote(program.businessBenefit), quote(initiative.name),
+        quote(program.measurableImpact), quote(program.businessBenefit), quote(initiative.name), quote(initiative.description),
         quote(initiative.type), quote(initiative.crNo), quote(initiative.vertical),
         quote(initiative.deliveryMethod), quote(initiative.businessOwner), quote(initiative.assignedTo),
         quote(initiative.startDate), quote(initiative.targetEndDate), quote(initiative.revisedStartDate),
@@ -12102,7 +12295,7 @@ function exportToExcel() {
   });
 
   projects.filter(initiative => !initiative.programId).forEach(initiative => {
-    const base = ['', '', '', '', '', '', '', '', '', '', '', '', quote(initiative.name),
+    const base = ['', '', '', '', '', '', '', '', '', '', '', '', '', quote(initiative.name), quote(initiative.description),
       quote(initiative.type), quote(initiative.crNo), quote(initiative.vertical), quote(initiative.deliveryMethod),
       quote(initiative.businessOwner), quote(initiative.assignedTo), quote(initiative.startDate),
       quote(initiative.targetEndDate), quote(initiative.revisedStartDate), quote(initiative.revisedEndDate),
@@ -12121,7 +12314,12 @@ function exportToExcel() {
     });
   });
 
-  const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const engineerRows=rows.map(row=>{
+    const program=programs.find(item=>item.name===row[0]);
+    const initiative=projects.find(item=>item.name===row[14]&&String(item.programId||'')===String(program?.id||''));
+    return [...row,...engineerAssignments.fields.map(field=>program?.[field]??''),...engineerAssignments.fields.map(field=>initiative?.[field]??'')];
+  });
+  const sheet = XLSX.utils.aoa_to_sheet([headers, ...engineerRows]);
   sheet['!cols'] = headers.map(header => ({ wch: Math.max(16, Math.min(32, header.length + 4)) }));
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, sheet, 'Delivery Hub');
@@ -12136,8 +12334,8 @@ function downloadUnifiedImportTemplate() {
 
   const sample = [
     unifiedExcelHeaders(),
-    ['Retail Express', 'Rohit Sharma', 'Amit Kumar', 'Finance', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle', 'Retail Express', 'Project', 'CR-1001', 'Finance', 'Agile', 'Rohit Sharma', 'Amit Kumar', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle', 'Functional Track', 1, '', '', 'Requirement Signoff', 'Finalize BRD', 'Amit Kumar', '', 5, '2026-09-01', ''],
-    ['Retail Express', 'Rohit Sharma', 'Amit Kumar', 'Finance', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle', 'Retail Express', 'Project', 'CR-1001', 'Finance', 'Agile', 'Rohit Sharma', 'Amit Kumar', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle', 'Functional Track', 1, '', '', 'Build', 'Complete build', 'Amit Kumar', '', 5, '2026-09-01', '']
+    ['Retail Express', 'Program purpose sample', 'Rohit Sharma', 'Amit Kumar', 'Finance', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle', 'Retail Express', 'Initiative description sample', 'Project', 'CR-1001', 'Finance', 'Agile', 'Rohit Sharma', 'Amit Kumar', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle', 'Functional Track', 1, '', '', 'Requirement Signoff', 'Finalize BRD', 'Amit Kumar', '', 5, '2026-09-01', ''],
+    ['Retail Express', 'Program purpose sample', 'Rohit Sharma', 'Amit Kumar', 'Finance', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle', 'Retail Express', 'Initiative description sample', 'Project', 'CR-1001', 'Finance', 'Agile', 'Rohit Sharma', 'Amit Kumar', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle', 'Functional Track', 1, '', '', 'Build', 'Complete build', 'Amit Kumar', '', 5, '2026-09-01', '']
   ];
   const sheet = XLSX.utils.aoa_to_sheet(sample);
   sheet['!cols'] = unifiedExcelHeaders().map(header => ({ wch: Math.max(16, Math.min(32, header.length + 4)) }));
@@ -12189,6 +12387,8 @@ const tracksByKey = new Map();
 
     rows.forEach((row, index) => {
       const excelRow = index + 2;
+      try { engineerAssignments.importPayload(row,'Program '); engineerAssignments.importPayload(row,'Initiative '); }
+      catch(error) { errors.push(`Row ${excelRow}: ${error.message}`); }
       const programName = String(row['Program Name'] || '').trim();
       const initiativeName = String(row['Initiative Name*'] || '').trim();
       const initiativeType = String(row['Initiative Type*'] || '').trim();
@@ -12242,7 +12442,9 @@ const tracksByKey = new Map();
         if (item.programName) {
           if (!programsByKey.has(item.programKey)) {
             const { data, error } = await supabaseClient.from('programs').insert({
+              ...engineerAssignments.importPayload(item.row,'Program '),
               program_name: item.programName,
+              purpose: item.row['Program Purpose'] || null,
               program_owner: item.row['Program Owner'] || null,
               assigned_to: item.row['Program Assigned To'] || null,
               vertical: item.row['Program Vertical'] || item.vertical,
@@ -12270,9 +12472,11 @@ const tracksByKey = new Map();
           const targetEndDate = normalizeExcelDate(item.row['Initiative Target End Date']);
           const actualEndDate = normalizeExcelDate(item.row['Initiative Actual End Date']);
           const { data, error } = await supabaseClient.from('initiatives').insert({
+            ...engineerAssignments.importPayload(item.row,'Initiative '),
             sequence_no: nextInitiativeSequence++,
             program_id: programId,
             title: item.initiativeName,
+            description: item.row['Initiative Description'] || null,
             initiative_type: item.initiativeType,
             cr_no: item.row['CR No'] || null,
             vertical: item.vertical,
@@ -12349,8 +12553,8 @@ const tracksByKey = new Map();
 
 function deliveryWorkbookHeaders() {
   return {
-    programs: ['Program Name*', 'Program Owner', 'Program Assigned To', 'Vertical*', 'Start Date', 'Target End Date', 'Revised Start Date', 'Revised End Date', 'Actual End Date', 'Impact Category', 'Measurable Impact', 'Business Benefit'],
-    initiatives: ['Program Name', 'Initiative Name*', 'Type*', 'CR No', 'Vertical*', 'Delivery Method*', 'Business Owner*', 'Assigned To*', 'Start Date', 'Target End Date', 'Revised Start Date', 'Revised End Date', 'Actual End Date', 'Impact Category*', 'Measurable Impact*', 'Business Benefit*'],
+    programs: ['Program Name*', 'Purpose', 'Program Owner', 'Program Assigned To', 'Vertical*', 'Start Date', 'Target End Date', 'Revised Start Date', 'Revised End Date', 'Actual End Date', 'Impact Category', 'Measurable Impact', 'Business Benefit','Functional Engineer ID','Technical Engineer ID'],
+    initiatives: ['Program Name', 'Initiative Name*', 'Description', 'Type*', 'CR No', 'Vertical*', 'Delivery Method*', 'Business Owner*', 'Assigned To*', 'Start Date', 'Target End Date', 'Revised Start Date', 'Revised End Date', 'Actual End Date', 'Impact Category*', 'Measurable Impact*', 'Business Benefit*','Functional Engineer ID','Technical Engineer ID'],
     tracks: ['Initiative Name*', 'Track Name*', 'Display Order'],
     milestones: ['Initiative Name*', 'Track Name', 'Track - User Story*', 'Milestone - Actions*', 'Milestoner Owner*', 'Dependency', 'Days', 'Start Date', 'Completion Date']
   };
@@ -12373,12 +12577,12 @@ function exportToWorkbook() {
   const value = item => item ?? '';
 
   XLSX.utils.book_append_sheet(workbook, deliverySheet(
-    programs.map(program => [value(program.name), value(program.owner), value(program.assignedTo), value(program.vertical), value(program.startDate), value(program.targetEndDate), value(program.revisedStartDate), value(program.revisedEndDate), value(program.actualEndDate), value(program.impactCategory), value(program.measurableImpact), value(program.businessBenefit)]),
+    programs.map(program => [value(program.name), value(program.purpose), value(program.owner), value(program.assignedTo), value(program.vertical), value(program.startDate), value(program.targetEndDate), value(program.revisedStartDate), value(program.revisedEndDate), value(program.actualEndDate), value(program.impactCategory), value(program.measurableImpact), value(program.businessBenefit),value(program.functional_engineer_id),value(program.technical_engineer_id)]),
     headers.programs
   ), 'Programs');
 
   XLSX.utils.book_append_sheet(workbook, deliverySheet(
-    projects.map(initiative => [value(programs.find(program => Number(program.id) === Number(initiative.programId))?.name), value(initiative.name), value(initiative.type), value(initiative.crNo), value(initiative.vertical), value(initiative.deliveryMethod), value(initiative.businessOwner), value(initiative.assignedTo), value(initiative.startDate), value(initiative.targetEndDate), value(initiative.revisedStartDate), value(initiative.revisedEndDate), value(initiative.actualEndDate), value(initiative.impactCategory), value(initiative.measurableImpact), value(initiative.businessBenefit)]),
+    projects.map(initiative => [value(programs.find(program => Number(program.id) === Number(initiative.programId))?.name), value(initiative.name), value(initiative.description), value(initiative.type), value(initiative.crNo), value(initiative.vertical), value(initiative.deliveryMethod), value(initiative.businessOwner), value(initiative.assignedTo), value(initiative.startDate), value(initiative.targetEndDate), value(initiative.revisedStartDate), value(initiative.revisedEndDate), value(initiative.actualEndDate), value(initiative.impactCategory), value(initiative.measurableImpact), value(initiative.businessBenefit),value(initiative.functional_engineer_id),value(initiative.technical_engineer_id)]),
     headers.initiatives
   ), 'Initiatives');
 
@@ -12407,10 +12611,10 @@ function downloadWorkbookTemplate() {
   const headers = deliveryWorkbookHeaders();
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, deliverySheet([
-    ['Retail Express', 'Rohit Sharma', 'Amit Kumar', 'Finance', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle by 30%']
+    ['Retail Express', 'Program purpose sample', 'Rohit Sharma', 'Amit Kumar', 'Finance', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle by 30%']
   ], headers.programs), 'Programs');
   XLSX.utils.book_append_sheet(workbook, deliverySheet([
-    ['Retail Express', 'Retail Express', 'Project', 'CR-1001', 'Finance', 'Agile', 'Rohit Sharma', 'Amit Kumar', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle by 30%']
+    ['Retail Express', 'Retail Express', 'Initiative description sample', 'Project', 'CR-1001', 'Finance', 'Agile', 'Rohit Sharma', 'Amit Kumar', '2026-09-01', '2026-10-15', '', '', '', 'Efficiency & Control', 'Quantitative', 'Reduce closing cycle by 30%']
   ], headers.initiatives), 'Initiatives');
   XLSX.utils.book_append_sheet(workbook, deliverySheet([
     ['Retail Express', 'Functional Track', 1]
@@ -12470,12 +12674,14 @@ async function importWorkbook(event) {
     const initiativeRowsByKey = new Map();
 
     programRows.forEach((row, index) => {
+      try { engineerAssignments.importPayload(row); } catch(error) { errors.push(`Programs row ${index+2}: ${error.message}`); }
       const name = String(row['Program Name*'] || '').trim();
       if (!name) errors.push(`Programs row ${index + 2}: Program Name is required.`);
       programRowsByKey.set(name.toLowerCase(), row);
     });
 
     initiativeRows.forEach((row, index) => {
+      try { engineerAssignments.importPayload(row); } catch(error) { errors.push(`Initiatives row ${index+2}: ${error.message}`); }
       const name = String(row['Initiative Name*'] || '').trim();
       const type = String(row['Type*'] || '').trim();
       const vertical = String(row['Vertical*'] || '').trim();
@@ -12537,7 +12743,8 @@ async function importWorkbook(event) {
         const targetEndDate = normalizeExcelDate(row['Target End Date']);
         const actualEndDate = normalizeExcelDate(row['Actual End Date']);
         const { data, error } = await supabaseClient.from('programs').insert({
-          program_name: row['Program Name*'], program_owner: row['Program Owner'] || null, assigned_to: row['Program Assigned To'] || null,
+          ...engineerAssignments.importPayload(row),
+          program_name: row['Program Name*'], purpose: row.Purpose || null, program_owner: row['Program Owner'] || null, assigned_to: row['Program Assigned To'] || null,
           vertical: row['Vertical*'], start_date: startDate || null, target_end_date: targetEndDate || null,
           revised_start_date: normalizeExcelDate(row['Revised Start Date']) || null, revised_end_date: normalizeExcelDate(row['Revised End Date']) || null,
           actual_end_date: actualEndDate || null, impact_category: row['Impact Category'] || null,
@@ -12557,9 +12764,10 @@ async function importWorkbook(event) {
         const actualEndDate = normalizeExcelDate(row['Actual End Date']);
         const initiativeSequenceNo = nextInitiativeSequence;
         const { data, error } = await supabaseClient.from('initiatives').insert({
+          ...engineerAssignments.importPayload(row),
           sequence_no: initiativeSequenceNo,
           program_id: programIds.get(String(row['Program Name'] || '').trim().toLowerCase()) || null,
-          title: row['Initiative Name*'], initiative_type: row['Type*'], cr_no: row['CR No'] || null,
+          title: row['Initiative Name*'], description: row.Description || null, initiative_type: row['Type*'], cr_no: row['CR No'] || null,
           vertical: row['Vertical*'], delivery_method: row['Delivery Method*'], business_owner: row['Business Owner*'], assigned_to: row['Assigned To*'],
           start_date: startDate || null, target_end_date: targetEndDate || null,
           revised_start_date: normalizeExcelDate(row['Revised Start Date']) || null, revised_end_date: normalizeExcelDate(row['Revised End Date']) || null,
@@ -14955,18 +15163,26 @@ function clearBulkSelection(){bulkWorkspaceSelection[currentWorkspaceView]?.clea
 function syncBulkSelectionUI(){const count=bulkWorkspaceSelection[currentWorkspaceView]?.size||0;const label=document.getElementById('bulk-selected-count');if(label)label.innerText=`${count} selected`;document.querySelectorAll('#bulk-action-toolbar button:not(:last-child)').forEach(button=>button.disabled=count===0);}
 function selectedBulkIds(){return [...(bulkWorkspaceSelection[currentWorkspaceView]||[])];}
 function bulkEditFields(entity){
-  if(entity==='programs')return[{value:'program_status',label:'Status',type:'status'},{value:'program_owner',label:'Program Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'}];
-  if(entity==='initiatives')return[{value:'initiative_status',label:'Status',type:'status'},{value:'business_owner',label:'Business Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'},{value:'initiative_type',label:'Initiative Type',type:'initiativeType'}];
+  const engineers=engineerAssignments.fields.map((value,index)=>({value,label:engineerAssignments.labels[index],type:'engineer'}));
+  if(entity==='programs')return[{value:'program_status',label:'Status',type:'status'},{value:'program_owner',label:'Program Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'},...engineers];
+  if(entity==='initiatives')return[{value:'initiative_status',label:'Status',type:'status'},{value:'business_owner',label:'Business Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'},{value:'initiative_type',label:'Initiative Type',type:'initiativeType'},...engineers];
   if(entity==='tracks')return[{value:'append_track_name',label:'Append text to Track Name',type:'text'}];
-  return[{value:'status',label:'Status',type:'status'},{value:'owner',label:'Milestone Owner',type:'user'},{value:'dependency',label:'Dependency',type:'text'},{value:'days',label:'Days',type:'number'},{value:'start_date',label:'Start Date',type:'date'},{value:'completion_date',label:'Actual End Date',type:'date'}];
+  return[{value:'status',label:'Status',type:'status'},{value:'owner',label:'Milestone Owner',type:'user'},{value:'dependency',label:'Dependency',type:'text'},{value:'milestone_remarks',label:'Remarks',type:'remarks'},{value:'days',label:'Days',type:'number'},{value:'start_date',label:'Start Date',type:'date'},{value:'completion_date',label:'Actual End Date',type:'date'}];
 }
 function openBulkEditModal(){const ids=selectedBulkIds();if(!ids.length)return showToast('Select at least one record.','error');bulkEditEntity=currentWorkspaceView==='overview'?overviewBulkEntity:currentWorkspaceView;const fields=bulkEditFields(bulkEditEntity),select=document.getElementById('bulk-edit-field');select.innerHTML=fields.map(f=>`<option value="${f.value}" data-type="${f.type}">${f.label}</option>`).join('');document.getElementById('bulk-edit-context').innerText=`${ids.length} ${bulkEditEntity} selected`;renderBulkEditValueInput();const modal=document.getElementById('bulk-edit-modal');modal.classList.remove('hidden');modal.classList.add('flex');lucide.createIcons();}
-function renderBulkEditValueInput(){const select=document.getElementById('bulk-edit-field'),type=select.selectedOptions[0]?.dataset.type||'text',area=document.getElementById('bulk-edit-value-area');let control='';if(type==='user')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="">-- Select User --</option>${userMaster.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join('')}</select>`;else if(type==='vertical')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${['Retail commercial','Finance','Merchandising'].map(v=>`<option>${v}</option>`).join('')}</select>`;else if(type==='initiativeType')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${getMasterValues('INITIATIVE_TYPE').map(v=>`<option value="${escapeHtml(v.value_name)}">${escapeHtml(v.value_name)}</option>`).join('')}</select>`;else if(type==='status')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="Pending">Pending</option><option value="In Progress">In Progress</option><option value="On-Hold">On Hold</option><option value="Delayed">Delayed</option><option value="Critical">Critical</option><option value="Done">Done</option><option value="In-Queue">In-Queue</option><option value="WIP">WIP</option><option value="Deviated">Deviated</option></select>`;else control=`<input id="bulk-edit-value" type="${type}" ${type==='number'?'min="1" step="1"':''} required class="mt-1 w-full rounded-lg border px-3 py-2">`;area.innerHTML=`<label class="block font-semibold text-slate-700">New value${control}</label>`+(bulkEditEntity==='milestones'&&['days','start_date','completion_date'].includes(select.value)?milestoneScheduleImpactControl('bulk-edit-impact-below'):'');}
+function renderBulkEditValueInput(){const select=document.getElementById('bulk-edit-field'),type=select.selectedOptions[0]?.dataset.type||'text',area=document.getElementById('bulk-edit-value-area');let control='';if(type==='remarks')control='<textarea id="bulk-edit-value" rows="5" maxlength="10000" class="mt-1 w-full rounded-lg border px-3 py-2 whitespace-pre-wrap break-words" placeholder="Leave empty to clear Remarks"></textarea>';else if(type==='user')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="">-- Select User --</option>${userMaster.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join('')}</select>`;else if(type==='vertical')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${['Retail commercial','Finance','Merchandising'].map(v=>`<option>${v}</option>`).join('')}</select>`;else if(type==='initiativeType')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${getMasterValues('INITIATIVE_TYPE').map(v=>`<option value="${escapeHtml(v.value_name)}">${escapeHtml(v.value_name)}</option>`).join('')}</select>`;else if(type==='status')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="Pending">Pending</option><option value="In Progress">In Progress</option><option value="On-Hold">On Hold</option><option value="Delayed">Delayed</option><option value="Critical">Critical</option><option value="Done">Done</option><option value="In-Queue">In-Queue</option><option value="WIP">WIP</option><option value="Deviated">Deviated</option></select>`;else control=`<input id="bulk-edit-value" type="${type}" ${type==='number'?'min="1" step="1"':''} required class="mt-1 w-full rounded-lg border px-3 py-2">`;area.innerHTML=`<label class="block font-semibold text-slate-700">New value${control}</label>`+(bulkEditEntity==='milestones'&&['days','start_date','completion_date'].includes(select.value)?milestoneScheduleImpactControl('bulk-edit-impact-below'):'');}
 function closeBulkEditModal(){const modal=document.getElementById('bulk-edit-modal');modal.classList.add('hidden');modal.classList.remove('flex');bulkEditEntity='';}
 async function saveBulkEdit(event){
   event.preventDefault();
   const ids=selectedBulkIds(),field=document.getElementById('bulk-edit-field').value,value=document.getElementById('bulk-edit-value').value;
-  if(!ids.length||!field||value==='')return;
+  const engineerField=engineerAssignments.fields.includes(field),clearEngineer=document.getElementById('bulk-engineer-clear')?.checked===true;
+  if(engineerField){
+    if(!value&&!clearEngineer)return showToast('Choose an engineer or explicitly select Clear assignment.','error');
+    if(value&&!clearEngineer&&!engineerAssignments.users.some(user=>String(user.id)===value&&user.is_active===true))return showToast('Select an active engineer.','error');
+    if(bulkEditEntity==='programs'?!canCreateInitiative():ids.some(id=>!canEditInitiative(projects.find(item=>Number(item.id)===Number(id)))))return showToast('Permission denied.','error');
+  }
+  if(!ids.length||!field||(value===''&&field!=='milestone_remarks'&&!engineerField))return;
+  if(field==='milestone_remarks'&&value.length>MAX_MILESTONE_REMARKS_LENGTH){showToast(`Remarks cannot exceed ${MAX_MILESTONE_REMARKS_LENGTH.toLocaleString()} characters.`,'error');return;}
   const impactBelow=document.getElementById('bulk-edit-impact-below')?.checked===true;
   if(bulkEditEntity==='milestones'&&field==='start_date'&&!confirm(`Apply this Start Date to ${ids.length} selected Milestones? Impact Below Dates? ${impactBelow?'Yes':'No'}.`))return;
   const button=document.getElementById('bulk-edit-save');button.disabled=true;
@@ -14989,7 +15205,7 @@ async function saveBulkEdit(event){
       }
       await applyMilestoneScheduleImpact(records,impactBelow);
     }else{
-      const table=bulkEditEntity==='programs'?'programs':bulkEditEntity==='initiatives'?'initiatives':'milestones',payload={[field]:value};if(table!=='milestones')payload.updated_at=new Date().toISOString();
+      const table=bulkEditEntity==='programs'?'programs':bulkEditEntity==='initiatives'?'initiatives':'milestones',payload={[field]:engineerField?(clearEngineer?null:Number(value)):field==='milestone_remarks'?(normalizeMilestoneRemarks(value)||null):value};if(table!=='milestones')payload.updated_at=new Date().toISOString();
       const {error}=await supabaseClient.from(table).update(payload).in('id',ids);if(error)throw error;
     }
     closeBulkEditModal();clearBulkSelection();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records updated successfully.','success');
@@ -18119,7 +18335,7 @@ if (typeof Chart !== 'undefined') Chart.register(analyticsProfessionalColorScale
     if(key==='todo')return document.getElementById('todo-search')?.closest('.bg-white');
   }
   function applyBarState(bar,key){const controls=[...bar.querySelectorAll('input,select,button')].filter(x=>!x.closest('.delivery-filter-actions'));const firstTop=controls[0]?.offsetTop??0;const overflow=controls.some(x=>x.offsetTop>firstTop+4);const toggle=bar.querySelector('.delivery-filter-toggle');if(toggle)toggle.classList.toggle('hidden',!overflow&&!expandedState[key]);bar.classList.toggle('is-collapsed',overflow&&!expandedState[key]);if(toggle){toggle.setAttribute('aria-expanded',String(Boolean(expandedState[key])));toggle.innerHTML=`<i data-lucide="chevron-${expandedState[key]?'up':'down'}" class="w-4 h-4"></i>${expandedState[key]?'Collapse Filters':'Filters'}`;}const count=activeCount(key),summary=bar.querySelector('.delivery-active-filter-count'),reset=bar.querySelector('.delivery-filter-reset');if(summary)summary.textContent=count?`${count} filter${count===1?'':'s'} active`:'';if(reset)reset.disabled=count===0;}
-  function enhanceBar(key){const bar=findBar(key);if(!bar)return;bar.dataset.deliveryFilterPage=key.startsWith('flat:')?'flat':key;bar.dataset.deliveryControlPage=key;bar.classList.add('delivery-filter-bar');if(!bar.querySelector('.delivery-filter-actions')){const actions=document.createElement('div');actions.className='delivery-filter-actions flex items-center gap-2';actions.innerHTML=`<button type="button" onclick="resetCurrentPageFilters()" class="delivery-filter-reset px-3 py-2 text-xs font-semibold rounded-lg border bg-white"><i data-lucide="rotate-ccw" class="w-4 h-4"></i>Reset Filters</button><button type="button" onclick="toggleCurrentFilterBar()" aria-controls="${bar.id||key+'-filters'}" class="delivery-filter-toggle px-3 py-2 text-xs font-semibold rounded-lg border bg-white"></button><button type="button" onclick="toggleCurrentFilterBar()" class="delivery-active-filter-count px-2 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700"></button>`;bar.appendChild(actions);}
+  function enhanceBar(key){const bar=findBar(key);if(!bar||bar.dataset.sharedOverviewFilter==='true')return;bar.dataset.deliveryFilterPage=key.startsWith('flat:')?'flat':key;bar.dataset.deliveryControlPage=key;bar.classList.add('delivery-filter-bar');if(!bar.querySelector('.delivery-filter-actions')){const actions=document.createElement('div');actions.className='delivery-filter-actions flex items-center gap-2';actions.innerHTML=`<button type="button" onclick="resetCurrentPageFilters()" class="delivery-filter-reset px-3 py-2 text-xs font-semibold rounded-lg border bg-white"><i data-lucide="rotate-ccw" class="w-4 h-4"></i>Reset Filters</button><button type="button" onclick="toggleCurrentFilterBar()" aria-controls="${bar.id||key+'-filters'}" class="delivery-filter-toggle px-3 py-2 text-xs font-semibold rounded-lg border bg-white"></button><button type="button" onclick="toggleCurrentFilterBar()" class="delivery-active-filter-count px-2 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700"></button>`;bar.appendChild(actions);}
     [...bar.querySelectorAll('select')].forEach(select=>{select.title=select.selectedOptions?.[0]?.textContent?.trim()||select.title;});
     if(observedBar!==bar){if(observedBar)resizeObserver?.unobserve(observedBar);observedBar=bar;resizeObserver?.observe(bar);}requestAnimationFrame(()=>applyBarState(bar,key));
   }
@@ -18981,10 +19197,10 @@ body:not(.delivery-overview-filter-active) .shared-overview-filter-bar-hidden {
     const headers = deliveryWorkbookHeaders();
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, deliverySheet([
-      ['Retail Express','Rohit Sharma','Amit Kumar','Finance','2026-09-01','2026-10-15','','','','Efficiency & Control','Quantitative','Reduce closing cycle by 30%']
+      ['Retail Express','Program purpose sample','Rohit Sharma','Amit Kumar','Finance','2026-09-01','2026-10-15','','','','Efficiency & Control','Quantitative','Reduce closing cycle by 30%']
     ], headers.programs), 'Programs');
     XLSX.utils.book_append_sheet(workbook, deliverySheet([
-      ['Retail Express','Retail Express','Project','CR-1001','Finance','Agile','Rohit Sharma','Amit Kumar','2026-09-01','2026-10-15','','','','Efficiency & Control','Quantitative','Reduce closing cycle by 30%']
+      ['Retail Express','Retail Express','Initiative description sample','Project','CR-1001','Finance','Agile','Rohit Sharma','Amit Kumar','2026-09-01','2026-10-15','','','','Efficiency & Control','Quantitative','Reduce closing cycle by 30%']
     ], headers.initiatives), 'Initiatives');
     XLSX.utils.book_append_sheet(workbook, deliverySheet([
       ['Retail Express','Functional Track',1]
@@ -19375,12 +19591,12 @@ body:not(.delivery-overview-filter-active) .shared-overview-filter-bar-hidden {
 <script>
 (()=>{'use strict';
 const original={openImport:window.openPageImportModal,exportPage:window.exportCurrentWorkspacePage,importPage:window.importCurrentWorkspacePage,updateHeader:window.updateWorkspaceHeaderActions};
-let contextualPage=null,busy=false;
+let lastImportExportPage=null,busy=false;
 const safe=v=>v==null?'':String(v), norm=s=>safe(s).trim().toLowerCase(), stamp=()=>new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date()).replace(/[-: ]/g,'').slice(0,13);
 const audit=['created_at','created_by','modified_at','modified_by','archived_at','archived_by'];
 const cfg={
- programs:{label:'Programs',sheet:'Programs',table:'programs',key:'id',required:['Program Name'],headers:['Program ID','Sequence No','Program Name','Vertical','Program Owner','Assigned To','Start Date','Target End Date','Revised Start Date','Revised End Date','Actual End Date','Impact Category','Measurable Impact','Business Benefit','Program Status','Record Status'],map:{'Program ID':'id','Sequence No':'sequence_no','Program Name':'name','Vertical':'vertical','Program Owner':'owner','Assigned To':'assigned_to','Start Date':'start_date','Target End Date':'target_end_date','Revised Start Date':'revised_start_date','Revised End Date':'revised_end_date','Actual End Date':'actual_end_date','Impact Category':'impact_category','Measurable Impact':'measurable_impact','Business Benefit':'business_benefit','Program Status':'status','Record Status':'record_status'},rows:()=>window.programs||[]},
- initiatives:{label:'Initiatives',sheet:'Initiatives',table:'initiatives',key:'id',required:['Initiative Name','Program ID'],headers:['Initiative ID','Program ID','Sequence No','Initiative Name','Initiative Type','CR Number','Vertical','Delivery Method','Business Owner','Assigned To','Start Date','Target End Date','Revised Start Date','Revised End Date','Actual End Date','Impact Category','Measurable Impact','Business Benefit','Status','Record Status'],map:{'Initiative ID':'id','Program ID':'program_id','Sequence No':'sequence_no','Initiative Name':'name','Initiative Type':'initiative_type','CR Number':'cr_no','Vertical':'vertical','Delivery Method':'delivery_method','Business Owner':'business_owner','Assigned To':'assigned_to','Start Date':'start_date','Target End Date':'target_end_date','Revised Start Date':'revised_start_date','Revised End Date':'revised_end_date','Actual End Date':'actual_end_date','Impact Category':'impact_category','Measurable Impact':'measurable_impact','Business Benefit':'business_benefit','Status':'status','Record Status':'record_status'},rows:()=>window.projects||[]},
+ programs:{label:'Programs',sheet:'Programs',table:'programs',key:'id',required:['Program Name'],headers:['Program ID','Sequence No','Program Name','Purpose','Vertical','Program Owner','Assigned To','Start Date','Target End Date','Revised Start Date','Revised End Date','Actual End Date','Impact Category','Measurable Impact','Business Benefit','Program Status','Record Status'],map:{'Program ID':'id','Sequence No':'sequence_no','Program Name':'name','Purpose':'purpose','Vertical':'vertical','Program Owner':'owner','Assigned To':'assigned_to','Start Date':'start_date','Target End Date':'target_end_date','Revised Start Date':'revised_start_date','Revised End Date':'revised_end_date','Actual End Date':'actual_end_date','Impact Category':'impact_category','Measurable Impact':'measurable_impact','Business Benefit':'business_benefit','Program Status':'status','Record Status':'record_status'},rows:()=>window.programs||[]},
+ initiatives:{label:'Initiatives',sheet:'Initiatives',table:'initiatives',key:'id',required:['Initiative Name','Program ID'],headers:['Initiative ID','Program ID','Sequence No','Initiative Name','Description','Initiative Type','CR Number','Vertical','Delivery Method','Business Owner','Assigned To','Start Date','Target End Date','Revised Start Date','Revised End Date','Actual End Date','Impact Category','Measurable Impact','Business Benefit','Status','Record Status'],map:{'Initiative ID':'id','Program ID':'program_id','Sequence No':'sequence_no','Initiative Name':'name','Description':'description','Initiative Type':'initiative_type','CR Number':'cr_no','Vertical':'vertical','Delivery Method':'delivery_method','Business Owner':'business_owner','Assigned To':'assigned_to','Start Date':'start_date','Target End Date':'target_end_date','Revised Start Date':'revised_start_date','Revised End Date':'revised_end_date','Actual End Date':'actual_end_date','Impact Category':'impact_category','Measurable Impact':'measurable_impact','Business Benefit':'business_benefit','Status':'status','Record Status':'record_status'},rows:()=>window.projects||[]},
  tracks:{label:'Tracks',sheet:'Tracks',table:'milestone_tracks',key:'id',required:['Track Name','Initiative ID'],headers:['Track ID','Sequence No','Initiative ID','Track Name','Record Status'],map:{'Track ID':'id','Sequence No':'display_order','Initiative ID':'initiative_id','Track Name':'name','Record Status':'record_status'},rows:()=> (window.projects||[]).flatMap(i=>(i.tracks||[]).map(t=>({...t,initiative_id:i.id})))},
  milestones:{label:'Milestones',sheet:'Milestones',table:'milestones',key:'id',required:['Initiative ID','Action / Deliverable'],headers:['Milestone ID','Initiative ID','Track ID','Sequence No','Action / Deliverable','Milestone Planner Type ID','Owner','Dependency','Days','Start Date','End Date','Deadline','Completion Date','Status','Deviation','Critical','Record Status'],map:{'Milestone ID':'id','Initiative ID':'initiative_id','Track ID':'track_id','Sequence No':'sequence_no','Action / Deliverable':'action','Milestone Planner Type ID':'planner_type_id','Owner':'owner','Dependency':'dependency','Days':'days','Start Date':'start_date','End Date':'end_date','Deadline':'deadline','Completion Date':'completion_date','Status':'status','Deviation':'deviation','Critical':'critical','Record Status':'record_status'},rows:()=> (window.projects||projects||[]).flatMap(i=>(i.milestones||[]).map(m=>({...m,planner_type_id:m.plannerTypeId||null,initiative_id:i.id})))},
  daily:{label:'Daily Tracker',sheet:'Daily Tracker',table:'milestones',key:'id',required:['Milestone ID'],headers:['Milestone ID','Program','Initiative','Track','Action / Deliverable','Owner','Status','Start Date','End Date','Deadline','Completion Date','Deviation','Critical','Review State','Record Status'],map:{'Milestone ID':'id','Owner':'owner','Status':'status','Completion Date':'completion_date','Review State':'review_state','Record Status':'record_status'},rows:()=>{const search=(document.getElementById('daily-search')?.value||'').trim().toLowerCase(),owner=document.getElementById('daily-owner-filter')?.value||'';return (typeof getDailyPendingRows==='function'?getDailyPendingRows():[]).filter(r=>(!owner||r.m.owner===owner)&&(!search||[r.m.actions,r.m.owner,r.i.name,r.p?.name,r.t?.name].filter(Boolean).join(' ').toLowerCase().includes(search))).map(r=>({'Milestone ID':r.m.id??'','Program':r.p?.name||'','Initiative':r.i?.name||'','Track':r.t?.name||'','Action / Deliverable':r.m.actions||'','Owner':r.m.owner||'','Status':r.status||'','Start Date':r.m.startDate||'','End Date':r.m.revisedEndDate||r.m.endDate||'','Deadline':r.m.deadline||r.end||'','Completion Date':r.m.completionDate||'','Deviation':r.m.deviationReason||r.m.deviation||'','Critical':r.m.isCritical?'Yes':'No','Review State':r.m.reviewState||'','Record Status':r.m.recordStatus||'active'}))}},
@@ -19390,14 +19606,108 @@ const cfg={
  initiative_type:master('Initiative Type','INITIATIVE_TYPE'),departments:master('Departments','DEPARTMENT'),business_benefit:master('Business Benefit Categories','BUSINESS_BENEFIT_CATEGORY'),project_status:master('Project Status','PROJECT_STATUS'),
  project_planner:{label:'Project Planner',sheet:'Project Planner',table:'project_planner_templates',key:'id',required:['Planner Name'],headers:['Planner ID','Planner Name','Description','Milestone Order','Milestone Name','Days','Rule','Dynamic / Fixed','Active Status'],map:{'Planner ID':'id','Planner Name':'name','Description':'description','Active Status':'is_active'},rows:()=>window.projectPlannerTemplates||[]}
 };
+for(const entity of ['programs','initiatives']){
+  engineerAssignments.fields.forEach((field,index)=>{
+    const label=engineerAssignments.labels[index];
+    cfg[entity].headers.push(label+' ID',label);
+    cfg[entity].map[label+' ID']=field;
+  });
+  cfg[entity].rows=()=>(entity==='programs'?programs:projects).map(record=>({...record,...Object.fromEntries(engineerAssignments.fields.map((field,index)=>[engineerAssignments.labels[index],engineerAssignments.display(record[field])]))}));
+}
 function master(label,type){return{label,sheet:label.slice(0,31),table:'master_values',key:'id',masterType:type,required:['Value Name'],headers:['Master ID','Code','Value Name','Master Type','Active Status'],map:{'Master ID':'id','Code':'code','Value Name':'value','Master Type':'master_type','Active Status':'is_active'},rows:()=> (window.masterValues||window.masterData||[]).filter(x=>x.master_type===type||x.type===type)}}
-function page(){return contextualPage||window.currentWorkspaceView||'overview'}
+function page(){
+  const visible=id=>{const element=document.getElementById(id);return element&&!element.classList.contains('hidden')&&element.getClientRects().length>0};
+  if(visible('user-modal'))return 'user_master';
+  if(visible('master-data-modal'))return {INITIATIVE_TYPE:'initiative_type',DEPARTMENT:'departments',BUSINESS_BENEFIT_CATEGORY:'business_benefit',PROJECT_STATUS:'project_status'}[currentMasterType]||currentWorkspaceView;
+  if(visible('project-planner-modal'))return 'project_planner';
+  return currentWorkspaceView||'overview';
+}
 function canImport(p){if(p==='analytics'||p==='logout')return false;if(typeof canCreateInitiative==='function'&&!canCreateInitiative())return false;if(p==='user_roles'&&!(currentUser?.roleTier==='admin'||currentUser?.role==='admin'))return false;return true}
-function setContext(p){contextualPage=p;setTimeout(update,0)}
-function update(){const p=page(),c=cfg[p],ib=document.getElementById('btn-page-import'),eb=document.getElementById('btn-page-export');if(p==='overview'){contextualPage=null;return original.updateHeader?.()}if(ib){ib.style.display=(p==='analytics'||p==='logout'||!c)?'none':'';ib.title=c?`Import ${c.label}`:'';ib.setAttribute('aria-label',ib.title)}if(eb){eb.style.display=(p==='logout'||(!c&&p!=='analytics'))?'none':'';eb.title=p==='analytics'?'Export Analytics':c?`Export ${c.label}`:'';eb.setAttribute('aria-label',eb.title)}}
+function setContext(){update();setTimeout(update,0)}
+function update(){
+  const p=page(),c=cfg[p],ib=document.getElementById('btn-page-import'),eb=document.getElementById('btn-page-export');
+  if(lastImportExportPage!==p){
+    lastImportExportPage=p;currentImportView=p;
+    document.getElementById('page-export-menu')?.remove();
+    const input=document.getElementById('import-file');if(input)input.value='';
+    const modal=document.getElementById('import-modal');
+    if(modal&&!modal.classList.contains('hidden')&&!busy)closeImportModal();
+  }
+  if(p==='overview'){
+    original.updateHeader?.();
+    if(ib){ib.style.display=canImport(p)?'':'none';ib.title='Import Project Overview';ib.setAttribute('aria-label',ib.title)}
+    if(eb){eb.style.display='';eb.title='Export Project Overview';eb.setAttribute('aria-label',eb.title)}
+    return;
+  }
+  if(ib){ib.style.display=(!c||!canImport(p))?'none':'';ib.title=c?`Import ${c.label}`:'';ib.setAttribute('aria-label',ib.title)}
+  if(eb){eb.style.display=(p==='logout'||(!c&&p!=='analytics'))?'none':'';eb.title=p==='analytics'?'Export Analytics':c?`Export ${c.label}`:'';eb.setAttribute('aria-label',eb.title)}
+}
 window.openPageImportModal=function(){const p=page();if(p==='overview')return original.openImport();const c=cfg[p];if(!c)return showToast?.('Import is not available for this page.','error');if(!canImport(p))return showToast?.('You are not authorised to import this page.','error');const title=document.getElementById('import-modal-title'),content=document.getElementById('import-modal-default'),status=document.getElementById('import-modal-status');if(title)title.textContent=`${c.label} Import Center`;if(content)content.innerHTML=`<p class="text-sm text-slate-600">Template: <b>${c.label}_Import_Template.xlsx</b></p><div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button type="button" id="pio-template" class="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white">Download Template</button><button type="button" id="pio-select" class="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white">Select Import File</button></div><div class="page-io-progress"><i id="pio-bar"></i></div><p id="pio-count" class="text-xs text-slate-500">Ready</p>`;if(status){status.classList.add('hidden');status.innerHTML=''};openImportModal();document.getElementById('pio-template').onclick=()=>template(p);document.getElementById('pio-select').onclick=()=>document.getElementById('import-file')?.click()};
 function template(p){const c=cfg[p],wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([c.headers]),meta=XLSX.utils.aoa_to_sheet([['PMO_DELIVERY_HUB_TEMPLATE',p,'1.0']]);XLSX.utils.book_append_sheet(wb,ws,c.sheet);XLSX.utils.book_append_sheet(wb,meta,'_PMO_META');meta['!state']='hidden';XLSX.writeFile(wb,`${c.label.replace(/ /g,'_')}_Import_Template.xlsx`)}
-window.importCurrentWorkspacePage=async function(e){const p=page();if(p==='overview')return original.importPage(e);if(busy)return;const file=e.target.files?.[0];e.target.value='';if(!file)return;const c=cfg[p];busy=true;lock(true);try{const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});const meta=wb.Sheets._PMO_META?XLSX.utils.sheet_to_json(wb.Sheets._PMO_META,{header:1})[0]:null;if(!meta||meta[0]!=='PMO_DELIVERY_HUB_TEMPLATE'||meta[1]!==p||!wb.Sheets[c.sheet])throw new Error(`This file is not a ${c.label} import template. Please use the ${c.label} template.`);const rows=XLSX.utils.sheet_to_json(wb.Sheets[c.sheet],{defval:''}),heads=rows.length?Object.keys(rows[0]):[];const missing=c.required.filter(h=>!heads.includes(h));if(missing.length)throw new Error(`Missing required columns: ${missing.join(', ')}`);if(!rows.length)throw new Error('The selected template contains no data rows.');const errors=[];rows.forEach((r,i)=>{c.required.forEach(h=>{if(!safe(r[h]).trim())errors.push(`Row ${i+2}: ${h} is required.`)});if(p==='user_master'||p==='user_roles'){if(r.Email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.Email))errors.push(`Row ${i+2}: invalid email.`)}});let importRows=rows,verticalValidationFailures=[];if(p==='initiatives'){const validVerticals=await getActiveDepartmentValueSet();if(!validVerticals.size)throw new Error('Department Master contains no active Value Name records for Initiative Vertical validation.');importRows=rows.filter((r,i)=>{const vertical=safe(r.Vertical).trim();if(validVerticals.has(vertical.toLowerCase()))return true;verticalValidationFailures.push({row:i+2,vertical});return false});if(!importRows.length&&verticalValidationFailures.length)throw new Error(formatInitiativeVerticalValidationSummary(0,verticalValidationFailures))}if(errors.length)throw new Error(errors.slice(0,8).join(' '));const payload=importRows.map(r=>{const o={};Object.entries(c.map).forEach(([h,k])=>{if(h in r&&r[h]!=='')o[k]=r[h]});if(c.masterType)o.master_type=c.masterType;o.modified_at=new Date().toISOString();o.modified_by=currentUser?.email||currentUser?.name||'';return o});progress(30,`Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}`);const db=window.supabaseClient||window.supabase;if(!db?.from)throw new Error('Database connection is not available.');const q=db.from(c.table).upsert(payload,{onConflict:c.key});const {error}=await q;if(error)throw error;progress(100,`Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}.`);showStatus('success',`${c.label} import completed. Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}.`);if(verticalValidationFailures.length)alert(formatInitiativeVerticalValidationSummary(importRows.length,verticalValidationFailures));await refresh(p)}catch(err){console.error('[Page import]',p,err);showStatus('error',err.message||'Import failed. No rows were imported.')}finally{busy=false;lock(false)}};
+window.importCurrentWorkspacePage=async function(e){
+  const p=page();
+  if(p==='overview')return original.importPage(e);
+  if(busy)return;
+  const file=e.target.files?.[0];e.target.value='';if(!file)return;
+  const c=cfg[p];busy=true;lock(true);
+  try{
+    if(!canImport(p))throw new Error('You are not authorised to import this page.');
+    const wb=XLSX.read(await file.arrayBuffer(),{type:'array',cellDates:true});
+    const meta=wb.Sheets._PMO_META?XLSX.utils.sheet_to_json(wb.Sheets._PMO_META,{header:1})[0]:null;
+    if(!meta||meta[0]!=='PMO_DELIVERY_HUB_TEMPLATE'||meta[1]!==p||!wb.Sheets[c.sheet])throw new Error(`This file is not a ${c.label} import template. Please use the ${c.label} template.`);
+    const rows=XLSX.utils.sheet_to_json(wb.Sheets[c.sheet],{defval:''}),heads=rows.length?Object.keys(rows[0]):[];
+    const missing=c.required.filter(h=>!heads.includes(h));
+    if(missing.length)throw new Error(`Missing required columns: ${missing.join(', ')}`);
+    if(!rows.length)throw new Error('The selected template contains no data rows.');
+    const engineers=['programs','initiatives'].includes(p);
+    const existing=row=>(p==='programs'?programs:projects).find(record=>String(record.id)===String(row[p==='programs'?'Program ID':'Initiative ID']));
+    const errors=[];
+    rows.forEach((row,index)=>{
+      c.required.forEach(heading=>{if(!safe(row[heading]).trim())errors.push(`Row ${index+2}: ${heading} is required.`)});
+      if(engineers){
+        try{
+          const record=existing(row);
+          if(p==='initiatives'&&record&&!canEditInitiative(record))throw new Error('Permission denied.');
+          engineerAssignments.importPayload(row,'',record);
+        }catch(error){errors.push(`Row ${index+2}: ${error.message}`)}
+      }
+      if((p==='user_master'||p==='user_roles')&&row.Email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.Email))errors.push(`Row ${index+2}: invalid email.`);
+    });
+    let importRows=rows,verticalValidationFailures=[];
+    if(p==='initiatives'){
+      const validVerticals=await getActiveDepartmentValueSet();
+      if(!validVerticals.size)throw new Error('Department Master contains no active Value Name records for Initiative Vertical validation.');
+      importRows=rows.filter((row,index)=>{const vertical=safe(row.Vertical).trim();if(validVerticals.has(vertical.toLowerCase()))return true;verticalValidationFailures.push({row:index+2,vertical});return false});
+      if(!importRows.length&&verticalValidationFailures.length)throw new Error(formatInitiativeVerticalValidationSummary(0,verticalValidationFailures));
+    }
+    if(errors.length)throw new Error(errors.slice(0,8).join(' '));
+    const payload=importRows.map(row=>{
+      const record={};
+      Object.entries(c.map).forEach(([heading,key])=>{if(heading in row&&row[heading]!==''&&!engineerAssignments.fields.includes(key))record[key]=row[heading]});
+      if(engineers){
+        const previous=existing(row);
+        if(previous)for(const field of engineerAssignments.fields)record[field]=previous[field]??null;
+        Object.assign(record,engineerAssignments.importPayload(row,'',previous));
+        const columns=p==='programs'?{name:'program_name',owner:'program_owner',status:'program_status'}:{name:'title',status:'initiative_status'};
+        for(const [source,target]of Object.entries(columns))if(Object.hasOwn(record,source)){record[target]=record[source];delete record[source];}
+        if(p==='programs')delete record.record_status;
+      }
+      if(c.masterType)record.master_type=c.masterType;
+      record.modified_at=new Date().toISOString();record.modified_by=currentUser?.email||currentUser?.name||'';
+      return record;
+    });
+    progress(30,`Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}`);
+    const db=engineers?supabaseClient:(window.supabaseClient||window.supabase);
+    if(!db?.from)throw new Error('Database connection is not available.');
+    const {error}=await db.from(c.table).upsert(payload,{onConflict:c.key});if(error)throw error;
+    progress(100,`Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}.`);
+    showStatus('success',`${c.label} import completed. Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}.`);
+    if(verticalValidationFailures.length)alert(formatInitiativeVerticalValidationSummary(importRows.length,verticalValidationFailures));
+    if(engineers)await loadInitiativesFromSupabase();
+    await refresh(p);
+  }catch(error){console.error('[Page import]',p,error);showStatus('error',error.message||'Import failed. No rows were imported.')}
+  finally{busy=false;lock(false)}
+};
 function lock(on){document.getElementById('import-modal-close')?.toggleAttribute('disabled',on);const b=document.getElementById('pio-select');if(b)b.disabled=on}function progress(n,t){const b=document.getElementById('pio-bar'),c=document.getElementById('pio-count');if(b)b.style.width=n+'%';if(c)c.textContent=t}function showStatus(type,msg){const s=document.getElementById('import-modal-status');if(s){s.className=`rounded-lg p-3 text-sm ${type==='success'?'bg-emerald-50 text-emerald-800':'bg-rose-50 text-rose-800'}`;s.textContent=msg}}
 async function refresh(p){if(['programs','initiatives','tracks','milestones','daily'].includes(p)&&typeof loadProjectsFromDB==='function')await loadProjectsFromDB();if(p==='todo'&&typeof renderTodoList==='function')renderTodoList();if(typeof renderFlatWorkspacePage==='function'&&['programs','initiatives','tracks','milestones'].includes(p))renderFlatWorkspacePage()}
 window.exportCurrentWorkspacePage=function(){const p=page();if(p==='overview')return original.exportPage();if(p==='analytics')return menu();const c=cfg[p];if(!c)return showToast?.('Export is not available for this page.','error');if(busy)return;busy=true;try{let exportHeaders=c.headers,rows;if(p==='daily'){const table=document.querySelector('#workspace-flat-page table');if(!table)throw new Error('Daily Tracker table is not available.');const allHeaders=[...table.querySelectorAll('thead th')].map((th,index)=>({index,label:th.innerText.replace(/\s+/g,' ').trim()}));const included=allHeaders.filter(h=>h.label&&!/^(select|action|actions)$/i.test(h.label));exportHeaders=included.map(h=>h.label);rows=[...table.querySelectorAll('tbody tr')].filter(tr=>tr.offsetParent!==null&&!tr.querySelector('td[colspan]')).map(tr=>{const cells=[...tr.querySelectorAll(':scope > td')],o={};included.forEach(h=>{const cell=cells[h.index];o[h.label]=cell?cell.innerText.replace(/\s+/g,' ').trim():''});return o}).filter(row=>Object.values(row).some(value=>String(value).trim()));if(!rows.length)throw new Error('No Daily Tracker rows are visible for the current filters.');}else{rows=c.rows().map(x=>{const o={};c.headers.forEach(h=>{if(Object.prototype.hasOwnProperty.call(x,h)){o[h]=x[h]??'';return}const k=c.map[h];o[h]=k?x[k]??x[toCamel(k)]??'':''});return o})}const ws=XLSX.utils.json_to_sheet(rows,{header:exportHeaders}),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,c.sheet);XLSX.writeFile(wb,`${c.label.replace(/ /g,'_')}_${stamp()}.xlsx`);showToast?.(`${c.label} export created.`,'success')}catch(err){console.error('[Page export]',p,err);showToast?.(`Unable to export ${c.label}: ${err.message}`,'error')}finally{busy=false}};
@@ -19407,8 +19717,9 @@ function analyticsData(){const root=document.getElementById('analytics-dashboard
 window.exportAnalyticsReport=async function(format){return window.deliveryReportBuilder?.export(format)};
 async function analyticsExport(f){if(busy)return;busy=true;try{const d=analyticsData(),name=`Analytics_${stamp()}`;if(f==='excel'){const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['PMO Delivery Hub Analytics'],['Export Date',d.date],['Active Filters',d.filters.join('; ')],[],['KPIs'],...d.kpis.map(x=>[x])]),'Summary');d.charts.forEach((x,i)=>{const ch=x.chart,labels=ch?.data?.labels||[],sets=ch?.data?.datasets||[],aoa=[['Category',...sets.map(s=>s.label||'Value')],...labels.map((l,j)=>[l,...sets.map(s=>s.data?.[j]??'')])];XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(aoa),(`Report ${i+1}`).slice(0,31))});XLSX.writeFile(wb,name+'.xlsx')}else if(f==='pdf'){const {jsPDF}=window.jspdf,doc=new jsPDF({orientation:'landscape'});doc.setFontSize(18);doc.text('PMO Delivery Hub Analytics',14,16);doc.setFontSize(9);doc.text(`Exported: ${d.date}`,14,23);doc.text(`Filters: ${d.filters.join('; ')||'None'}`,14,29,{maxWidth:260});for(let i=0;i<d.charts.length;i++){if(i||d.charts.length)doc.addPage();doc.setFontSize(14);doc.text(d.charts[i].title,14,15);doc.addImage(d.charts[i].image,'PNG',14,22,260,145);doc.setFontSize(8);doc.text(`Page ${i+2}`,270,195,{align:'right'})}doc.save(name+'.pdf')}else if(f==='word'){if(!window.docx)throw new Error('Word library failed to load.');const {Document,Packer,Paragraph,HeadingLevel,ImageRun,TextRun}=docx,children=[new Paragraph({text:'PMO Delivery Hub Analytics',heading:HeadingLevel.TITLE}),new Paragraph(`Exported: ${d.date}`),new Paragraph(`Active filters: ${d.filters.join('; ')||'None'}`),new Paragraph({text:'KPI Summary',heading:HeadingLevel.HEADING_1}),...d.kpis.map(x=>new Paragraph(x))];for(const x of d.charts){children.push(new Paragraph({text:x.title,heading:HeadingLevel.HEADING_1}),new Paragraph({children:[new ImageRun({data:Uint8Array.from(atob(x.image.split(',')[1]),c=>c.charCodeAt(0)),transformation:{width:620,height:330}})]}))}const blob=await Packer.toBlob(new Document({sections:[{children}]}));saveAsBlob(blob,name+'.docx')}else{if(!window.PptxGenJS)throw new Error('PowerPoint library failed to load.');const ppt=new PptxGenJS();ppt.layout='LAYOUT_WIDE';ppt.author='PMO Delivery Hub';let s=ppt.addSlide();s.addText('PMO Delivery Hub Analytics',{x:.7,y:1.7,w:12,h:.7,fontSize:28,bold:true,color:'312E81'});s.addText(`Exported ${d.date}`,{x:.7,y:2.6,w:12,h:.35,fontSize:12,color:'64748B'});s=ppt.addSlide();s.addText('Active Filters and KPI Summary',{x:.5,y:.35,w:12.3,h:.5,fontSize:22,bold:true,color:'312E81'});s.addText((d.filters.join('\n')||'No active filters')+'\n\n'+d.kpis.join('\n'),{x:.7,y:1,w:11.8,h:5.8,fontSize:15,breakLine:true});d.charts.forEach(x=>{const sl=ppt.addSlide();sl.addText(x.title,{x:.5,y:.25,w:12.2,h:.45,fontSize:20,bold:true,color:'312E81'});sl.addImage({data:x.image,x:.7,y:.9,w:11.9,h:5.9})});await ppt.writeFile({fileName:name+'.pptx'})}showToast?.(`Analytics ${f} export created.`,'success')}catch(err){console.error('[Analytics export]',err);showToast?.(`Analytics export failed: ${err.message}`,'error')}finally{busy=false}}
 function saveAsBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
-const wrap=(n,pick)=>{const fn=window[n];if(typeof fn!=='function')return;window[n]=function(...a){setContext(pick(...a));return fn.apply(this,a)}};
+const wrap=(n,pick)=>{const fn=window[n];if(typeof fn!=='function')return;window[n]=function(...a){try{return fn.apply(this,a)}finally{setContext()}}};
 wrap('showWorkspaceView',x=>x);wrap('showTodoListView',()=> 'todo');wrap('showAnalyticsView',()=> 'analytics');wrap('openUserModal',()=> 'user_master');wrap('openMasterModal',t=>({INITIATIVE_TYPE:'initiative_type',DEPARTMENT:'departments',BUSINESS_BENEFIT_CATEGORY:'business_benefit',PROJECT_STATUS:'project_status'}[t]));wrap('openProjectPlannerModal',()=> 'project_planner');
+['closeUserModal','closeMasterModal','closeProjectPlannerModal'].forEach(name=>wrap(name));
 document.addEventListener('DOMContentLoaded',update);window.addEventListener('resize',()=>document.getElementById('page-export-menu')?.remove());
 })();
 </script>
@@ -21661,7 +21972,7 @@ body.report-workspace-active [data-report-workspace-hidden="true"]{display:none!
 (()=>{
   'use strict';
   const reportType='initiative_milestone_roadmap';
-  const rowFields={program:'Program',initiative:'Initiative',type:'Initiative Type',vertical:'Vertical',owner:'Business Owner',assigned:'Assigned To',status:'Status'};
+  const rowFields={program:'Program',initiative:'Initiative',type:'Initiative Type',vertical:'Vertical',owner:'Business Owner',assigned:'Assigned To',status:'Status',functional_engineer_id:'Initiative Functional Engineer',technical_engineer_id:'Initiative Technical Engineer',program_functional_engineer_id:'Program Functional Engineer',program_technical_engineer_id:'Program Technical Engineer'};
   const dateFields={start_date:'Start Date',end_date:'End Date',deadline:'Deadline',completion_date:'Completion Date'};
   const timestampFields=new Set(['created_at','updated_at','archived_at']);
   const isDateValueField=field=>Boolean(dateFields[field])||timestampFields.has(field);
@@ -21671,14 +21982,14 @@ body.report-workspace-active [data-report-workspace-hidden="true"]{display:none!
   const aggregations={earliest:'Earliest Date',latest:'Latest Date',first_sequence:'First by Milestone Sequence',last_sequence:'Last by Milestone Sequence',all:'Show All',count:'Count'};
   const allowedFields=()=>({rows:[...Object.keys(rowFields),...Object.keys(milestoneDimensions)],columns:['plannerTypes','templateMilestones','manualMilestones',...Object.keys(milestoneDimensions)],values:Object.keys(valueFields),filters:[...Object.keys(filterFields),...Object.keys(milestoneDimensions)]});
   const defaultAggregation=field=>isDateValueField(field)?'latest':'last_sequence';
-  const filterFields={program:'Program',initiative:'Initiative',template:'Template',vertical:'Vertical',owner:'Owner',status:'Initiative Status',milestoneStatus:'Milestone Status',dateRange:'Date Range',scope:'Active/Archived Scope'};
+  const filterFields={program:'Program',initiative:'Initiative',template:'Template',vertical:'Vertical',owner:'Owner',status:'Initiative Status',milestoneStatus:'Milestone Status',dateRange:'Date Range',scope:'Active/Archived Scope',functional_engineer_id:'Initiative Functional Engineer',technical_engineer_id:'Initiative Technical Engineer',program_functional_engineer_id:'Program Functional Engineer',program_technical_engineer_id:'Program Technical Engineer'};
   const state={config:null,saved:[],selected:null,editing:true,templates:[],templateRows:new Map(),metadataPromise:null,metadataVersion:0,data:null,result:null,busy:false,drag:null,user:null,request:0,openRequest:0,channel:null,refreshTimer:null,view:'report_builder',pages:{report_builder:null,custom_reports:null},scrolls:{},catalog:{search:'',template:'',dateField:''},catalogError:''};
   const clone=value=>JSON.parse(JSON.stringify(value));
   const key=value=>value==null?'':String(value);
   const html=value=>escapeHtml(key(value));
   const admin=()=>currentUser?.role==='Admin';
   const editable=()=>admin()&&state.view==='report_builder'&&state.editing&&!state.busy;
-  const defaults=()=>({version:3,reportType,groupId:'',rows:Object.keys(rowFields),columns:['plannerTypes'],values:['deadline'],stageValue:'deadline',dateField:'deadline',aggregationRules:{deadline:'latest'},selectedMilestoneFields:[],sorting:{program:'asc',initiative:'asc',date:'asc',missingDates:'last',initiativeId:'asc',milestoneId:'asc'},filters:Object.keys(filterFields),templateId:'',filterValues:{scope:'active'},manualMilestoneIds:[]});
+  const defaults=()=>({version:3,reportType,groupId:'',rows:Object.keys(rowFields),columns:['plannerTypes'],values:['deadline'],stageValue:'deadline',dateField:'deadline',aggregationRules:{deadline:'latest'},selectedMilestoneFields:[],sorting:{program:'asc',initiative:'asc',date:'asc',missingDates:'last',initiativeId:'asc',milestoneId:'asc'},filters:Object.keys(filterFields),templateId:'',filterValues:{scope:'active',search:''},manualMilestoneIds:[]});
   const root=()=>document.getElementById('delivery-reports');
   function message(text,error=false){const element=document.getElementById('report-message');if(element){element.textContent=text;element.dataset.error=key(error);}}
   function checkConfig(config){
@@ -21706,7 +22017,7 @@ body.report-workspace-active [data-report-workspace-hidden="true"]{display:none!
     for(const user of data.users||[])for(const name of [user.full_name,user.name,user.email,user.id])if(name!=null)users.set(key(name).trim().toLowerCase(),user);
     const byInitiative=new Map(),used=new Set(),relevant=new Map(),filterOptions=new Map(config.filters.filter(field=>field.startsWith('milestone.')).map(field=>[field,new Map()]));
     const selectedManual=new Set((config.manualMilestoneIds||[]).map(key));
-    const filters=config.filterValues||{},enabled=new Set(config.filters),scope=enabled.has('scope')?(filters.scope||'active'):'active',dateField=config.dateField||(dateFields[config.values[0]]?config.values[0]:'deadline'),sortDateField=config.sorting?.dateField||(dateFields[config.stageValue]?config.stageValue:dateFields[config.values[0]]?config.values[0]:dateField);
+    const filters=config.filterValues||{},search=key(filters.search).trim().toLocaleLowerCase(),enabled=new Set(config.filters),scope=enabled.has('scope')?(filters.scope||'active'):'active',dateField=config.dateField||(dateFields[config.values[0]]?config.values[0]:'deadline'),sortDateField=config.sorting?.dateField||(dateFields[config.stageValue]?config.stageValue:dateFields[config.values[0]]?config.values[0]:dateField);
     const typeOf=milestone=>key(milestone.planner_type_id);
     const selectedTypes=new Set(templateRows.map(row=>key(row.planner_type_id)).filter(Boolean)),nameCells=new Map(),typeRuleCells=new Map(),exactPresence=new Set();
     for(const rule of templateRows){const name=milestoneTypeIntegrity.normalizeName(rule.milestone_action||rule.milestone_title);const cells=['template:'+key(rule.id),...(rule.planner_type_id?['type:'+key(rule.planner_type_id)]:[])];if(name){if(!nameCells.has(name))nameCells.set(name,new Set());cells.forEach(cell=>nameCells.get(name).add(cell));}if(rule.planner_type_id){const type=key(rule.planner_type_id);if(!typeRuleCells.has(type))typeRuleCells.set(type,new Set());typeRuleCells.get(type).add('template:'+key(rule.id));}}
@@ -21773,10 +22084,12 @@ body.report-workspace-active [data-report-workspace-hidden="true"]{display:none!
       if(!used.has(initiativeId)||!allowedVertical(initiative.vertical)||!inScope(raw,scope))continue;
       const program=programMap.get(key(initiative.programId));
       const status=analyticsStatus(initiative);
-      const dimension={program:program?.program_name||program?.name||'Unmapped',initiative:initiative.name,type:initiative.type,vertical:initiative.vertical,owner:initiative.businessOwner,assigned:initiative.assignedTo,status};
+      const dimension={program:program?.program_name||program?.name||'Unmapped',initiative:initiative.name,type:initiative.type,vertical:initiative.vertical,owner:initiative.businessOwner,assigned:initiative.assignedTo,status,...Object.fromEntries(engineerAssignments.fields.flatMap(field=>[[field,engineerAssignments.display(raw[field])],['program_'+field,engineerAssignments.display(program?.[field])]]))};
+      if(engineerAssignments.fields.some(field=>[[field,raw[field]],['program_'+field,program?.[field]]].some(([filter,value])=>enabled.has(filter)&&filters[filter]&&(filters[filter]==='__unassigned__'?value!=null:String(value??'')!==String(filters[filter])))))continue;
       if(enabled.has('template')&&filters.template&&filters.template!==templateId)continue;
       if(['program','initiative','vertical','owner','status'].some(field=>enabled.has(field)&&filters[field]&&key(field==='program'?initiative.programId:field==='initiative'?initiative.id:dimension[field])!==filters[field]))continue;
       const milestones=relevant.get(initiativeId)||[];if((enabled.has('dateRange')&&(filters.from||filters.to)||enabled.has('milestoneStatus')&&filters.milestoneStatus||[...enabled].some(field=>field.startsWith('milestone.')&&filters[field]))&&!milestones.length)continue;
+      const search=key(filters.search).trim().toLocaleLowerCase();if(search){const searchable=[dimension.program,initiative.name,initiative.type,initiative.vertical,initiative.businessOwner,initiative.assignedTo,initiative.deliveryMethod,initiative.crNo,raw.cr_no,raw.cr,raw.change_request_number,...milestones.flatMap(row=>[row.action,row.actions,row.milestone_title,row.owner,row.track,row.plannerType,row.planner_type,row.status,row.dependency])].filter(Boolean).join(' ').toLocaleLowerCase();if(!searchable.includes(search))continue;}
       const cells=columnDefs.map(column=>aggregate(column.standard?milestones:byInitiative.get(initiativeId)?.get(column.cellKey)||[],column.field));
       const dates=milestones.map(row=>Date.parse(key(rawValue(row,sortDateField)))).filter(Number.isFinite);
       reportRows.push({values:[...config.rows.map(field=>field.startsWith('milestone.')?aggregate(milestones,field.slice(10)):key(dimension[field])||'-'),...cells],program:dimension.program,initiative:dimension.initiative,date:dates.length?Math.min(...dates):Infinity,initiativeId,milestoneId:milestones.map(row=>key(row.id)).sort((left,right)=>left.localeCompare(right,undefined,{numeric:true}))[0]||''});
@@ -21830,7 +22143,8 @@ body.report-workspace-active [data-report-workspace-hidden="true"]{display:none!
     const data=state.data||{initiatives:[],programs:[],milestones:[]},filters=state.config.filterValues,initiatives=data.initiatives.map(normalizeInitiative).filter(row=>isVerticalAllowed(row.vertical));
     const unique=values=>analyticsUnique(values).map(value=>[value,value]);
     const options={program:data.programs.map(row=>[row.id,row.program_name||row.name||row.id]),initiative:initiatives.map(row=>[row.id,row.name]),template:state.templates.map(row=>[row.id,row.template_name]),vertical:unique(initiatives.map(row=>row.vertical)),owner:unique(initiatives.map(row=>row.businessOwner)),status:unique(initiatives.map(analyticsStatus)),milestoneStatus:unique(data.milestones.map(row=>row.status)),scope:[['active','Active'],['archived','Archived'],['all','Active and Archived']]};
-    document.getElementById('report-filters').innerHTML=state.config.filters.map(field=>field==='dateRange'?`<label>From<input type="date" data-filter="from" value="${html(filters.from)}"></label><label>To<input type="date" data-filter="to" value="${html(filters.to)}"></label>`:`<label>${html(filterFields[field]||milestoneDimensions[field])}<select data-filter="${field}">${field==='scope'?options.scope.map(([value,text])=>`<option value="${value}" ${value===(filters.scope||'active')?'selected':''}>${text}</option>`).join(''):selectOptions(options[field]||state.result?.filterOptions?.[field]||[],filters[field])}</select></label>`).join('');
+    for(const field of engineerAssignments.fields)for(const [filter,records] of [[field,initiatives],['program_'+field,data.programs]])options[filter]=[['__unassigned__','Not Assigned'],...[...new Set(records.map(row=>row[field]).filter(value=>value!=null).map(String))].map(value=>[value,engineerAssignments.display(value)])];
+    document.getElementById('report-filters').innerHTML=`<label class="shared-filter-search-label">Search Report Data<input id="report-filter-search" type="search" data-filter="search" value="${html(filters.search||'')}" placeholder="Search report data" aria-label="Search report data"></label>`+state.config.filters.map(field=>field==='dateRange'?`<label>From<input type="date" data-filter="from" value="${html(filters.from)}"></label><label>To<input type="date" data-filter="to" value="${html(filters.to)}"></label>`:`<label>${html(filterFields[field]||milestoneDimensions[field])}<select data-filter="${field}">${field==='scope'?options.scope.map(([value,text])=>`<option value="${value}" ${value===(filters.scope||'active')?'selected':''}>${text}</option>`).join(''):selectOptions(options[field]||state.result?.filterOptions?.[field]||[],filters[field])}</select></label>`).join('');
   }
   function preview(){
     if(!state.data){message('Select a template and Run the report.');return;}
@@ -21878,7 +22192,7 @@ body.report-workspace-active [data-report-workspace-hidden="true"]{display:none!
   async function getSavedReport(id){
     const result=await supabaseClient.from('report_definitions').select('*').eq('id',id).eq('is_active',true).eq('report_type',reportType).single();
     if(result.error)throw result.error;if(!result.data)throw new Error('This report is no longer active.');
-    const config=clone(result.data.report_config);config.templateId=key(result.data.template_id);config.groupId=key(result.data.planner_type_group_id||config.groupId);config.manualMilestoneIds||=[];config.filterValues||={scope:'active'};config.sorting||=defaults().sorting;config.reportType=reportType;config.stageValue||=config.values?.[0];config.aggregationRules||={};checkConfig(config);return {...result.data,report_config:config};
+    const config=clone(result.data.report_config);config.templateId=key(result.data.template_id);config.groupId=key(result.data.planner_type_group_id||config.groupId);config.manualMilestoneIds||=[];config.filterValues||={scope:'active'};config.filterValues.search||='';config.sorting||=defaults().sorting;config.reportType=reportType;config.stageValue||=config.values?.[0];config.aggregationRules||={};checkConfig(config);return {...result.data,report_config:config};
   }
   async function openReport(id,edit=false){
     if(state.busy)return;if(!currentUser)throw new Error('Sign in to run reports.');if(edit)await authorize();
@@ -22015,7 +22329,7 @@ body.report-workspace-active [data-report-workspace-hidden="true"]{display:none!
     const result=clone(state.result),config=clone(state.config),title=document.getElementById('report-name').value.trim()||'Initiative-wise Milestone Roadmap';
     const filename=title.replace(/[^a-z0-9_-]+/gi,'_')+'_'+new Date().toISOString().slice(0,10);
     const template=state.templates.find(row=>key(row.id)===config.templateId);
-    const details=`Template: ${template?.template_name||config.templateId} | Group: ${window.milestonePlannerTypes?.state.groups.find(group=>key(group.id)===key(config.groupId))?.group_name||'All'} | Values: ${config.values.map(field=>valueFields[field]).join(', ')} | Aggregation: ${Object.entries(config.aggregationRules||{}).map(([field,mode])=>`${valueFields[field]}: ${aggregations[mode]}`).join('; ')} | Filters: ${config.filters.map(field=>field==='dateRange'?`${config.filterValues.from||'*'} to ${config.filterValues.to||'*'}`:`${filterFields[field]||milestoneDimensions[field]}: ${config.filterValues[field]||'All'}`).join('; ')}`;
+    const details=`Template: ${template?.template_name||config.templateId} | Group: ${window.milestonePlannerTypes?.state.groups.find(group=>key(group.id)===key(config.groupId))?.group_name||'All'} | Values: ${config.values.map(field=>valueFields[field]).join(', ')} | Aggregation: ${Object.entries(config.aggregationRules||{}).map(([field,mode])=>`${valueFields[field]}: ${aggregations[mode]}`).join('; ')} | Search: ${config.filterValues.search||'All'} | Filters: ${config.filters.map(field=>field==='dateRange'?`${config.filterValues.from||'*'} to ${config.filterValues.to||'*'}`:`${filterFields[field]||milestoneDimensions[field]}: ${config.filterValues[field]||'All'}`).join('; ')}`;
     const table=[result.headers,...result.rows];
     if(format==='excel'){
       const workbook=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(table);
@@ -22580,7 +22894,7 @@ commit;
   function dateWithin(day,start,end){return Boolean(day&&start&&end&&day>=start&&day<=end);}
   function readForm(){
     const departments=[...document.getElementById('sr-departments').selectedOptions].map(option=>option.value).filter(Boolean),sections=[...document.querySelectorAll('#sr-section-options input:checked')].map(input=>input.value),runDate=calendarDate(document.getElementById('sr-run-date').value),asOfDate=calendarDate(document.getElementById('sr-as-of-date').value),start=calendarDate(document.getElementById('sr-period-start').value),end=calendarDate(document.getElementById('sr-period-end').value);
-    return {reviewType:document.getElementById('sr-review-type').value,runDate,asOfDate,start,end,departments,program:document.getElementById('sr-program').value,initiativeType:document.getElementById('sr-initiative-type').value,deliveryMethod:document.getElementById('sr-delivery-method').value,initiativeStatus:document.getElementById('sr-initiative-status').value,milestoneStatus:document.getElementById('sr-milestone-status').value,owner:document.getElementById('sr-owner').value,assigned:document.getElementById('sr-assigned').value,priority:document.getElementById('sr-priority').value,scope:document.getElementById('sr-scope').value,profile:document.getElementById('sr-profile').value,sections,plannerTypeField:document.getElementById('sr-planner-value').value,plannerAggregation:document.getElementById('sr-planner-aggregation').value,diagnostics:currentUser?.role==='Admin'&&Boolean(document.getElementById('sr-planner-diagnostics')?.checked)};
+    return {search:document.getElementById('sr-search')?.value.trim()||'',reviewType:document.getElementById('sr-review-type').value,runDate,asOfDate,start,end,departments,program:document.getElementById('sr-program').value,initiativeType:document.getElementById('sr-initiative-type').value,deliveryMethod:document.getElementById('sr-delivery-method').value,initiativeStatus:document.getElementById('sr-initiative-status').value,milestoneStatus:document.getElementById('sr-milestone-status').value,owner:document.getElementById('sr-owner').value,assigned:document.getElementById('sr-assigned').value,priority:document.getElementById('sr-priority').value,scope:document.getElementById('sr-scope').value,profile:document.getElementById('sr-profile').value,sections,plannerTypeField:document.getElementById('sr-planner-value').value,plannerAggregation:document.getElementById('sr-planner-aggregation').value,diagnostics:currentUser?.role==='Admin'&&Boolean(document.getElementById('sr-planner-diagnostics')?.checked)};
   }
   function setStatus(text,error=false){const element=document.getElementById('sr-status');if(element){element.textContent=text;element.dataset.error=String(error);}}
   function selectedAll(departments){return departments.includes('__all');}
@@ -22654,7 +22968,7 @@ commit;
   }
   function initParams(){
     const today=runToday(),range=periods('Weekly',today,state.config.week_start||1),filter=state.config.default_filters||{};
-    document.getElementById('sr-run-date').value=today;document.getElementById('sr-as-of-date').value=today;document.getElementById('sr-review-type').value='Weekly';document.getElementById('sr-scope').value=filter.scope||'active';document.getElementById('sr-profile').value=state.config.default_export_profile||'Executive';document.getElementById('sr-planner-value').value=state.config.planner_type_value_field||'deadline';document.getElementById('sr-planner-aggregation').value=state.config.planner_type_aggregation||defaultPlannerAggregation(document.getElementById('sr-planner-value').value);state.lastDepartments=['__all'];state.zoom='0.8';
+    if(document.getElementById('sr-search'))document.getElementById('sr-search').value='';document.getElementById('sr-run-date').value=today;document.getElementById('sr-as-of-date').value=today;document.getElementById('sr-review-type').value='Weekly';document.getElementById('sr-scope').value=filter.scope||'active';document.getElementById('sr-profile').value=state.config.default_export_profile||'Executive';document.getElementById('sr-planner-value').value=state.config.planner_type_value_field||'deadline';document.getElementById('sr-planner-aggregation').value=state.config.planner_type_aggregation||defaultPlannerAggregation(document.getElementById('sr-planner-value').value);state.lastDepartments=['__all'];state.zoom='0.8';
     updatePeriodControls(true);setSections(state.config.default_sections||executiveSections);state.params={departments:Array.isArray(filter.departments)&&filter.departments.length?filter.departments:['__all'],program:filter.program||'',initiativeType:filter.initiativeType||'',deliveryMethod:filter.deliveryMethod||'',initiativeStatus:filter.initiativeStatus||'',milestoneStatus:filter.milestoneStatus||'',owner:filter.owner||'',assigned:filter.assigned||'',priority:filter.priority||''};renderFilters();
   }
   async function readRows(table,required=true){const result=await fetchAllSupabaseRows(table);if(result.error){if(required)throw result.error;return [];}return result.data||[];}
@@ -22690,7 +23004,9 @@ commit;
     if(!params.departments.length)throw new Error('No Departments selected. Select one, more than one, or All Departments.');
     const departmentNames=selectedDepartmentNames(params,data);if(!departmentNames.length)throw new Error('No active Departments are configured in Department Master.');
     const programMap=new Map(data.programs.map(row=>[key(row.id),row])),trackMap=new Map(data.tracks.map(row=>[key(row.id),row])),typeMap=new Map(data.plannerTypes.map(row=>[key(row.id),row]));
-    const initiatives=data.initiatives.filter(row=>inScope(row,params.scope)&&departmentNames.includes(key(row.vertical))&&isVerticalAllowed(row.vertical)).filter(row=>!params.program||key(row.program_id)===params.program).filter(row=>!params.initiativeType||key(row.initiative_type||row.type)===params.initiativeType).filter(row=>!params.deliveryMethod||key(row.delivery_method)===params.deliveryMethod).filter(row=>!params.owner||key(row.business_owner)===params.owner).filter(row=>!params.assigned||key(row.assigned_to)===params.assigned).filter(row=>!params.initiativeStatus||initiativeStatus(row)===params.initiativeStatus).filter(row=>!params.priority||priorityFor(row)===params.priority);
+    const search=key(params.search).trim().toLocaleLowerCase();
+    const matchesSearch=row=>{if(!search)return true;const program=programMap.get(key(row.program_id)),text=[row.title||row.name,row.id,row.cr_no||row.cr_number,row.initiative_type||row.type,row.vertical,row.delivery_method,row.business_owner,row.assigned_to,program?.program_name||program?.name,...data.milestones.filter(milestone=>key(milestone.initiative_id)===key(row.id)).flatMap(milestone=>[milestone.actions,milestone.milestone_title,milestone.owner,milestone.dependency,milestone.status])].filter(Boolean).join(' ').toLocaleLowerCase();return text.includes(search);};
+    const initiatives=data.initiatives.filter(row=>inScope(row,params.scope)&&departmentNames.includes(key(row.vertical))&&isVerticalAllowed(row.vertical)).filter(row=>!params.program||key(row.program_id)===params.program).filter(row=>!params.initiativeType||key(row.initiative_type||row.type)===params.initiativeType).filter(row=>!params.deliveryMethod||key(row.delivery_method)===params.deliveryMethod).filter(row=>!params.owner||key(row.business_owner)===params.owner).filter(row=>!params.assigned||key(row.assigned_to)===params.assigned).filter(row=>!params.initiativeStatus||initiativeStatus(row)===params.initiativeStatus).filter(row=>!params.priority||priorityFor(row)===params.priority).filter(matchesSearch);
     const initiativeMap=new Map(initiatives.map(row=>[key(row.id),row])),milestones=data.milestones.filter(row=>initiativeMap.has(key(row.initiative_id))&&inScope(row,params.scope)).map(row=>normalizedMilestone(row,initiativeMap.get(key(row.initiative_id)),programMap.get(key(initiativeMap.get(key(row.initiative_id)).program_id)),data,trackMap,typeMap,params,period)).filter(row=>!params.milestoneStatus||row.status===params.milestoneStatus);
     const milestoneByInitiative=new Map();for(const milestone of milestones){if(!milestoneByInitiative.has(key(milestone.initiativeId)))milestoneByInitiative.set(key(milestone.initiativeId),[]);milestoneByInitiative.get(key(milestone.initiativeId)).push(milestone);}
     const initiativeRecords=initiatives.map(row=>{
@@ -22708,7 +23024,7 @@ commit;
     const totals=['Grand Total',...statusOrder.map(status=>allMilestones.filter(item=>matchesStatus(item,status)).length),allMilestones.length];
     const summary={programs:selectedPrograms.size,initiatives:initiativeRecords.length,milestones:allMilestones.length,done:done.length,onHold:allMilestones.filter(item=>item.onHold).length,pending:allMilestones.filter(item=>item.status==='Pending').length,deviated:allMilestones.filter(item=>item.deviated).length,critical:allMilestones.filter(item=>item.critical).length,wip:allMilestones.filter(item=>['WIP','In Progress'].includes(item.status)).length,inQueue:allMilestones.filter(item=>item.status==='In-Queue').length,completedDuring:completed.length,dueNotCompleted:dueNotComplete.length,plannedNext:planned.length,progress:eligible.length?Math.round(done.length*100/eligible.length):0};
     const risks=[...new Map([...overdue.map(row=>[row,'Overdue']),...dueNotComplete.map(row=>[row,'Due Last Week but Not Completed']),...onHoldNext.map(row=>[row,'On Hold Due Next Review Period']),...criticalNext.map(row=>[row,row.critical?'Critical Next-Period Plan':'Deviated Next-Period Plan']),...allMilestones.filter(row=>row.critical).map(row=>[row,'Critical']),...allMilestones.filter(row=>row.deviated).map(row=>[row,'Deviated']),...allMilestones.filter(row=>row.futureCompletion).map(row=>[row,'Invalid Future Completion Date'])].map(([row,label])=>[key(row.id),{...row,riskLabel:label}])).values()].sort((a,b)=>stableId(a.department,b.department)||stableId(a.program,b.program)||stableId(a.initiative,b.initiative)||stableId(a.deadline,b.deadline)||a.sequence-b.sequence||stableId(a.id,b.id));
-    const model={reportCode:code,reportName,runDate:params.runDate,asOfDate:params.asOfDate,reviewType:params.reviewType,reviewStart:period.reportStart,reviewEnd:period.reportEnd,nextStart:period.nextStart,nextEnd:period.nextEnd,timeZone:timeZone(),manualOverride:period.manualOverride,departments:departmentNames,profile:params.profile,sections:params.sections,filters:{program:params.program,initiativeType:params.initiativeType,deliveryMethod:params.deliveryMethod,initiativeStatus:params.initiativeStatus,milestoneStatus:params.milestoneStatus,owner:params.owner,assigned:params.assigned,priority:params.priority,scope:params.scope},summary,initiativeRecords,initiativesByDepartment,programs:[...selectedPrograms.values()],milestones:allMilestones,completed,dueNotComplete,planned,overdue,onHoldNext,criticalNext,risks,matrix,matrixTotals:totals,plannerTypes:[],plannerRows:[],plannerDiagnostics:[],pages:[],generatedAt:new Date().toISOString()};
+    const model={reportCode:code,reportName,runDate:params.runDate,asOfDate:params.asOfDate,reviewType:params.reviewType,reviewStart:period.reportStart,reviewEnd:period.reportEnd,nextStart:period.nextStart,nextEnd:period.nextEnd,timeZone:timeZone(),manualOverride:period.manualOverride,departments:departmentNames,profile:params.profile,sections:params.sections,filters:{search:params.search||'',program:params.program,initiativeType:params.initiativeType,deliveryMethod:params.deliveryMethod,initiativeStatus:params.initiativeStatus,milestoneStatus:params.milestoneStatus,owner:params.owner,assigned:params.assigned,priority:params.priority,scope:params.scope},summary,initiativeRecords,initiativesByDepartment,programs:[...selectedPrograms.values()],milestones:allMilestones,completed,dueNotComplete,planned,overdue,onHoldNext,criticalNext,risks,matrix,matrixTotals:totals,plannerTypes:[],plannerRows:[],plannerDiagnostics:[],pages:[],generatedAt:new Date().toISOString()};
     buildPlannerRoadmap(model,data,params);buildReportPages(model,params);return model;
   }
   function aggregatePlannerMatches(matches,field,mode){
@@ -22790,7 +23106,7 @@ commit;
     document.getElementById('sr-report-page').style.zoom=document.getElementById('sr-zoom')?.value||'0.8';
     document.getElementById('sr-print').disabled=false;document.getElementById('sr-export').disabled=state.exporting;lucide.createIcons();
   }
-  function formatMetadataLine(model){return `Review period: ${formatDay(model.reviewStart)} to ${formatDay(model.reviewEnd)} | Next: ${formatDay(model.nextStart)} to ${formatDay(model.nextEnd)} | Run: ${formatDay(model.runDate)} | As-of: ${formatDay(model.asOfDate)} | Department: ${model.departments.join(', ')} | Profile: ${model.profile}`;}
+  function formatMetadataLine(model){const filters=Object.entries(model.filters||{}).filter(([,value])=>value!==''&&value!=null).map(([field,value])=>`${field}: ${value}`).join('; ')||'None';return `Review period: ${formatDay(model.reviewStart)} to ${formatDay(model.reviewEnd)} | Next: ${formatDay(model.nextStart)} to ${formatDay(model.nextEnd)} | Run: ${formatDay(model.runDate)} | As-of: ${formatDay(model.asOfDate)} | Department: ${model.departments.join(', ')} | Profile: ${model.profile} | Filters: ${filters}`;}
   function sheetRows(title,headers,rows){return [[title],['Review Period',`${formatDay(state.model.reviewStart)} to ${formatDay(state.model.reviewEnd)}`],['Next Review Period',`${formatDay(state.model.nextStart)} to ${formatDay(state.model.nextEnd)}`],[],headers,...(rows.length?rows:[['-']])];}
   async function exportExcel(model){
     if(!window.ExcelJS)throw new Error('Excel library failed to load.');const workbook=new window.ExcelJS.Workbook();workbook.creator=currentUser?.name||'Delivery Hub';workbook.title=reportName;workbook.subject=formatMetadataLine(model);workbook.created=new Date();
@@ -22932,7 +23248,7 @@ commit;
   window.showWorkspaceView=function(view){if(view==='system_reports')return showCatalog();closePage();return previousWorkspace.apply(this,arguments);};
   window.showAnalyticsView=function(){closePage();return previousAnalytics.apply(this,arguments);};
   root()?.addEventListener('input',onCatalogInput);root()?.addEventListener('change',onChange);root()?.addEventListener('click',onClick);
-  window.weeklyMonthlyReviewSystemReport={code,defaults,periods,calendarDate,buildModel,loadData,run:runReport,export:exportCurrent,print:printPreview,getModel:()=>state.model,show:showPage,showCatalog,open:showPage};
+  window.weeklyMonthlyReviewSystemReport={code,defaults,periods,calendarDate,buildModel,loadData,run:runReport,export:exportCurrent,print:printPreview,getModel:()=>state.model,show:showPage,showCatalog,open:showPage,resetFilters(){initParams();invalidatePreview();state.params=null;setStatus('Report filters reset.');},resetCatalogFilters(){catalogState.search='';catalogState.reportType='';catalogState.reviewType='';catalogState.page=1;renderCatalog();}};
   supabaseClient.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT'){state.data=null;state.model=null;state.params=null;state.config=defaults();state.configAvailable=false;state.user=null;closePage();}});
 })();
 </script>
@@ -23359,19 +23675,22 @@ commit;
       const sharedDailyBanner=config.key==='daily'&&bar.dataset.dailySharedFilter==='true';
       const sharedDailyPrimary=sharedDailyBanner?bar.querySelector(':scope > .unified-filter-primary'):null;
       const sharedDailySecondary=sharedDailyBanner?bar.querySelector(':scope > .unified-filter-secondary'):null;
+      const sharedFlatBanner=config.key.startsWith('flat:')&&bar.dataset.sharedOverviewFilter==='true';
+      const sharedFlatPrimary=sharedFlatBanner?bar.querySelector(':scope > .unified-filter-primary'):null;
+      const sharedFlatSecondary=sharedFlatBanner?bar.querySelector(':scope > .unified-filter-secondary'):null;
       const overviewPrimary=config.key==='overview'?bar.querySelector(':scope > .unified-filter-primary'):null;
       const overviewSecondary=config.key==='overview'?bar.querySelector(':scope > .unified-filter-secondary'):null;
       if(overviewPrimary){overviewPrimary.classList.remove('delivery-page-filter-fields','delivery-page-search-host');overviewPrimary.style.removeProperty('grid-template-columns');overviewPrimary.style.removeProperty('grid-column');overviewPrimary.style.setProperty('display','flex','important');overviewPrimary.style.setProperty('flex-flow','row wrap','important');overviewPrimary.style.setProperty('align-items','center','important');overviewPrimary.style.setProperty('width','100%','important');overviewPrimary.style.setProperty('min-width','0','important');const spacer=overviewPrimary.querySelector('.unified-filter-spacer'),reset=overviewPrimary.querySelector('.unified-filter-reset'),toggle=overviewPrimary.querySelector('.unified-filter-toggle');if(spacer)spacer.style.setProperty('order','6','important');if(reset)reset.style.setProperty('order','7','important');if(toggle)toggle.style.setProperty('order','8','important');}
       if(overviewSecondary){overviewSecondary.classList.remove('delivery-page-filter-fields');overviewSecondary.style.removeProperty('display');overviewSecondary.style.removeProperty('grid-template-columns');overviewSecondary.style.removeProperty('grid-column');}
       if(config.key==='daily')bar.querySelector('.daily-controls-primary')?.classList.remove('overview-primary-filter-row');
-      if(config.key.startsWith('flat:'))organizeFlatFilterRow(config,root,bar);
+      if(config.key.startsWith('flat:')&&!sharedFlatBanner)organizeFlatFilterRow(config,root,bar);
       const hasActions=Boolean(bar.querySelector('.delivery-filter-actions'));
       const mobile=window.matchMedia('(max-width: 640px)').matches;
-      const columns=mobile||config.key==='overview'?'minmax(0,1fr)':config.key.startsWith('flat:')
+      const columns=sharedFlatBanner?'minmax(0,1fr)':mobile||config.key==='overview'?'minmax(0,1fr)':config.key.startsWith('flat:')
         ?'minmax(180px,220px) minmax(0,4fr) minmax(16px,.5fr) auto'
         :`minmax(0,1fr)${hasActions?' auto':''}`;
       bar.style.setProperty('grid-template-columns',columns,'important');
-      const search=query(root,config.search);if(search){search.dataset.deliveryControlSearch='';search.dataset.deliveryFieldId=`${slug(config.key)}-search`;search.dataset.deliveryFieldKey='search';search.setAttribute('data-delivery-filter-field','search');search.style.setProperty('--delivery-filter-order','0');const host=directChild(bar,search);if(host){if(host===overviewPrimary||host===sharedDailyPrimary){host.style.setProperty('grid-column','1/-1','important');}else{host.classList.add('delivery-page-search-host');host.style.setProperty('grid-column','auto','important');}host.style.setProperty('min-width','0','important');host.style.setProperty('max-width','100%','important');}}
+      const search=query(root,config.search);if(search){search.dataset.deliveryControlSearch='';search.dataset.deliveryFieldId=`${slug(config.key)}-search`;search.dataset.deliveryFieldKey='search';search.setAttribute('data-delivery-filter-field','search');search.style.setProperty('--delivery-filter-order','0');const host=directChild(bar,search);if(host){if(host===overviewPrimary||host===sharedDailyPrimary||host===sharedFlatPrimary){host.style.setProperty('grid-column','1/-1','important');}else{host.classList.add('delivery-page-search-host');host.style.setProperty('grid-column','auto','important');}host.style.setProperty('min-width','0','important');host.style.setProperty('max-width','100%','important');}}
       const fields=[];
       config.fields.filter(field=>field.key!=='search').forEach((field,index)=>{
         const control=configuredControl(config,field,root);if(!control)return;
@@ -23383,7 +23702,7 @@ commit;
         const canFilter=field.permissions?.canFilter??config.permissions?.canFilter;if(canFilter!==undefined)control.disabled=!permissionAllowed(canFilter,{root,config,field,control,user:currentUser});
         const host=directChild(bar,control);if(host&&!fields.includes(host))fields.push(host);
       });
-      fields.forEach(host=>{if(host===overviewPrimary||host===overviewSecondary||host===sharedDailyPrimary||host===sharedDailySecondary)return;host.classList.add('delivery-page-filter-fields');host.style.setProperty('display','grid','important');host.style.setProperty('grid-column','auto','important');host.style.setProperty('min-width','0','important');host.style.setProperty('width','100%','important');host.style.setProperty('grid-template-columns',mobile?'minmax(0,1fr)':'repeat(auto-fit,minmax(140px,1fr))','important');});
+      fields.forEach(host=>{if(host===overviewPrimary||host===overviewSecondary||host===sharedDailyPrimary||host===sharedDailySecondary||host===sharedFlatPrimary||host===sharedFlatSecondary)return;host.classList.add('delivery-page-filter-fields');host.style.setProperty('display','grid','important');host.style.setProperty('grid-column','auto','important');host.style.setProperty('min-width','0','important');host.style.setProperty('width','100%','important');host.style.setProperty('grid-template-columns',mobile?'minmax(0,1fr)':'repeat(auto-fit,minmax(140px,1fr))','important');});
       if(overviewPrimary){const searchControl=query(root,config.search),searchHost=searchControl?.closest('.unified-search-host'),dropdowns=[...overviewPrimary.querySelectorAll('select[data-delivery-filter-field]')],spacer=overviewPrimary.querySelector('.unified-filter-spacer'),actions=overviewPrimary.querySelector('.delivery-page-flat-actions'),reset=overviewPrimary.querySelector('.unified-filter-reset'),toggle=overviewPrimary.querySelector('.unified-filter-toggle');if(searchHost){searchHost.classList.add('unified-search-host');searchHost.style.setProperty('flex',mobile?'1 1 100%':'0 0 220px','important');searchHost.style.setProperty('width',mobile?'100%':'220px','important');searchHost.style.setProperty('min-width',mobile?'0':'180px','important');searchHost.style.setProperty('max-width',mobile?'100%':'220px','important');}if(searchControl){searchControl.style.setProperty('width','100%','important');searchControl.style.setProperty('min-width','0','important');searchControl.style.setProperty('max-width','100%','important');}dropdowns.forEach(control=>{control.style.setProperty('display','block','important');control.style.setProperty('flex',mobile?'1 1 calc(50% - 6px)':'0 0 150px','important');control.style.setProperty('width',mobile?'calc(50% - 6px)':'150px','important');control.style.setProperty('min-width',mobile?'0':'120px','important');control.style.setProperty('max-width',mobile?'none':'170px','important');});if(spacer){spacer.style.setProperty('display',mobile?'none':'block','important');spacer.style.setProperty('flex',mobile?'0 0 0':'1 1 16px','important');}if(actions){actions.style.setProperty('order','7','important');actions.style.setProperty('display','flex','important');actions.style.setProperty('gap','8px','important');}if(reset){reset.style.setProperty('flex','0 0 auto','important');reset.style.setProperty('width','auto','important');reset.style.setProperty('min-width','100px','important');reset.style.setProperty('height','34px','important');reset.style.setProperty('min-height','34px','important');reset.style.setProperty('font-size','11px','important');}if(toggle){toggle.style.setProperty('flex','0 0 30px','important');toggle.style.setProperty('width','30px','important');toggle.style.setProperty('min-width','30px','important');toggle.style.setProperty('max-width','30px','important');toggle.style.setProperty('height','30px','important');toggle.style.setProperty('min-height','30px','important');}}
       if(overviewPrimary){const searchControl=query(root,config.search),searchHost=searchControl?.closest('.unified-search-host'),dropdowns=[...overviewPrimary.querySelectorAll('select[data-delivery-filter-field]')],spacer=overviewPrimary.querySelector('.unified-filter-spacer'),actions=overviewPrimary.querySelector('.delivery-page-flat-actions'),reset=overviewPrimary.querySelector('.unified-filter-reset'),toggle=overviewPrimary.querySelector('.unified-filter-toggle');if(searchHost)searchHost.classList.add('unified-search-host');if(searchControl){searchControl.style.setProperty('width','100%','important');searchControl.style.setProperty('min-width','0','important');searchControl.style.setProperty('max-width','100%','important');}dropdowns.forEach(control=>control.style.setProperty('display','block','important'));if(actions){actions.style.setProperty('display','flex','important');actions.style.setProperty('gap','8px','important');}if(reset){reset.style.setProperty('flex','0 0 auto','important');reset.style.setProperty('width','auto','important');reset.style.setProperty('min-width','100px','important');reset.style.setProperty('height','34px','important');reset.style.setProperty('min-height','34px','important');reset.style.setProperty('font-size','11px','important');}if(toggle){toggle.style.setProperty('flex','0 0 30px','important');toggle.style.setProperty('width','30px','important');toggle.style.setProperty('min-width','30px','important');toggle.style.setProperty('max-width','30px','important');toggle.style.setProperty('height','30px','important');toggle.style.setProperty('min-height','30px','important');}}
       bar.querySelectorAll('.delivery-filter-actions button,.delivery-page-flat-actions button,.unified-filter-reset,.unified-filter-toggle').forEach(button=>{const action=button.classList.contains('delivery-filter-reset')||button.classList.contains('unified-filter-reset')?'reset':button.classList.contains('delivery-filter-toggle')||button.classList.contains('unified-filter-toggle')?'expand':'summary';button.dataset.deliveryControlAction=`${slug(config.key)}:${action}`;});
@@ -23846,7 +24165,7 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
       const style=getComputedStyle(source);copiedStyleProperties.forEach(property=>setStyle(control,property,style.getPropertyValue(property)));
     });
   }
-  function populateDynamicOptions(bar){
+  function populateDynamicOptions(bar,selectedValues=values){
     const unique=items=>[...new Set(items.map(item=>String(item??'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
     const owners=new Map();projects.flatMap(item=>item.milestones||[]).forEach(milestone=>{const owner=String(milestone.owner||'').trim();if(owner&&!owners.has(owner))owners.set(owner,typeof getMilestoneUserDisplay==='function'?getMilestoneUserDisplay(owner):owner);});
     const statuses=unique(projects.flatMap(item=>(item.milestones||[]).map(milestone=>getEffectiveMilestoneStatus(milestone)))).map(value=>({value,label:value}));
@@ -23863,7 +24182,7 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
     ];
     configs.forEach(([source,placeholder,entries])=>{
       const select=bar.querySelector(`[data-daily-shared-source="${source}"]`);if(!select)return;
-      const selected=Object.prototype.hasOwnProperty.call(values,source)?values[source]:select.value;
+      const selected=Object.prototype.hasOwnProperty.call(selectedValues,source)?selectedValues[source]:select.value;
       const same=select.options.length===entries.length+1&&select.options[0]?.value===''&&select.options[0]?.textContent===placeholder&&entries.every((entry,index)=>select.options[index+1]?.value===String(entry.value)&&select.options[index+1]?.textContent===String(entry.label));
       if(same){select.value=entries.some(entry=>String(entry.value)===String(selected))?selected:'';return;}
       const first=document.createElement('option');first.value='';first.textContent=placeholder;
@@ -23877,12 +24196,14 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
     syncControlStyles(bar);
     const primary=bar.querySelector('.unified-filter-primary'),secondary=bar.querySelector('.unified-filter-secondary');
     const actions=primary?.querySelector('.delivery-page-flat-actions'),reset=actions?.querySelector('.unified-filter-reset'),toggle=actions?.querySelector('.unified-filter-toggle');
-    const expanded=Boolean(window.dailyTrackerControls?.state?.filterOpen),columns=innerWidth<=420?1:innerWidth<=640?2:4;
+    const expanded=bar.dataset.dailySharedFilter==='true'?Boolean(window.dailyTrackerControls?.state?.filterOpen):!bar.classList.contains('is-collapsed'),columns=innerWidth<=420?1:innerWidth<=640?2:4;
     bar.classList.toggle('is-collapsed',!expanded);
     [['display','grid'],['grid-template-columns','minmax(0,1fr)'],['gap','8px'],['padding','12px'],['box-sizing','border-box'],['width','100%'],['order','2']].forEach(([k,v])=>setStyle(bar,k,v));
     [['display','flex'],['flex','0 0 100%'],['flex-flow','row nowrap'],['align-items','center'],['width','100%'],['min-width','0'],['max-width','none'],['grid-column','1 / -1'],['gap','8px']].forEach(([k,v])=>setStyle(primary,k,v));
     const controls=[...(primary?.querySelectorAll('input,select')||[])];
-    controls.forEach((control,index)=>[['display','block'],['flex','1 1 0'],['width','0'],['min-width','0'],['max-width','none'],['order',String(index)]].forEach(([k,v])=>setStyle(control,k,v)));
+    const items=[...new Set(controls.map(control=>{const label=control.closest('label');return label?.parentElement===primary?label:control;}))];
+    items.forEach((item,index)=>[['display',item.tagName==='LABEL'?'flex':'block'],['flex','1 1 0'],['width','0'],['min-width','0'],['max-width','none'],['order',String(index)]].forEach(([k,v])=>setStyle(item,k,v)));
+    controls.forEach(control=>setStyle(control,'width','100%'));
     setStyle(primary?.querySelector('.unified-filter-spacer'),'display','none');
     [['display','flex'],['flex','0 0 auto'],['width','auto'],['min-width','0'],['max-width','none'],['gap','8px'],['order',String(controls.length+1)]].forEach(([k,v])=>setStyle(actions,k,v));
     [['display',expanded?'grid':'none'],['grid-column','1 / -1'],['grid-template-columns',`repeat(${columns},minmax(0,1fr))`],['align-items','start'],['gap','8px'],['width','100%'],['min-width','0']].forEach(([k,v])=>setStyle(secondary,k,v));
@@ -23890,7 +24211,7 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
     const ordered=[...(secondary?.querySelectorAll('select,.delivery-date-range-control,[data-overview-filter-group]')||[])].sort((a,b)=>Number(a.dataset.overviewGridOrder||0)-Number(b.dataset.overviewGridOrder||0));
     ordered.forEach((item,index)=>{setStyle(item,'order',String(index));if(!item.classList.contains('overview-filter-group-heading'))[['width','100%'],['min-width','0'],['max-width','none']].forEach(([k,v])=>setStyle(item,k,v));});
     [reset,toggle].forEach(button=>[['display','inline-flex'],['flex','0 0 38px'],['width','38px'],['min-width','38px'],['max-width','38px'],['height','38px'],['padding','0'],['font-size','0'],['justify-content','center']].forEach(([k,v])=>setStyle(button,k,v)));
-    if(reset){const active=Object.entries(values).some(([source,value])=>value&&!(source==='filter-record-status'&&value==='active')&&!(source==='filter-reviewed'&&value===''));reset.disabled=!active&&!document.getElementById('daily-search')?.value;reset.setAttribute('aria-label','Reset filters');reset.title='Reset filters';}
+    if(reset){const active=Object.entries(values).some(([source,value])=>value&&!(source==='filter-record-status'&&value==='active')&&!(source==='filter-reviewed'&&value===''));const search=bar.querySelector('[data-daily-shared-source="filter-search"]');reset.disabled=!active&&!search?.value;reset.setAttribute('aria-label','Reset filters');reset.title='Reset filters';}
     if(toggle){toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',expanded?'Collapse filters':'Expand filters');toggle.title=expanded?'Collapse filters':'Expand filters';const name=`chevron-${expanded?'up':'down'}`,icon=toggle.querySelector('svg')?.getAttribute('data-lucide')||toggle.querySelector('i')?.getAttribute('data-lucide');if(icon!==name){toggle.innerHTML=`<i data-lucide="${name}" class="w-4 h-4" aria-hidden="true"></i>`;lucide.createIcons();}}
   }
   function install(){
@@ -23945,7 +24266,391 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
   if(workspace)new MutationObserver(()=>{if(isDaily())schedule();}).observe(workspace,{childList:true,subtree:true});
   window.dailySharedOverviewFilterBannerRefresh=schedule;
   window.dailySharedOverviewFilterBannerMount=install;
+  window.populateOverviewSharedFilterOptions=populateDynamicOptions;
+  window.applySharedOverviewFilterLayout=applyLayout;
   window.addEventListener('pageshow',schedule);if(isDaily())schedule();
+})();
+</script>
+<style id="flat-shared-overview-filter-style">
+#workspace-flat-page .flat-shared-filter-banner{border:1px solid #e2e8f0!important;border-radius:12px!important;background:#fff!important;box-shadow:0 1px 2px rgba(15,23,42,.06)!important;padding:12px!important;box-sizing:border-box!important}
+#workspace-flat-page .flat-shared-filter-banner .overview-filter-group-heading{grid-column:1/-1;align-self:end;padding:7px 0 4px;border-bottom:1px solid #e2e8f0;color:#475569;font-size:10px;font-weight:700;line-height:1.2;text-transform:uppercase}
+#workspace-flat-page .flat-shared-filter-banner .delivery-date-range-control{font-size:10px!important}
+</style>
+<script id="flat-shared-overview-filter-banner">
+(function installFlatSharedOverviewFilterBanner(){
+  if(window.flatSharedOverviewFilterBannerInstalled)return;
+  window.flatSharedOverviewFilterBannerInstalled=true;
+  const flatPages=new Set(['programs','initiatives','tracks','milestones']);
+  const idMap={
+    'filter-search':'flat-search','filter-status':'flat-status-filter','filter-type':'flat-type-filter',
+    'filter-vertical':'flat-vertical-filter','filter-critical':'flat-shared-critical','filter-reviewed':'flat-shared-review',
+    'filter-impact':'flat-impact-filter','filter-record-status':'flat-record-status',
+    'overview-initiative-owner':'flat-shared-initiative-owner','overview-initiative-assigned':'flat-shared-initiative-assigned',
+    'overview-program-owner':'flat-shared-program-owner','overview-program-assigned':'flat-shared-program-assigned',
+    'overview-program':'flat-shared-program','overview-delivery-method':'flat-shared-delivery-method',
+    'overview-milestone-status':'flat-shared-milestone-status','overview-milestone-owner':'flat-shared-milestone-owner',
+    'overview-created-from':'flat-shared-created-from','overview-created-to':'flat-shared-created-to',
+    'overview-modified-from':'flat-shared-modified-from','overview-modified-to':'flat-shared-modified-to',
+    'overview-start-from':'flat-shared-start-from','overview-start-to':'flat-shared-start-to',
+    'overview-deadline-from':'flat-shared-deadline-from','overview-deadline-to':'flat-shared-deadline-to',
+    'overview-actual-from':'flat-shared-actual-from','overview-actual-to':'flat-shared-actual-to'
+  };
+  const valuesByPage=new Map(),primaryOptionFallbacks=new Map();let frame=0,workspaceObserver=null,layoutObserver=null,resettingPage='';
+  const flatView=()=>flatPages.has(currentWorkspaceView)?currentWorkspaceView:'';
+  function valuesFor(view){if(!valuesByPage.has(view))valuesByPage.set(view,Object.create(null));return valuesByPage.get(view);}
+  function currentBar(){return document.getElementById('flat-search')?.closest('.delivery-page-filter-row')||document.getElementById('flat-search')?.closest('.bg-white');}
+  function prepareFlatSecondary(bar){
+    const primary=bar?.querySelector('.unified-filter-primary'),secondary=bar?.querySelector('.unified-filter-secondary');if(!primary||!secondary)return;
+    const actions=primary.querySelector('.delivery-page-flat-actions'),reset=primary.querySelector('.unified-filter-reset'),toggle=primary.querySelector('.unified-filter-toggle');
+    if(actions&&reset&&reset.parentElement!==actions)actions.appendChild(reset);
+    if(actions&&toggle&&toggle.parentElement!==actions)actions.appendChild(toggle);
+    const impact=bar.querySelector('[data-flat-shared-source="filter-impact"]'),recordStatus=bar.querySelector('[data-flat-shared-source="filter-record-status"]');
+    if(impact){impact.dataset.overviewGridOrder='33';if(!secondary.contains(impact))secondary.appendChild(impact);}
+    if(recordStatus){recordStatus.dataset.overviewGridOrder='41';if(!secondary.contains(recordStatus))secondary.appendChild(recordStatus);}
+    const spacer=primary.querySelector('.unified-filter-spacer');if(spacer){spacer.style.setProperty('display','none','important');spacer.style.setProperty('order','999','important');}
+    const headings=[...secondary.querySelectorAll('[data-overview-filter-group]')];
+    headings.forEach(heading=>{
+      const order=Number(heading.dataset.overviewGridOrder||0);
+      if(order===0){heading.dataset.overviewGridOrder='0';return;}
+      const hasBefore=[...secondary.querySelectorAll('[data-overview-grid-order]')].some(item=>Number(item.dataset.overviewGridOrder)>0&&Number(item.dataset.overviewGridOrder)<order);
+      if(!hasBefore)heading.dataset.overviewGridOrder=String(order+1);
+    });
+    const items=[...secondary.querySelectorAll('select,.delivery-date-range-control,[data-overview-filter-group]')].sort((a,b)=>Number(a.dataset.overviewGridOrder||0)-Number(b.dataset.overviewGridOrder||0));
+    items.forEach((item,index)=>item.style.setProperty('order',String(index),'important'));
+  }
+  function capture(){const view=flatView(),bar=currentBar();if(!view||resettingPage===view||!bar?.dataset.sharedOverviewFilter)return;const values=valuesFor(view);bar.querySelectorAll('[data-flat-shared-source]').forEach(control=>{values[control.dataset.flatSharedSource]=control.value;});}
+  const clean=value=>String(value??'').trim();
+  const unique=values=>[...new Set(values.map(clean).filter(Boolean))].sort((left,right)=>left.localeCompare(right));
+  function fillOptions(bar,view){
+    const selected=valuesFor(view);
+    const owners=new Map();projects.flatMap(initiative=>initiative.milestones||[]).forEach(milestone=>{const owner=clean(milestone.owner);if(owner&&!owners.has(owner))owners.set(owner,typeof getMilestoneUserDisplay==='function'?getMilestoneUserDisplay(owner):owner);});
+    const statuses=unique(projects.flatMap(initiative=>(initiative.milestones||[]).map(milestone=>getEffectiveMilestoneStatus(milestone)))).map(value=>({value,label:value}));
+    const programOptions=programs.slice().sort((left,right)=>Number(left.sequenceNo)-Number(right.sequenceNo)).map(program=>({value:program.name,label:`Program ${program.sequenceNo||program.id} - ${program.name}`}));
+    const configs=[
+      ['overview-initiative-owner','All Initiative Owners',unique(projects.map(item=>item.businessOwner)).map(value=>({value,label:value}))],
+      ['overview-initiative-assigned','All Initiative Assignees',unique(projects.map(item=>item.assignedTo)).map(value=>({value,label:value}))],
+      ['overview-program-owner','All Program Owners',unique(programs.map(item=>item.owner)).map(value=>({value,label:value}))],
+      ['overview-program-assigned','All Program Assignees',unique(programs.map(item=>item.assignedTo)).map(value=>({value,label:value}))],
+      ['overview-program','All Programs',[{value:'Unmapped',label:'Unmapped Initiatives'},...programOptions]],
+      ['overview-delivery-method','All Delivery Methods',unique(projects.map(item=>item.deliveryMethod)).map(value=>({value,label:value}))],
+      ['overview-milestone-status','All Milestone Statuses',statuses],
+      ['overview-milestone-owner','All Milestone Owners',[...owners].sort((left,right)=>String(left[1]).localeCompare(String(right[1]))).map(([value,label])=>({value,label}))]
+    ];
+    configs.forEach(([source,placeholder,entries])=>{
+      const select=bar.querySelector(`[data-flat-shared-source="${source}"]`);if(!select)return;
+      const selectedValue=Object.prototype.hasOwnProperty.call(selected,source)?selected[source]:select.value;
+      const unchanged=select.options.length===entries.length+1&&select.options[0]?.textContent===placeholder&&entries.every((entry,index)=>select.options[index+1]?.value===String(entry.value)&&select.options[index+1]?.textContent===String(entry.label));
+      if(unchanged){select.value=entries.some(entry=>String(entry.value)===String(selectedValue))?selectedValue:'';return;}
+      const first=document.createElement('option');first.value='';first.textContent=placeholder;const fragment=document.createDocumentFragment();fragment.appendChild(first);
+      entries.forEach(entry=>{const option=document.createElement('option');option.value=String(entry.value);option.textContent=String(entry.label);fragment.appendChild(option);});
+      select.replaceChildren(fragment);select.value=entries.some(entry=>String(entry.value)===String(selectedValue))?selectedValue:'';
+    });
+  }
+  function syncPrimaryOptions(bar,view){
+    const values=valuesFor(view),fallback=primaryOptionFallbacks.get(view)||new Map();
+    ['filter-status','filter-type','filter-vertical','filter-critical','filter-reviewed','filter-impact','filter-record-status'].forEach(source=>{
+      const original=document.getElementById(source),clone=bar?.querySelector(`[data-flat-shared-source="${source}"]`);if(!original?.options||!clone)return;
+      const selected=Object.prototype.hasOwnProperty.call(values,source)?values[source]:clone.value;
+      const sourceOptions=original.options.length>1?[...original.options]:fallback.get(source)||[...original.options];
+      const options=sourceOptions.map(option=>option.cloneNode(true));
+      if(source==='filter-reviewed'&&options[0]?.value==='all')options[0].value='';
+      clone.replaceChildren(...options);clone.value=options.some(option=>option.value===selected)?selected:'';
+    });
+  }
+  function syncControlStyles(bar){
+    const properties=['font-family','font-size','font-weight','line-height','padding','color','background-color','border-color','border-radius','height'];
+    bar.querySelectorAll('[data-flat-shared-source]').forEach(control=>{
+      const source=document.getElementById(control.dataset.flatSharedSource);if(!source)return;
+      const style=getComputedStyle(source);properties.forEach(property=>{const value=style.getPropertyValue(property);if(control.style.getPropertyValue(property)!==value||control.style.getPropertyPriority(property)!=='important')control.style.setProperty(property,value,'important');});
+    });
+    [['.unified-filter-reset','.unified-filter-reset'],['.unified-filter-toggle','.unified-filter-toggle']].forEach(([sourceSelector,targetSelector])=>{
+      const source=document.querySelector(`#overview-filter-row ${sourceSelector}`),target=bar.querySelector(targetSelector);if(!source||!target)return;
+      const style=getComputedStyle(source);properties.forEach(property=>{const value=style.getPropertyValue(property);if(target.style.getPropertyValue(property)!==value||target.style.getPropertyPriority(property)!=='important')target.style.setProperty(property,value,'important');});
+    });
+  }
+  function applyFlatLayout(bar){prepareFlatSecondary(bar);window.applySharedOverviewFilterLayout?.(bar);syncControlStyles(bar);}
+  function install(){
+    const view=flatView();if(!view)return false;
+    const source=document.getElementById('overview-filter-row'),search=document.getElementById('flat-search'),target=currentBar();if(!source||!search||!target)return false;
+    if(target.dataset.sharedOverviewFilter==='true'){prepareFlatSecondary(target);syncPrimaryOptions(target,view);fillOptions(target,view);applyFlatLayout(target);updateReset(target,view);return true;}
+    if(!primaryOptionFallbacks.has(view)){
+      const options=new Map();Object.entries(idMap).forEach(([sourceId,targetId])=>{const control=target.querySelector(`#${CSS.escape(targetId)}`);if(control?.tagName==='SELECT'&&control.options.length>1)options.set(sourceId,[...control.options].map(option=>option.cloneNode(true)));});
+      primaryOptionFallbacks.set(view,options);
+    }
+    const previousValues=new Map([...target.querySelectorAll('input,select')].map(control=>[control.id,control.value]));
+    const clone=source.cloneNode(true),flatKey=`flat-${view}`;
+    clone.id=`${flatKey}-filter-row`;clone.classList.remove('hidden','daily-hidden-overview-filter-bar','shared-overview-filter-bar-hidden');clone.classList.add('flat-shared-filter-banner');clone.removeAttribute('aria-hidden');clone.removeAttribute('inert');
+    clone.dataset.sharedOverviewFilter='true';clone.dataset.deliveryControlPage=`flat:${view}`;clone.dataset.deliveryFilterPage='flat';
+    clone.querySelectorAll('.delivery-filter-actions').forEach(element=>element.remove());clone.querySelectorAll('.strict-filter-hidden').forEach(element=>element.classList.remove('strict-filter-hidden'));
+    clone.querySelectorAll('[id]').forEach(element=>{const sourceId=element.id;if(idMap[sourceId]){element.dataset.flatSharedSource=sourceId;element.id=idMap[sourceId];}});
+    clone.querySelectorAll('label[for]').forEach(label=>{if(idMap[label.htmlFor])label.htmlFor=idMap[label.htmlFor];});
+    clone.querySelectorAll('input,select,button').forEach(control=>{
+      [...control.attributes].filter(attribute=>/^on/i.test(attribute.name)).forEach(attribute=>control.removeAttribute(attribute.name));
+      control.removeAttribute('inert');control.removeAttribute('aria-hidden');control.removeAttribute('tabindex');control.removeAttribute('data-strict-old-tabindex');control.removeAttribute('data-unified-tabindex');
+      const sourceId=control.dataset.flatSharedSource;if(!sourceId)return;
+      control.dataset.deliveryControlPage=`flat:${view}`;control.dataset.deliveryFilterField=sourceId;
+      const saved=Object.prototype.hasOwnProperty.call(valuesFor(view),sourceId)?valuesFor(view)[sourceId]:previousValues.get(idMap[sourceId]);
+      if(saved!==undefined)control.value=saved;else control.value=sourceId==='filter-record-status'?'active':sourceId==='filter-reviewed'?'':'';
+      if(sourceId==='filter-reviewed'&&control.tagName==='SELECT'&&control.options[0]?.value==='all')control.options[0].value='';
+    });
+    const secondary=clone.querySelector('.unified-filter-secondary');if(secondary){secondary.id=`${flatKey}-filter-pane`;secondary.setAttribute('aria-label','Additional filters');secondary.hidden=true;secondary.querySelectorAll('[data-date-range-page="overview"]').forEach(host=>{host.dataset.dateRangePage=`flat:${view}`;});}
+    const reset=clone.querySelector('.unified-filter-primary .unified-filter-reset'),toggle=clone.querySelector('.unified-filter-primary .unified-filter-toggle');
+    if(reset){reset.classList.add('delivery-filter-reset');reset.dataset.deliveryControlAction=`${flatKey}:reset`;reset.removeAttribute('onclick');}
+    if(toggle){toggle.classList.add('delivery-filter-toggle');toggle.dataset.deliveryControlAction=`${flatKey}:expand`;toggle.setAttribute('aria-controls',secondary?.id||`${flatKey}-filter-pane`);toggle.removeAttribute('onclick');}
+    const expanded=JSON.parse(sessionStorage.getItem('deliveryHubFilterBarExpanded')||'{}');clone.classList.toggle('is-collapsed',!expanded.flat);
+    target.replaceWith(clone);prepareFlatSecondary(clone);syncPrimaryOptions(clone,view);fillOptions(clone,view);applyFlatLayout(clone);updateReset(clone,view);
+    layoutObserver?.disconnect();layoutObserver=new MutationObserver(()=>requestAnimationFrame(()=>{applyFlatLayout(clone);updateReset(clone,view);}));
+    layoutObserver.observe(clone,{attributes:true,childList:true,subtree:true,attributeFilter:['class','hidden','style']});lucide.createIcons();
+    return true;
+  }
+  function updateReset(bar,view){const values=valuesFor(view),reset=bar?.querySelector('.unified-filter-reset'),search=bar?.querySelector('#flat-search');if(!reset)return;const active=Object.entries(values).some(([source,value])=>value&&!(source==='filter-record-status'&&value==='active')&&!(source==='filter-reviewed'&&value===''));reset.disabled=!active&&!search?.value;reset.setAttribute('aria-label','Reset filters');reset.title='Reset filters';}
+  function schedule(){if(frame)cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>requestAnimationFrame(install));}
+  function initiativesFor(row){if(row.initiative)return[row.initiative];if(row.program)return projects.filter(item=>Number(item.programId)===Number(row.program.id));return[];}
+  function milestonesFor(row,initiatives){if(row.milestone)return[row.milestone];if(row.track)return(row.initiative?.milestones||[]).filter(item=>Number(item.trackId)===Number(row.track.id));return initiatives.flatMap(item=>item.milestones||[]);}
+  function sharedMatches(row){
+    const view=flatView(),values=valuesFor(view),value=source=>values[source]||'',initiatives=initiativesFor(row),program=row.program||flatProgram(row.initiative||initiatives[0]),milestones=milestonesFor(row,initiatives);
+    const selectedProgram=value('overview-program');if(selectedProgram==='Unmapped'){if(program)return false;}else if(selectedProgram&&clean(program?.name)!==selectedProgram)return false;
+    if(value('overview-initiative-owner')&&!initiatives.some(item=>clean(item.businessOwner)===value('overview-initiative-owner')))return false;
+    if(value('overview-initiative-assigned')&&!initiatives.some(item=>clean(item.assignedTo)===value('overview-initiative-assigned')))return false;
+    if(view==='programs'&&value('filter-type')&&!initiatives.some(item=>clean(item.type)===value('filter-type')))return false;
+    if(value('overview-program-owner')&&clean(program?.owner)!==value('overview-program-owner'))return false;
+    if(value('overview-program-assigned')&&clean(program?.assignedTo)!==value('overview-program-assigned'))return false;
+    if(value('overview-delivery-method')&&!initiatives.some(item=>clean(item.deliveryMethod)===value('overview-delivery-method')))return false;
+    const selectedMilestoneStatus=value('overview-milestone-status'),selectedMilestoneOwner=value('overview-milestone-owner');
+    if((selectedMilestoneStatus||selectedMilestoneOwner)&&!milestones.some(item=>(!selectedMilestoneStatus||getEffectiveMilestoneStatus(item)===selectedMilestoneStatus)&&(!selectedMilestoneOwner||clean(item.owner)===selectedMilestoneOwner)))return false;
+    const account=String(currentUser?.email||currentUser?.id||'anonymous').trim().toLowerCase();let criticalIds=new Set(),reviewedItems=new Set();
+    try{criticalIds=new Set(JSON.parse(localStorage.getItem(`deliveryHubCriticalMilestones:${account}`)||'[]').map(Number));}catch(error){}
+    try{reviewedItems=new Set(JSON.parse(localStorage.getItem(`deliveryHubDailyReviews:${account}:${localToday()}`)||'[]'));}catch(error){}
+    const critical=value('filter-critical'),hasCritical=milestones.some(item=>criticalIds.has(Number(item.id)));
+    if(critical&&((critical==='critical')!==hasCritical))return false;
+    const review=value('filter-reviewed'),hasReviewed=initiatives.some(item=>reviewedItems.has(`initiatives:${Number(item.id)}`));
+    if(review&&review!=='all'&&((review==='reviewed')!==hasReviewed))return false;
+    const record=row.milestone||row.track||row.initiative||row.program,initiative=row.initiative||initiatives[0],summary=row.track&&initiative?getTrackSummary(initiative,row.track):null;
+    const dateFields=[
+      ['created',record?.createdAt||initiative?.createdAt],['modified',record?.updatedAt||initiative?.updatedAt],
+      ['start',record?.revisedStartDate||record?.startDate||initiative?.revisedStartDate||initiative?.startDate],
+      ['deadline',row.milestone?(row.milestone.deadline||row.milestone.revisedEndDate||row.milestone.endDate||calculateMilestoneEndDate(row.milestone.days,row.milestone.startDate)):summary?.endDate||record?.revisedEndDate||record?.targetEndDate],
+      ['actual',row.milestone?row.milestone.completionDate:summary?.actualEndDate||record?.actualEndDate]
+    ];
+    return dateFields.every(([field,date])=>{const from=value(`overview-${field}-from`),to=value(`overview-${field}-to`);if(!from&&!to)return true;const normalized=String(date||'').slice(0,10);return Boolean(normalized)&&(!from||normalized>=from)&&(!to||normalized<=to);});
+  }
+  const previousFlatRecords=window.flatRecords;
+  window.flatRecords=function(){
+    const view=flatView(),typeControl=view==='programs'?document.getElementById('flat-type-filter'):null,selectedType=typeControl?.value||'';let rows;
+    if(selectedType){typeControl.value='';try{rows=previousFlatRecords.apply(this,arguments);}finally{typeControl.value=selectedType;}rows=rows.filter(row=>projects.some(initiative=>Number(initiative.programId)===Number(row.program?.id)&&clean(initiative.type)===selectedType));}
+    else rows=previousFlatRecords.apply(this,arguments);
+    return view&&document.querySelector('.flat-shared-filter-banner')?rows.filter(sharedMatches):rows;
+  };
+  const previousRender=window.renderFlatWorkspacePage;
+  window.renderFlatWorkspacePage=function(){if(flatView())capture();const result=previousRender.apply(this,arguments);if(flatView())schedule();return result;};
+  const previousReset=window.resetCurrentPageFilters;
+  window.resetCurrentPageFilters=function(){const view=flatView();if(!view)return previousReset.apply(this,arguments);resettingPage=view;Object.keys(valuesFor(view)).forEach(key=>delete valuesFor(view)[key]);try{return previousReset.apply(this,arguments);}finally{resettingPage='';schedule();}};
+  const previousShow=window.showWorkspaceView;
+  window.showWorkspaceView=function(view){const result=previousShow.apply(this,arguments);if(flatPages.has(view)){install();schedule();}return result;};
+  document.addEventListener('change',event=>{const control=event.target.closest?.('#workspace-flat-page .flat-shared-filter-banner [data-flat-shared-source]'),view=flatView();if(!control||!view)return;valuesFor(view)[control.dataset.flatSharedSource]=control.value;flatListCurrentPage=1;window.renderFlatWorkspacePage?.();});
+  document.addEventListener('input',event=>{const control=event.target.closest?.('#workspace-flat-page .flat-shared-filter-banner #flat-search'),view=flatView();if(control&&view)valuesFor(view)['filter-search']=control.value;});
+  const workspace=document.getElementById('workspace-flat-page');if(workspace)workspaceObserver=new MutationObserver(()=>{if(flatView())schedule();}).observe(workspace,{childList:true,subtree:true});
+  const overviewFilter=document.getElementById('overview-filter-row');if(overviewFilter)new MutationObserver(()=>{if(flatView())schedule();}).observe(overviewFilter,{childList:true,subtree:true});
+  window.flatSharedOverviewFilterBannerRefresh=schedule;
+  window.flatSharedOverviewFilterBannerMount=install;
+  window.addEventListener('resize',()=>{const bar=document.querySelector('#workspace-flat-page .flat-shared-filter-banner');if(bar){applyFlatLayout(bar);updateReset(bar,flatView());}},{passive:true});
+  if(flatView())schedule();
+})();
+</script>
+<script id="final-shared-filter-layout-pass">
+(function installFinalSharedFilterLayoutPass(){
+  let frame=0,timer=0,overviewObserver=null,observedOverview=null;
+  function observeOverview(bar){
+    if(!bar||bar===observedOverview)return;
+    overviewObserver?.disconnect();observedOverview=bar;
+    overviewObserver=new MutationObserver(schedule);
+    overviewObserver.observe(bar,{attributes:true,subtree:true,attributeFilter:['class','style']});
+  }
+  function apply(){
+    frame=0;
+    if(currentWorkspaceView==='overview'){const bar=document.getElementById('overview-filter-row');observeOverview(bar);window.applySharedOverviewFilterLayout?.(bar);}
+    else if(currentWorkspaceView==='daily')window.dailySharedOverviewFilterBannerRefresh?.();
+    else if(['programs','initiatives','tracks','milestones'].includes(currentWorkspaceView))window.flatSharedOverviewFilterBannerRefresh?.();
+  }
+  function schedule(){if(frame)cancelAnimationFrame(frame);clearTimeout(timer);frame=requestAnimationFrame(()=>requestAnimationFrame(apply));timer=setTimeout(apply,120);}
+  for(const name of ['renderProjects','renderFlatWorkspacePage','showWorkspaceView','toggleCurrentFilterBar','resetCurrentPageFilters']){
+    const previous=window[name];if(typeof previous!=='function')continue;
+    window[name]=function(){const result=previous.apply(this,arguments);schedule();return result;};
+  }
+  document.addEventListener('change',event=>{if(event.target.closest?.('#overview-filter-row,#workspace-flat-page .flat-shared-filter-banner,#daily-tracker-controls[data-daily-shared-filter]'))schedule();},true);
+  window.addEventListener('resize',schedule,{passive:true});window.addEventListener('pageshow',schedule);schedule();
+})();
+</script>
+<script id="engineer-assignment-workflows">
+(() => {
+  const api = engineerAssignments;
+  const filterStates = new Map();
+  const state = () => {
+    if (!filterStates.has(currentWorkspaceView)) filterStates.set(currentWorkspaceView, {});
+    return filterStates.get(currentWorkspaceView);
+  };
+  const recordFor = (entity, id) => (entity === 'programs' ? programs : projects).find(item => String(item.id) === String(id));
+  const editable = (entity, record) => !!record && (entity === 'programs' ? canCreateInitiative() : record.recordStatus !== 'deleted' && canEditInitiative(record));
+  api.cell = (entity, record, field) => {
+    const text = escapeHtml(api.display(record[field]));
+    return editable(entity, record) ? `<button type="button" data-engineer-edit="${entity}" data-record-id="${record.id}" data-engineer-field="${field}" class="text-left underline decoration-dotted" title="Edit ${api.labels[api.fields.indexOf(field)]}">${text}</button>` : text;
+  };
+  api.saveCell = async (button) => {
+    const host = button.closest('[data-engineer-editor]');
+    const { entity, recordId, field } = host.dataset;
+    const record = recordFor(entity, recordId);
+    if (!editable(entity, record)) return showToast('Permission denied.', 'error');
+    const value = host.querySelector('select').value;
+    if (value && String(record[field] ?? '') !== value && !api.users.some(user => String(user.id) === value && user.is_active === true)) return showToast('Select an active engineer.', 'error');
+    button.disabled = true;
+    try {
+      const { error } = await supabaseClient.from(entity).update({ [field]: value ? Number(value) : null, updated_at: new Date().toISOString() }).eq('id', record.id);
+      if (error) throw error;
+      record[field] = value ? Number(value) : null;
+      await loadInitiativesFromSupabase();
+      currentWorkspaceView === 'overview' ? renderProjects() : renderFlatWorkspacePage();
+      showToast('Engineer assignment updated.', 'success');
+    } catch (error) {
+      showToast(error.message, 'error');
+      button.disabled = false;
+    }
+  };
+  document.addEventListener('click', event => {
+    const button = event.target.closest('[data-engineer-edit]');
+    if (!button) return;
+    event.stopPropagation();
+    const entity = button.dataset.engineerEdit, record = recordFor(entity, button.dataset.recordId), field = button.dataset.engineerField;
+    if (!editable(entity, record)) return;
+    const host = document.createElement('span');
+    host.dataset.engineerEditor = 'true';
+    Object.assign(host.dataset, { entity, recordId: String(record.id), field });
+    host.className = 'inline-block min-w-[220px]';
+    host.innerHTML = api.picker(`engineer-cell-${entity}-${record.id}-${field}`, record[field]) + '<button type="button" data-engineer-save class="border rounded px-2 py-1 mt-1">Save</button><button type="button" data-engineer-cancel class="border rounded px-2 py-1 ml-1">Cancel</button>';
+    host.addEventListener('dblclick', event => event.stopPropagation());
+    host.addEventListener('click', event => {
+      event.stopPropagation();
+      if (event.target.closest('[data-engineer-save]')) api.saveCell(event.target.closest('button'));
+      if (event.target.closest('[data-engineer-cancel]')) host.outerHTML = api.cell(entity, record, field);
+    });
+    button.replaceWith(host);
+  });
+  const priorConfig = window.flatConfig;
+  window.flatConfig = function () {
+    const config = priorConfig.apply(this, arguments), entity = currentWorkspaceView;
+    if (!['programs', 'initiatives'].includes(entity)) return config;
+    const index = config.heads.indexOf('Actions');
+    const position = index < 0 ? config.heads.length : index;
+    config.heads.splice(position, 0, ...api.labels);
+    const row = config.row;
+    config.row = data => {
+      const cells = row(data), record = entity === 'programs' ? data.program : data.initiative;
+      cells.splice(position, 0, ...api.fields.map(field => api.cell(entity, record, field)));
+      return cells;
+    };
+    return config;
+  };
+  const priorBulkInput = window.renderBulkEditValueInput;
+  window.renderBulkEditValueInput = function () {
+    const field = document.getElementById('bulk-edit-field')?.value;
+    if (!api.fields.includes(field)) return priorBulkInput.apply(this, arguments);
+    document.getElementById('bulk-edit-value-area').innerHTML = `<label class="block font-semibold">New engineer${api.picker('bulk-edit-value', '', false)}</label><label class="flex items-center gap-2 mt-3"><input id="bulk-engineer-clear" type="checkbox">Clear assignment for selected records</label>`;
+  };
+  const matches = (record, prefix, filters = state()) => api.fields.every(field => {
+    const selected = filters[prefix + field];
+    return !selected || (selected === '__unassigned__' ? record?.[field] == null : String(record?.[field] ?? '') === selected);
+  });
+  const priorFlatRecords = window.flatRecords;
+  window.flatRecords = function () {
+    return priorFlatRecords.apply(this, arguments).filter(row => !['programs', 'initiatives'].includes(currentWorkspaceView) || matches(row.program, 'program_') && (currentWorkspaceView === 'programs' || matches(row.initiative, 'initiative_')));
+  };
+  const priorInitiativeMatches = window.initiativeMatchesGlobalFilters;
+  window.initiativeMatchesGlobalFilters = function (record) {
+    return priorInitiativeMatches.apply(this, arguments) && (currentWorkspaceView !== 'overview' || matches(record, 'initiative_') && matches(programs.find(program => String(program.id) === String(record.programId)), 'program_'));
+  };
+  const priorProgramMatches = window.programMatchesGlobalFilters;
+  window.programMatchesGlobalFilters = function (record) {
+    if (!priorProgramMatches.apply(this, arguments)) return false;
+    if (currentWorkspaceView !== 'overview') return true;
+    return matches(record, 'program_') && (!api.fields.some(field => state()['initiative_' + field]) || projects.some(project => String(project.programId) === String(record.id) && matches(project, 'initiative_') && canViewInitiativeForEngineerFilter(project)));
+  };
+  function canViewInitiativeForEngineerFilter(record) { return isVerticalAllowed(record.vertical); }
+  function installFilters() {
+    if (!['overview', 'programs', 'initiatives'].includes(currentWorkspaceView)) return;
+    const root = currentWorkspaceView === 'overview' ? document.getElementById('overview-filter-row') : document.querySelector('#workspace-flat-page .flat-shared-filter-banner');
+    const secondary = root?.querySelector('.unified-filter-secondary');
+    if (!secondary) return;
+    secondary.querySelectorAll('[id^="engineer-filter-"]').forEach(select => {
+      if (!select.id.startsWith('engineer-filter-' + currentWorkspaceView + '-')) select.closest('label')?.remove();
+    });
+    const entities = currentWorkspaceView === 'programs' ? ['program'] : ['program', 'initiative'];
+    entities.forEach(entity => api.fields.forEach((field, index) => {
+      const key = entity + '_' + field, id = 'engineer-filter-' + currentWorkspaceView + '-' + key;
+      const records = entity === 'program' ? programs : projects;
+      const ids = [...new Set(records.map(record => record[field]).filter(value => value != null).map(String))];
+      const entries = '<option value="">All</option><option value="__unassigned__">Not Assigned</option>' + ids.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(api.display(value))}</option>`).join('');
+      const existing = document.getElementById(id);
+      if (existing) {
+        if (existing.dataset.engineerOptions !== entries) {
+          existing.innerHTML = entries; existing.dataset.engineerOptions = entries;
+          existing.value = state()[key] || '';
+        }
+        return;
+      }
+      const label = document.createElement('label');
+      label.className = 'delivery-secondary-control text-xs';
+      label.dataset.overviewGridOrder = String(25 + index + (entity === 'initiative' ? 2 : 0));
+      const title = `${entity === 'program' ? 'Program' : 'Initiative'} ${api.labels[index]}`;
+      label.innerHTML = `${title}<select id="${id}" aria-label="${title}" class="w-full border rounded px-2 py-2">${entries}</select>`;
+      const select = label.querySelector('select');
+      select.dataset.engineerOptions = entries;
+      select.value = state()[key] || '';
+      select.addEventListener('change', () => {
+        state()[key] = select.value;
+        deliveryCurrentPage = 1; flatListCurrentPage = 1;
+        currentWorkspaceView === 'overview' ? renderProjects() : renderFlatWorkspacePage();
+      });
+      secondary.append(label);
+    }));
+    if (Object.values(state()).some(Boolean)) {
+      const reset = root.querySelector('.unified-filter-reset');
+      if (reset) reset.disabled = false;
+    }
+  }
+  function installOverviewCells() {
+    for (const [entity, records, handler] of [['programs', programs, 'openProgramModal'], ['initiatives', projects, 'openProjectModal']]) {
+      for (const record of records) {
+        const header = [...document.querySelectorAll('#projects-container [ondblclick]')].find(element => (element.getAttribute('ondblclick') || '').includes(`${handler}(${record.id})`) && element.querySelector('h2'));
+        if (!header || header.querySelector(`.engineer-metadata-${entity}`)) continue;
+        const host = document.createElement('div');
+        host.className = `engineer-metadata-${entity} grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 text-xs`;
+        host.innerHTML = api.fields.map((field, index) => `<div><span class="block text-[10px] uppercase opacity-80">${api.labels[index]}</span>${api.cell(entity, record, field)}</div>`).join('');
+        header.append(host);
+      }
+    }
+  }
+  for (const name of ['renderProjects', 'renderFlatWorkspacePage']) {
+    const previous = window[name];
+    window[name] = function () {
+      const result = previous.apply(this, arguments);
+      installFilters();
+      if (name === 'renderProjects') installOverviewCells();
+      return result;
+    };
+  }
+  const priorReset = window.resetCurrentPageFilters;
+  window.resetCurrentPageFilters = function () {
+    filterStates.delete(currentWorkspaceView);
+    document.querySelectorAll('[id^="engineer-filter-"]').forEach(select => select.value = '');
+    return priorReset?.apply(this, arguments);
+  };
+  let filterFrame = 0;
+  const flatRoot = document.getElementById('workspace-flat-page');
+  if (flatRoot) new MutationObserver(() => {
+    if (filterFrame) return;
+    filterFrame = requestAnimationFrame(() => { filterFrame = 0; installFilters(); });
+  }).observe(flatRoot, { childList: true, subtree: true });
+  installFilters();
+  installOverviewCells();
 })();
 </script>
 </body>
