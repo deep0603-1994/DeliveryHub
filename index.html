@@ -23553,7 +23553,7 @@ commit;
   const rootFor=config=>document.querySelector(config.root);
   const query=(root,selector)=>root&&selector?root.querySelector(selector):null;
   function currentKey(){return currentWorkspaceView;}
-  function configFor(view=currentKey()){return configs[['programs','initiatives','tracks','milestones'].includes(view)?`flat:${view}`:view]||null;}
+  function configFor(view=currentKey()){return configs[view]||null;}
   function syncActiveVisibility(){
     const overviewActive=currentWorkspaceView==='overview',overview=configs.overview,overviewRoot=rootFor(overview);
     const overviewFilter=filterBar(overview,overviewRoot),overviewSelection=query(overviewRoot,overview.selection);
@@ -24318,21 +24318,30 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
     const items=[...secondary.querySelectorAll('select,.delivery-date-range-control,[data-overview-filter-group]')].sort((a,b)=>Number(a.dataset.overviewGridOrder||0)-Number(b.dataset.overviewGridOrder||0));
     items.forEach((item,index)=>item.style.setProperty('order',String(index),'important'));
   }
-  function capture(){const view=flatView(),bar=currentBar();if(!view||resettingPage===view||!bar?.dataset.sharedOverviewFilter)return;const values=valuesFor(view);bar.querySelectorAll('[data-flat-shared-source]').forEach(control=>{values[control.dataset.flatSharedSource]=control.value;});}
+  function capture(){const view=flatView(),bar=currentBar();if(!view||resettingPage===view||bar?.dataset.deliveryControlPage!==`flat:${view}`||!bar.dataset.sharedOverviewFilter)return;const values=valuesFor(view);bar.querySelectorAll('[data-flat-shared-source]').forEach(control=>{values[control.dataset.flatSharedSource]=control.value;});}
   const clean=value=>String(value??'').trim();
   const unique=values=>[...new Set(values.map(clean).filter(Boolean))].sort((left,right)=>left.localeCompare(right));
+  function pageRows(view){
+    let rows=[];
+    if(view==='programs')rows=programs.map(program=>({program}));
+    else if(view==='initiatives')rows=projects.map(initiative=>({program:flatProgram(initiative),initiative}));
+    else rows=projects.flatMap(initiative=>(view==='tracks'?initiative.tracks||[]:initiative.milestones||[]).map(record=>({program:flatProgram(initiative),initiative,...(view==='tracks'?{track:record}:{milestone:record})})));
+    const status=valuesFor(view)['filter-record-status']||'active';
+    return rows.filter(row=>{const record=row.milestone||row.track||row.initiative||row.program;return status==='all'||(status==='deleted'?record.recordStatus==='deleted':record.recordStatus!=='deleted');});
+  }
   function fillOptions(bar,view){
     const selected=valuesFor(view);
-    const owners=new Map();projects.flatMap(initiative=>initiative.milestones||[]).forEach(milestone=>{const owner=clean(milestone.owner);if(owner&&!owners.has(owner))owners.set(owner,typeof getMilestoneUserDisplay==='function'?getMilestoneUserDisplay(owner):owner);});
-    const statuses=unique(projects.flatMap(initiative=>(initiative.milestones||[]).map(milestone=>getEffectiveMilestoneStatus(milestone)))).map(value=>({value,label:value}));
-    const programOptions=programs.slice().sort((left,right)=>Number(left.sequenceNo)-Number(right.sequenceNo)).map(program=>({value:program.name,label:`Program ${program.sequenceNo||program.id} - ${program.name}`}));
+    const rows=pageRows(view),pageInitiatives=[...new Set(rows.flatMap(initiativesFor))],pagePrograms=[...new Set(rows.map(row=>row.program).filter(Boolean))],pageMilestones=[...new Set(rows.flatMap(row=>milestonesFor(row,initiativesFor(row))))];
+    const owners=new Map();pageMilestones.forEach(milestone=>{const owner=clean(milestone.owner);if(owner&&!owners.has(owner))owners.set(owner,typeof getMilestoneUserDisplay==='function'?getMilestoneUserDisplay(owner):owner);});
+    const statuses=unique(pageMilestones.map(milestone=>getEffectiveMilestoneStatus(milestone))).map(value=>({value,label:value}));
+    const programOptions=pagePrograms.sort((left,right)=>Number(left.sequenceNo)-Number(right.sequenceNo)).map(program=>({value:program.name,label:`Program ${program.sequenceNo||program.id} - ${program.name}`}));
     const configs=[
-      ['overview-initiative-owner','All Initiative Owners',unique(projects.map(item=>item.businessOwner)).map(value=>({value,label:value}))],
-      ['overview-initiative-assigned','All Initiative Assignees',unique(projects.map(item=>item.assignedTo)).map(value=>({value,label:value}))],
-      ['overview-program-owner','All Program Owners',unique(programs.map(item=>item.owner)).map(value=>({value,label:value}))],
-      ['overview-program-assigned','All Program Assignees',unique(programs.map(item=>item.assignedTo)).map(value=>({value,label:value}))],
-      ['overview-program','All Programs',[{value:'Unmapped',label:'Unmapped Initiatives'},...programOptions]],
-      ['overview-delivery-method','All Delivery Methods',unique(projects.map(item=>item.deliveryMethod)).map(value=>({value,label:value}))],
+      ['overview-initiative-owner','All Initiative Owners',unique(pageInitiatives.map(item=>item.businessOwner)).map(value=>({value,label:value}))],
+      ['overview-initiative-assigned','All Initiative Assignees',unique(pageInitiatives.map(item=>item.assignedTo)).map(value=>({value,label:value}))],
+      ['overview-program-owner','All Program Owners',unique(pagePrograms.map(item=>item.owner)).map(value=>({value,label:value}))],
+      ['overview-program-assigned','All Program Assignees',unique(pagePrograms.map(item=>item.assignedTo)).map(value=>({value,label:value}))],
+      ['overview-program','All Programs',[...(rows.some(row=>!row.program)?[{value:'Unmapped',label:'Unmapped Initiatives'}]:[]),...programOptions]],
+      ['overview-delivery-method','All Delivery Methods',unique(pageInitiatives.map(item=>item.deliveryMethod)).map(value=>({value,label:value}))],
       ['overview-milestone-status','All Milestone Statuses',statuses],
       ['overview-milestone-owner','All Milestone Owners',[...owners].sort((left,right)=>String(left[1]).localeCompare(String(right[1]))).map(([value,label])=>({value,label}))]
     ];
@@ -24348,11 +24357,18 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
   }
   function syncPrimaryOptions(bar,view){
     const values=valuesFor(view),fallback=primaryOptionFallbacks.get(view)||new Map();
+    const rows=pageRows(view),initiatives=[...new Set(rows.flatMap(initiativesFor))];
+    const entries={
+      'filter-status':['All Statuses',unique(rows.map(flatStatus))],
+      'filter-type':['All Types',unique(initiatives.map(item=>item.type))],
+      'filter-vertical':['All Verticals',unique(rows.map(row=>row.initiative?.vertical||row.program?.vertical))],
+      'filter-impact':['All Business Benefit Categories',unique(rows.map(row=>row.initiative?.impactCategory||row.program?.impactCategory))]
+    };
     ['filter-status','filter-type','filter-vertical','filter-critical','filter-reviewed','filter-impact','filter-record-status'].forEach(source=>{
       const original=document.getElementById(source),clone=bar?.querySelector(`[data-flat-shared-source="${source}"]`);if(!original?.options||!clone)return;
       const selected=Object.prototype.hasOwnProperty.call(values,source)?values[source]:clone.value;
       const sourceOptions=original.options.length>1?[...original.options]:fallback.get(source)||[...original.options];
-      const options=sourceOptions.map(option=>option.cloneNode(true));
+      const options=entries[source]?[new Option(entries[source][0],''),...entries[source][1].map(value=>new Option(value,value))]:sourceOptions.map(option=>option.cloneNode(true));
       if(source==='filter-reviewed'&&options[0]?.value==='all')options[0].value='';
       clone.replaceChildren(...options);clone.value=options.some(option=>option.value===selected)?selected:'';
     });
@@ -24409,6 +24425,10 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
   function milestonesFor(row,initiatives){if(row.milestone)return[row.milestone];if(row.track)return(row.initiative?.milestones||[]).filter(item=>Number(item.trackId)===Number(row.track.id));return initiatives.flatMap(item=>item.milestones||[]);}
   function sharedMatches(row){
     const view=flatView(),values=valuesFor(view),value=source=>values[source]||'',initiatives=initiativesFor(row),program=row.program||flatProgram(row.initiative||initiatives[0]),milestones=milestonesFor(row,initiatives);
+    if(value('filter-status')&&flatStatus(row)!==value('filter-status'))return false;
+    if(value('filter-vertical')&&clean(row.initiative?.vertical||program?.vertical)!==value('filter-vertical'))return false;
+    if(value('filter-impact')&&clean(row.initiative?.impactCategory||program?.impactCategory)!==value('filter-impact'))return false;
+    if(value('filter-type')&&!initiatives.some(item=>clean(item.type)===value('filter-type')))return false;
     const selectedProgram=value('overview-program');if(selectedProgram==='Unmapped'){if(program)return false;}else if(selectedProgram&&clean(program?.name)!==selectedProgram)return false;
     if(value('overview-initiative-owner')&&!initiatives.some(item=>clean(item.businessOwner)===value('overview-initiative-owner')))return false;
     if(value('overview-initiative-assigned')&&!initiatives.some(item=>clean(item.assignedTo)===value('overview-initiative-assigned')))return false;
@@ -24436,10 +24456,10 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
   }
   const previousFlatRecords=window.flatRecords;
   window.flatRecords=function(){
-    const view=flatView(),typeControl=view==='programs'?document.getElementById('flat-type-filter'):null,selectedType=typeControl?.value||'';let rows;
-    if(selectedType){typeControl.value='';try{rows=previousFlatRecords.apply(this,arguments);}finally{typeControl.value=selectedType;}rows=rows.filter(row=>projects.some(initiative=>Number(initiative.programId)===Number(row.program?.id)&&clean(initiative.type)===selectedType));}
-    else rows=previousFlatRecords.apply(this,arguments);
-    return view&&document.querySelector('.flat-shared-filter-banner')?rows.filter(sharedMatches):rows;
+    const view=flatView(),controls=view?['flat-type-filter','flat-status-filter','flat-vertical-filter','flat-impact-filter'].map(id=>document.getElementById(id)).filter(Boolean):[],selected=controls.map(control=>control.value);let rows;
+    controls.forEach(control=>{control.value='';});
+    try{rows=previousFlatRecords.apply(this,arguments);}finally{controls.forEach((control,index)=>{control.value=selected[index];});}
+    return view?rows.filter(sharedMatches):rows;
   };
   const previousRender=window.renderFlatWorkspacePage;
   window.renderFlatWorkspacePage=function(){if(flatView())capture();const result=previousRender.apply(this,arguments);if(flatView())schedule();return result;};
@@ -24448,7 +24468,7 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
   const previousShow=window.showWorkspaceView;
   window.showWorkspaceView=function(view){const result=previousShow.apply(this,arguments);if(flatPages.has(view)){install();schedule();}return result;};
   document.addEventListener('change',event=>{const control=event.target.closest?.('#workspace-flat-page .flat-shared-filter-banner [data-flat-shared-source]'),view=flatView();if(!control||!view)return;valuesFor(view)[control.dataset.flatSharedSource]=control.value;flatListCurrentPage=1;window.renderFlatWorkspacePage?.();});
-  document.addEventListener('input',event=>{const control=event.target.closest?.('#workspace-flat-page .flat-shared-filter-banner #flat-search'),view=flatView();if(control&&view)valuesFor(view)['filter-search']=control.value;});
+  document.addEventListener('input',event=>{const control=event.target.closest?.('#workspace-flat-page .flat-shared-filter-banner #flat-search'),view=flatView();if(control&&view){valuesFor(view)['filter-search']=control.value;flatListCurrentPage=1;window.renderFlatWorkspacePage?.();}});
   const workspace=document.getElementById('workspace-flat-page');if(workspace)workspaceObserver=new MutationObserver(()=>{if(flatView())schedule();}).observe(workspace,{childList:true,subtree:true});
   const overviewFilter=document.getElementById('overview-filter-row');if(overviewFilter)new MutationObserver(()=>{if(flatView())schedule();}).observe(overviewFilter,{childList:true,subtree:true});
   window.flatSharedOverviewFilterBannerRefresh=schedule;
