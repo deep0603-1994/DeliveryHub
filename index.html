@@ -2150,10 +2150,7 @@ async function archiveImportedRecords({ programIds = [], initiativeIds = [], tra
 // --- LOAD USERS FROM SUPABASE ---
 
 async function loadUsersFromSupabase() {
-  const { data, error } = await supabaseClient
-    .from('user_master')
-    .select('*')
-    .order('full_name', { ascending: true });
+  const { data, error } = await fetchAllSupabaseRows('user_master', 'full_name');
 
   if (error) {
     console.error('User loading failed:', error);
@@ -2224,23 +2221,43 @@ if (userDisplay && currentUser) {
 
 // --- LOAD INITIATIVES AND MILESTONES FROM SUPABASE ---
 
-async function fetchAllSupabaseRows(
+const pendingSupabaseReads = new Map();
+
+function fetchAllSupabaseRows(
   tableName,
   orderColumn = 'id',
-  activeOnly = false
+  activeOnly = false,
+  options = {}
 ) {
+  const account = typeof currentUser === 'undefined' ? '' : String(currentUser?.id || currentUser?.email || '');
+  const key = JSON.stringify([account, tableName, orderColumn, activeOnly, options]);
+  if (pendingSupabaseReads.has(key)) return pendingSupabaseReads.get(key);
+  const request = fetchSupabasePages(tableName, orderColumn, activeOnly, options);
+  pendingSupabaseReads.set(key, request);
+  queueMicrotask(() => {
+    if (pendingSupabaseReads.get(key) === request) pendingSupabaseReads.delete(key);
+  });
+  return request;
+}
+
+async function fetchSupabasePages(tableName, orderColumn, activeOnly, options) {
   const pageSize = 1000;
   const rows = [];
+  let total = null;
 
   for (
     let from = 0;
     ;
-    from += pageSize
+    from = rows.length
   ) {
     let query =
       supabaseClient
         .from(tableName)
-        .select('*');
+        .select(options.columns || '*', from === 0 ? { count: 'exact' } : {});
+
+    for (const [column, value] of Object.entries(options.equals || {})) {
+      query = query.eq(column, value);
+    }
 
     if (activeOnly) {
       query =
@@ -2250,17 +2267,16 @@ async function fetchAllSupabaseRows(
         );
     }
 
+    query = query.order(orderColumn, { ascending: true });
+    for (const column of options.thenOrder || []) query = query.order(column, { ascending: true });
+    if (orderColumn !== 'id') query = query.order('id', { ascending: true });
+
     const {
       data,
-      error
+      error,
+      count
     } =
       await query
-        .order(
-          orderColumn,
-          {
-            ascending: true
-          }
-        )
         .range(
           from,
           from + pageSize - 1
@@ -2273,13 +2289,15 @@ async function fetchAllSupabaseRows(
       };
     }
 
+    if (from === 0 && Number.isFinite(count)) total = count;
+
     rows.push(
       ...(data || [])
     );
 
     if (
-      !data ||
-      data.length < pageSize
+      !data || !data.length ||
+      (total !== null && rows.length >= total)
     ) {
       return {
         data: rows,
@@ -2289,30 +2307,14 @@ async function fetchAllSupabaseRows(
   }
 }
 
-async function loadInitiativesFromSupabase() {
-  // Preserve the delivery workspace state across data refreshes triggered by saves.
-  const deliveryStateBeforeReload = {
-    scrollX: window.scrollX,
-    scrollY: window.scrollY,
-    programCollapsed: new Map((programs || []).map(program => [Number(program.id), Boolean(program.collapsed)])),
-    initiativeCollapsed: new Map((projects || []).map(project => [Number(project.id), Boolean(project.collapsed)])),
-    trackCollapsed: new Map((projects || []).flatMap(project =>
-      (project.tracks || []).map(track => [`${Number(project.id)}:${Number(track.id)}`, Boolean(track.collapsed)])
-    ))
-  };
+async function loadInitiativesFromSupabase({ render = true } = {}) {
   const [programResult, initiativeResult, milestoneResult, trackResult] = await Promise.all([
-    supabaseClient
-      .from('programs')
-      .select('*')
-      .eq('is_active', true)
-      .order('id', { ascending: true }),
+    fetchAllSupabaseRows('programs', 'id', false, { equals: { is_active: true } }),
     fetchAllSupabaseRows('initiatives'),
     fetchAllSupabaseRows('milestones'),
-    supabaseClient
-      .from('milestone_tracks')
-      .select('id,initiative_id,sequence_no,display_order,record_status,created_by_name,created_by,created_at,modified_by_name,modified_by,updated_at,archived_by_name,archived_by,archived_at,track_name')
-      .order('display_order', { ascending: true })
-      .order('id', { ascending: true })
+    fetchAllSupabaseRows('milestone_tracks', 'display_order', false, {
+      columns: 'id,initiative_id,sequence_no,display_order,record_status,created_by_name,created_by,created_at,modified_by_name,modified_by,updated_at,archived_by_name,archived_by,archived_at,track_name'
+    })
   ]);
 
   if (programResult.error) {
@@ -2379,6 +2381,16 @@ async function loadInitiativesFromSupabase() {
 
     return false;
   }
+
+  const deliveryStateBeforeReload = {
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
+    programCollapsed: new Map((programs || []).map(program => [Number(program.id), Boolean(program.collapsed)])),
+    initiativeCollapsed: new Map((projects || []).map(project => [Number(project.id), Boolean(project.collapsed)])),
+    trackCollapsed: new Map((projects || []).flatMap(project =>
+      (project.tracks || []).map(track => [`${Number(project.id)}:${Number(track.id)}`, Boolean(track.collapsed)])
+    ))
+  };
 
   const programRows =
     programResult.data || [];
@@ -2734,10 +2746,13 @@ programId:
   await synchronizeInitiativeRevisedEndDates();
 
   populateProgramDropdown();
-  renderProjects();
-  requestAnimationFrame(() => {
-    window.scrollTo(deliveryStateBeforeReload.scrollX, deliveryStateBeforeReload.scrollY);
-  });
+  if (render) {
+    const scrollX = window.scrollX, scrollY = window.scrollY;
+    renderProjects();
+    requestAnimationFrame(() => {
+      window.scrollTo(scrollX, scrollY);
+    });
+  }
 
   return true;
 }
@@ -4457,22 +4472,7 @@ async function loadMasterValues() {
     data,
     error
   } =
-  await supabaseClient
-    .from('master_values')
-    .select('*')
-    .order(
-      'master_type',
-      {
-        ascending: true
-      }
-    )
-    
-    .order(
-      'value_name',
-      {
-        ascending: true
-      }
-    );
+  await fetchAllSupabaseRows('master_values', 'master_type', false, { thenOrder: ['value_name'] });
 
   if (error) {
 
@@ -9810,7 +9810,7 @@ function flatProgram(i){
 function flatRecords(){
  const rs=document.getElementById('flat-record-status')?.value||'active',q=(document.getElementById('flat-search')?.value||'').trim().toLowerCase(),pf=document.getElementById('flat-program-filter')?.value||'',inf=document.getElementById('flat-initiative-filter')?.value||'',tf=document.getElementById('flat-track-filter')?.value||'',type=document.getElementById('flat-type-filter')?.value||'',vert=document.getElementById('flat-vertical-filter')?.value||'',impact=document.getElementById('flat-impact-filter')?.value||'',sf=document.getElementById('flat-status-filter')?.value||'';
  let rows=[];if(currentWorkspaceView==='programs')rows=programs.map(program=>({program}));if(currentWorkspaceView==='initiatives')rows=projects.map(initiative=>({program:flatProgram(initiative),initiative}));if(currentWorkspaceView==='tracks')rows=projects.flatMap(initiative=>(initiative.tracks||[]).map(track=>({program:flatProgram(initiative),initiative,track})));if(currentWorkspaceView==='milestones')rows=projects.flatMap(initiative=>(initiative.milestones||[]).map(milestone=>({program:flatProgram(initiative),initiative,track:(initiative.tracks||[]).find(t=>Number(t.id)===Number(milestone.trackId))||null,milestone})));
- return rows.filter(r=>{const e=r.milestone||r.track||r.initiative||r.program,statusRec=String(e?.recordStatus||'active');if(rs==='active'&&statusRec==='deleted'||rs==='deleted'&&statusRec!=='deleted')return false;if(pf&&Number(r.program?.id)!==Number(pf)||inf&&Number(r.initiative?.id)!==Number(inf)||tf&&Number(r.track?.id)!==Number(tf))return false;const summary=r.track&&r.initiative?getTrackSummary(r.initiative,r.track):null,st=r.milestone?getEffectiveMilestoneStatus(r.milestone):summary?summary.status:r.initiative?evaluateProjectStatus(r.initiative.name,r.initiative.revisedStartDate||r.initiative.startDate,getEffectiveEndDate(r.initiative.targetEndDate,r.initiative.revisedEndDate),r.initiative.actualEndDate):evaluateProjectStatus(r.program?.name,r.program?.revisedStartDate||r.program?.startDate,getEffectiveEndDate(r.program?.targetEndDate,r.program?.revisedEndDate),r.program?.actualEndDate),et=r.initiative?.type||'',ev=r.initiative?.vertical||r.program?.vertical||'',ei=r.initiative?.impactCategory||r.program?.impactCategory||'';if(type&&et!==type||vert&&ev!==vert||impact&&ei!==impact||sf&&st!==sf)return false;if(activeFlatKpiFilter==='wip'&&['Done','On-Hold','In-Queue'].includes(st)||activeFlatKpiFilter==='onhold'&&st!=='On-Hold'||activeFlatKpiFilter==='delay'&&!['Delay','Pending','Deviation'].includes(st)||activeFlatKpiFilter==='completed'&&st!=='Done')return false;const x=[r.program?.sequenceNo,r.program?.name,r.program?.owner,r.initiative?.sequenceNo,r.initiative?.name,r.initiative?.type,r.initiative?.crNo,r.initiative?.businessOwner,r.track?.sequenceNo,r.track?.name,r.milestone?.sequenceNo,r.milestone?.actions,r.milestone?.owner].filter(Boolean).join(' ').toLowerCase();return !q||x.includes(q);});
+ return rows.filter(r=>{const e=r.milestone||r.track||r.initiative||r.program,statusRec=String(e?.recordStatus||'active');if(rs==='active'&&statusRec==='deleted'||rs==='deleted'&&statusRec!=='deleted')return false;if(pf&&Number(r.program?.id)!==Number(pf)||inf&&Number(r.initiative?.id)!==Number(inf)||tf&&Number(r.track?.id)!==Number(tf))return false;const summary=!r.milestone&&r.track&&r.initiative?getTrackSummary(r.initiative,r.track):null,st=r.milestone?getEffectiveMilestoneStatus(r.milestone):summary?summary.status:r.initiative?evaluateProjectStatus(r.initiative.name,r.initiative.revisedStartDate||r.initiative.startDate,getEffectiveEndDate(r.initiative.targetEndDate,r.initiative.revisedEndDate),r.initiative.actualEndDate):evaluateProjectStatus(r.program?.name,r.program?.revisedStartDate||r.program?.startDate,getEffectiveEndDate(r.program?.targetEndDate,r.program?.revisedEndDate),r.program?.actualEndDate),et=r.initiative?.type||'',ev=r.initiative?.vertical||r.program?.vertical||'',ei=r.initiative?.impactCategory||r.program?.impactCategory||'';if(type&&et!==type||vert&&ev!==vert||impact&&ei!==impact||sf&&st!==sf)return false;if(activeFlatKpiFilter==='wip'&&['Done','On-Hold','In-Queue'].includes(st)||activeFlatKpiFilter==='onhold'&&st!=='On-Hold'||activeFlatKpiFilter==='delay'&&!['Delay','Pending','Deviation'].includes(st)||activeFlatKpiFilter==='completed'&&st!=='Done')return false;const x=[r.program?.sequenceNo,r.program?.name,r.program?.owner,r.initiative?.sequenceNo,r.initiative?.name,r.initiative?.type,r.initiative?.crNo,r.initiative?.businessOwner,r.track?.sequenceNo,r.track?.name,r.milestone?.sequenceNo,r.milestone?.actions,r.milestone?.owner].filter(Boolean).join(' ').toLowerCase();return !q||x.includes(q);});
 }
 
 function flatConfig(){const rel=r=>[r.program?`Program ${r.program.sequenceNo}`:'-',escapeHtml(r.program?.name||'Unmapped'),r.initiative?`Initiative ${r.initiative.sequenceNo}`:'-',escapeHtml(r.initiative?.name||'-'),r.track?`Track ${r.track.sequenceNo}`:'-',escapeHtml(r.track?.name||'-')];if(currentWorkspaceView==='programs')return{title:'Programs',sub:'Flat list of all Programs without child hierarchy.',heads:['Program No.','Program Name','Owner','Assigned To','Vertical','Status','Start Date','Target End','Countdown','Initiatives','Milestones','Progress','Actions'],row:r=>{const p=r.program,i=projects.filter(x=>Number(x.programId)===Number(p.id)),m=i.flatMap(x=>x.milestones||[]),d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateProjectStatus(p.name,p.revisedStartDate||p.startDate,getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.actualEndDate),cd=calculateCountdown(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.revisedStartDate||p.startDate,p.actualEndDate);return[`Program ${p.sequenceNo}`,escapeHtml(p.name),escapeHtml(p.owner||'-'),escapeHtml(p.assignedTo||'-'),escapeHtml(p.vertical||'-'),getStatusBadge(st),formatDate(p.revisedStartDate||p.startDate),formatDate(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate)),getCountdownDisplay(cd),i.length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProgramModal(${p.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='initiatives')return{title:'Initiatives',sub:'Flat list of Initiatives with linked Program information.',heads:['Initiative No.','Initiative Name','Program No.','Program Name','Type','CR No.','Vertical','Delivery Method','Business Owner','Assigned To','Status','Countdown','Tracks','Milestones','Progress','Actions'],row:r=>{const i=r.initiative,a=rel(r),m=i.milestones||[],d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateProjectStatus(i.name,i.revisedStartDate||i.startDate,getEffectiveEndDate(i.targetEndDate,i.revisedEndDate),i.actualEndDate),cd=calculateCountdown(getEffectiveEndDate(i.targetEndDate,i.revisedEndDate),i.revisedStartDate||i.startDate,i.actualEndDate);return[`Initiative ${i.sequenceNo}`,escapeHtml(i.name),a[0],a[1],escapeHtml(i.type||'-'),escapeHtml(i.crNo||'-'),escapeHtml(i.vertical||'-'),escapeHtml(i.deliveryMethod||'-'),escapeHtml(i.businessOwner||'-'),escapeHtml(i.assignedTo||'-'),getStatusBadge(st),getCountdownDisplay(cd),(i.tracks||[]).length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProjectModal(${i.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='tracks')return{title:'Tracks',sub:'Flat list of Tracks linked to Initiatives and Programs.',heads:['Track No.','Track Name','Initiative No.','Initiative Name','Program No.','Program Name','Vertical','Milestones','Completed','Progress','Start Date','End Date','Status','Actions'],row:r=>{const a=rel(r),x=getTrackSummary(r.initiative,r.track);return[a[4],a[5],a[2],a[3],a[0],a[1],escapeHtml(r.initiative.vertical||'-'),x.milestoneCount,x.completedCount,`${x.progressPercentage}%`,formatDate(x.startDate),formatDate(x.endDate),getStatusBadge(x.status),`<button onclick="openTrackModal(${r.initiative.id},${r.track.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};return{title:'Milestones',sub:'Flat list of Milestones with Program, Initiative, and Track relationships.',heads:['Milestone No.','Action / Deliverable','Program No.','Program Name','Initiative No.','Initiative Name','Track No.','Track Name','Vertical','Owner','Dependency','Days','Start Date','End Date','Completion','Status','Deviation','Day Status','Actions'],row:r=>{const m=r.milestone,a=rel(r),end=calculateMilestoneEndDate(m.days,m.startDate),st=getEffectiveMilestoneStatus(m);return[`Milestone ${m.sequenceNo||m.id}`,escapeHtml(m.actions||m.title||'-'),a[0],a[1],a[2],a[3],a[4],a[5],escapeHtml(r.initiative.vertical||'-'),escapeHtml(m.owner||'-'),escapeHtml(m.dependency||'-'),escapeHtml(m.days||'-'),formatDate(m.startDate),formatDate(end),formatDate(m.completionDate),getStatusBadge(st),calculateDeviation(end,m.startDate,m.completionDate)||'-',calculateMilestoneDayStatus(end,m.completionDate)||'-',`<button onclick="openMilestoneModal(${r.initiative.id},${m.id},${m.trackId||'null'})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};}
@@ -9875,6 +9875,11 @@ function renderProjects() {
     );
 
   if (!masterContainer) {
+    return;
+  }
+
+  if (currentWorkspaceView !== 'overview') {
+    renderKPIs();
     return;
   }
 
@@ -14426,8 +14431,6 @@ if (!mastersLoaded) {
       return;
     }
 
-    renderProjects();
-
     renderUserMasterList();
 
     renderUserRoleManagement();
@@ -14676,8 +14679,6 @@ if (sessionRestored) {
   if (!projectsLoaded) {
     return;
   }
-
-  renderProjects();
 
   lucide.createIcons();
 
@@ -15076,9 +15077,9 @@ if (newProjectButton) {
 </script>
 <script>
 // REALTIME PORTAL SYNCHRONIZATION
-let deliveryRealtimeChannel=null,deliveryRealtimeRefreshTimer=null,deliveryRealtimeRefreshInProgress=false;
+let deliveryRealtimeChannel=null,deliveryRealtimeRefreshTimer=null,deliveryRealtimeRefreshInProgress=false,deliveryRealtimeRefreshPending=false;
 function renderActiveDeliveryWorkspace(){updateDailyTrackerBadge();if(currentWorkspaceView==='daily')renderDailyTrackerPage();else if(currentWorkspaceView==='overview')renderProjects();else renderFlatWorkspacePage();}
-async function refreshDeliveryPortalFromRealtime(){if(!currentUser||deliveryRealtimeRefreshInProgress)return;if(window._draggingMilestone||window._initiativeSequenceSaveLocks?.size){queueDeliveryRealtimeRefresh();return;}const state=captureDeliveryViewState();deliveryRealtimeRefreshInProgress=true;try{const loaded=await loadInitiativesFromSupabase();if(loaded){restoreDeliveryViewState(state);renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;}}
+async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._initiativeSequenceSaveLocks?.size){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
 function queueDeliveryRealtimeRefresh(){clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
 function initializeDeliveryRealtime(){if(deliveryRealtimeChannel||!currentUser||!supabaseClient?.channel)return;deliveryRealtimeChannel=supabaseClient.channel('delivery-hub-live').on('postgres_changes',{event:'*',schema:'public',table:'programs'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'initiatives'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestone_tracks'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestones'},queueDeliveryRealtimeRefresh).subscribe(status=>{if(status==='CHANNEL_ERROR')console.error('Delivery Hub realtime channel failed.');});}
 const existingLoadInitiativesFromSupabase=loadInitiativesFromSupabase;
@@ -16130,13 +16131,14 @@ function setDailySort(field){
   renderDailyTrackerPage();
 }
 function dailySortIcon(field){return dailySortField===field?(dailySortDirection==='asc'?'arrow-up':'arrow-down'):'arrow-up-down';}
+const deliveryGridCollator=new Intl.Collator(undefined,{numeric:true,sensitivity:'base'});
+const dailySortGetters={
+  program:row=>row.p?.name||'Unmapped',initiative:row=>row.i.name||'',track:row=>row.t?.name||'',milestone:row=>row.m.actions||row.m.title||'',owner:row=>row.m.owner||'',dependency:row=>row.m.dependency||'',status:row=>row.status||'',dueDate:row=>row.end||'',overdue:row=>Number(row.late||0),actualEnd:row=>row.m.completionDate||''
+};
 function dailyCompare(a,b){
-  const values={
-    program:r=>r.p?.name||'Unmapped',initiative:r=>r.i.name||'',track:r=>r.t?.name||'',milestone:r=>r.m.actions||r.m.title||'',owner:r=>r.m.owner||'',dependency:r=>r.m.dependency||'',status:r=>r.status||'',dueDate:r=>r.end||'',overdue:r=>Number(r.late||0),actualEnd:r=>r.m.completionDate||''
-  };
-  const getter=values[dailySortField]||values.dueDate;
+  const getter=dailySortGetters[dailySortField]||dailySortGetters.dueDate;
   const av=getter(a),bv=getter(b);
-  const result=typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),undefined,{numeric:true,sensitivity:'base'});
+  const result=typeof av==='number'&&typeof bv==='number'?av-bv:deliveryGridCollator.compare(String(av),String(bv));
   return dailySortDirection==='asc'?result:-result;
 }
 function dailySortHeader(label,field,selectColumn=false){
@@ -16999,7 +17001,21 @@ async function deletePlannerTemplate(id){
   await loadPlanners(true);
   showToast('Planner template deleted.','success');
 }
-function resolvePlannerRule(mode,rule,fixed,i,p,personOnly=false){const value=mode!=='DYNAMIC'?fixed||'':({INITIATIVE_BUSINESS_OWNER:i.businessOwner,INITIATIVE_ASSIGNED_TO:i.assignedTo,INITIATIVE_NAME:i.name,INITIATIVE_VERTICAL:i.vertical,PROGRAM_OWNER:p?.owner,PROGRAM_ASSIGNED_TO:p?.assignedTo,PROGRAM_NAME:p?.name,PROGRAM_VERTICAL:p?.vertical})[rule]||'';if(!personOnly)return value;return userMaster.find(user=>String(user.name||'').trim().toLowerCase()===String(value).trim().toLowerCase())?.name||'';}
+function resolvePlannerRule(mode,rule,fixed,i,p,personOnly=false){
+  const value=mode!=='DYNAMIC'?fixed??'':({INITIATIVE_BUSINESS_OWNER:i.businessOwner,INITIATIVE_ASSIGNED_TO:i.assignedTo,INITIATIVE_NAME:i.name,INITIATIVE_VERTICAL:i.vertical,PROGRAM_OWNER:p?.owner,PROGRAM_ASSIGNED_TO:p?.assignedTo,PROGRAM_NAME:p?.name,PROGRAM_VERTICAL:p?.vertical})[rule]||'';
+  if(!personOnly)return value;
+  const key=String(value).trim().toLowerCase();
+  if(!key)return '';
+  const people=typeof engineerAssignments!=='undefined'&&engineerAssignments.users?.length?engineerAssignments.users:userMaster;
+  const normalize=value=>String(value??'').trim().toLowerCase();
+  const active=user=>user.is_active===true||(user.is_active===undefined&&userMaster.some(person=>String(person.id)===String(user.id)));
+  const identified=people.filter(user=>[user.id,user.auth_user_id,user.email].some(identifier=>normalize(identifier)===key));
+  const matches=identified.length?identified:people.filter(user=>active(user)&&normalize(user.full_name||user.name)===key);
+  if(matches.length!==1)return '';
+  const user=matches[0];
+  if(!active(user))return '';
+  return user.full_name||user.name||'';
+}
 async function applyPlanner(id,iid,tid){
   if(!id)return;
   const i=projects.find(x=>+x.id===+iid),t=plannerTemplates.find(x=>String(x.id)===String(id));
@@ -17015,6 +17031,7 @@ async function applyPlanner(id,iid,tid){
   try{
     const rr=await supabaseClient.from('project_planner_milestones').select('*').eq('template_id',id).eq('is_active',true).order('display_order');
     if(rr.error||!rr.data?.length)return showToast(rr.error?.message||'Planner has no milestones.','error');
+    if(!await loadUsersFromSupabase())return showToast('Unable to verify Milestone Owners against User Master. No milestones were added. Please retry.','error');
     const templateItems=rr.data.slice().sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0));
     const p=programs.find(x=>+x.id===+i.programId);
 
@@ -17034,7 +17051,8 @@ async function applyPlanner(id,iid,tid){
     if(templateItems.some(row=>row.planner_type_id)&&(!plannerTypeReferenceAvailable||!reportProvenanceAvailable))return showToast('Apply the Planner Type / provenance SQL before generating mapped milestones.','error');
     const rows=templateItems.map((x,n)=>{const days=+x.days,end=start?calculateMilestoneEndDate(days,start):'',owner=resolvePlannerRule(x.owner_mode,x.owner_rule,x.owner_fixed_value,i,p,true),dependency=resolvePlannerRule(x.dependency_mode,x.dependency_rule,x.dependency_fixed_value,i,p),row={initiative_id:i.id,initiative_name:i.name,track_id:track,sequence_no:seq+n,milestone_title:x.milestone_action,actions:x.milestone_action,owner,dependency:dependency||null,days,status:evaluateMilestoneStatus(x.milestone_action,days,start,end,end,''),start_date:start||null,end_date:end||null,deadline:end||null,completion_date:null,deviation_days:null,record_status:'active',...(reportProvenanceAvailable?{template_id:id,template_milestone_id:x.id}:{}),...(plannerTypeReferenceAvailable?{planner_type_id:x.planner_type_id||null}:{})};start=end?getNextWorkingDay(end):'';return row;});
     await milestoneTypeIntegrity.validate(rows);
-    if(rows.some(x=>!x.owner))return showToast('Every Milestone Owner must resolve to an active User Master person.','error');
+    const unresolvedOwners=rows.flatMap((row,index)=>row.owner?[]:[`${index+1}. ${row.actions} [${templateItems[index].owner_mode==='DYNAMIC'?templateItems[index].owner_rule:templateItems[index].owner_fixed_value||'No owner mapping'}]`]);
+    if(unresolvedOwners.length)return showToast('Every Milestone Owner must resolve to an active User Master person. Unresolved: '+unresolvedOwners.slice(0,5).join('; '),'error');
 
     // Single multi-row insert is atomic: either all template rows are created or none.
     const ins=await supabaseClient.from('milestones').insert(rows).select('id,sequence_no');
@@ -17073,28 +17091,51 @@ async function applyPlanner(id,iid,tid){
     window._plannerApplyLocks.delete(lockKey);
   }
 }
+let plannerTemplateMenuSequence=0;
+function positionPlannerTemplateMenu(menu,trigger){
+  const bounds=trigger.getBoundingClientRect();
+  if(!trigger.isConnected||!bounds.width||bounds.bottom<0||bounds.top>window.innerHeight){menu.classList.add('hidden');trigger.setAttribute('aria-expanded','false');return;}
+  const width=Math.min(420,Math.max(240,bounds.width),window.innerWidth-16);
+  const below=Math.max(0,window.innerHeight-bounds.bottom-12),above=Math.max(0,bounds.top-12);
+  const down=below>=Math.min(menu.scrollHeight,280)||below>=above;
+  menu.style.width=`${width}px`;
+  menu.style.maxHeight=`${Math.max(40,down?below:above)}px`;
+  menu.style.left=`${Math.max(8,Math.min(bounds.left,window.innerWidth-width-8))}px`;
+  menu.style.top=`${Math.max(8,Math.min(down?bounds.bottom+4:bounds.top-menu.offsetHeight-4,window.innerHeight-menu.offsetHeight-8))}px`;
+}
+function cleanupPlannerTemplateMenus(){
+  document.querySelectorAll('.planner-template-menu').forEach(menu=>{if(!menu.plannerTrigger?.isConnected)menu.remove();});
+}
 function decoratePlannerDraft(){
+  cleanupPlannerTemplateMenus();
   document.querySelectorAll('#projects-container button[aria-label="Discard draft milestone"]').forEach(b=>{
-    if(b.parentElement.querySelector('.planner-template-trigger'))return;
+    const action=b.closest('tr')?.querySelector('.milestone-action-text');
+    if(!action||action.querySelector('.planner-template-trigger'))return;
     const found=projects.flatMap(p=>(p.milestones||[]).map(m=>({p,m}))).find(x=>+x.m.id===+inlineMilestoneEditId);
     if(!found)return;
-    const host=b.parentElement;
-    host.style.display='flex';
-    host.style.alignItems='center';
-    host.style.gap='4px';
-    host.style.position='relative';
+    const host=document.createElement('div');
+    host.className='mb-2';
     const trigger=document.createElement('button');
     trigger.type='button';
-    trigger.className='planner-template-trigger inline-flex h-7 w-7 items-center justify-center rounded border border-cyan-300 bg-white text-slate-700 hover:bg-cyan-50';
+    trigger.className='planner-template-trigger inline-flex min-h-7 max-w-full items-center justify-between gap-2 rounded border border-cyan-300 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-cyan-50';
     trigger.title='Choose Project Planner template';
     trigger.setAttribute('aria-label','Choose Project Planner template');
     trigger.setAttribute('aria-expanded','false');
-    trigger.innerHTML='<i data-lucide="chevron-down" class="w-4 h-4"></i>';
+    trigger.setAttribute('aria-haspopup','menu');
+    trigger.innerHTML='<span>Template Chooser</span><i data-lucide="chevron-down" class="w-4 h-4 shrink-0"></i>';
     const menu=document.createElement('div');
-    menu.className='planner-template-menu fixed left-0 top-0 z-[99999] hidden min-w-[240px] max-w-[min(420px,calc(100vw-1rem))] max-h-[70vh] overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl';
+    menu.id=`planner-template-menu-${++plannerTemplateMenuSequence}`;
+    menu.setAttribute('role','menu');
+    menu.setAttribute('aria-label','Project Planner templates');
+    menu.plannerTrigger=trigger;
+    trigger.setAttribute('aria-controls',menu.id);
+    menu.className='planner-template-menu fixed left-0 top-0 hidden overflow-y-auto overflow-x-hidden rounded-lg border border-slate-200 bg-white py-1 shadow-xl';
+    menu.style.position='fixed';
+    menu.style.boxSizing='border-box';
+    menu.style.zIndex='200010';
     const active=plannerTemplates.filter(x=>x.is_active!==false);
     menu.innerHTML=active.length
-      ? active.map(x=>`<button type="button" class="block w-full whitespace-normal px-3 py-2 text-left text-xs text-slate-700 hover:bg-cyan-50" data-planner-id="${x.id}">${escapeHtml(x.template_name)}</button>`).join('')
+      ? active.map(x=>`<button type="button" role="menuitem" class="block w-full whitespace-normal break-words px-3 py-2 text-left text-xs text-slate-700 hover:bg-cyan-50" data-planner-id="${escapeHtml(String(x.id))}">${escapeHtml(x.template_name)}</button>`).join('')
       : '<div class="px-3 py-2 text-xs text-slate-400">No active templates</div>';
     trigger.onclick=event=>{
       event.preventDefault();event.stopPropagation();
@@ -17104,16 +17145,18 @@ function decoratePlannerDraft(){
       menu.classList.toggle('hidden',!opening);
       trigger.setAttribute('aria-expanded',String(opening));
       if(opening){
-        const bounds=trigger.getBoundingClientRect();
-        const menuWidth=Math.min(420,Math.max(240,window.innerWidth-16));
-        menu.style.width=`${menuWidth}px`;
-        menu.style.zIndex='99999';
-        menu.style.maxHeight=`${Math.max(120,Math.min(560,window.innerHeight-16))}px`;
-        menu.style.overflowY='auto';
-        menu.style.left=`${Math.max(8,Math.min(bounds.right,window.innerWidth-menuWidth-8))}px`;
-        menu.style.top=`${Math.max(8,Math.min(bounds.top,window.innerHeight-menu.offsetHeight-8))}px`;
+        menu.scrollTop=0;
+        positionPlannerTemplateMenu(menu,trigger);
+        menu.querySelector('[role="menuitem"]')?.focus({preventScroll:true});
       }
     };
+    trigger.addEventListener('keydown',event=>{if(event.key==='ArrowDown'){event.preventDefault();if(menu.classList.contains('hidden'))trigger.click();else menu.querySelector('[role="menuitem"]')?.focus();}});
+    menu.addEventListener('keydown',event=>{
+      const options=[...menu.querySelectorAll('[role="menuitem"]')],index=options.indexOf(document.activeElement);
+      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();menu.classList.add('hidden');trigger.setAttribute('aria-expanded','false');trigger.focus({preventScroll:true});}
+      if(event.key==='Tab'){menu.classList.add('hidden');trigger.setAttribute('aria-expanded','false');}
+      if(options.length&&['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();options[event.key==='Home'?0:event.key==='End'?options.length-1:(index+(event.key==='ArrowDown'?1:-1)+options.length)%options.length].focus();}
+    });
     menu.addEventListener('click',event=>{
       const option=event.target.closest('[data-planner-id]');
       if(!option)return;
@@ -17123,11 +17166,14 @@ function decoratePlannerDraft(){
       applyPlanner(option.dataset.plannerId,found.p.id,found.m.trackId);
     });
     host.appendChild(trigger);
+    action.insertBefore(host,action.firstChild);
     document.body.appendChild(menu);
     lucide.createIcons();
   });
 }
-const renderProjectsBeforeProjectPlanner=renderProjects;renderProjects=function(){const x=renderProjectsBeforeProjectPlanner();if(currentUser&&document.querySelector('#projects-container button[aria-label="Discard draft milestone"]')){if(plannerTemplatesLoadedAt&&Date.now()-plannerTemplatesLoadedAt<60000)requestAnimationFrame(decoratePlannerDraft);else loadPlanners().then(()=>requestAnimationFrame(decoratePlannerDraft));}return x;};
+window.addEventListener('resize',()=>document.querySelectorAll('.planner-template-menu:not(.hidden)').forEach(menu=>positionPlannerTemplateMenu(menu,menu.plannerTrigger)),{passive:true});
+document.addEventListener('scroll',event=>{if(event.target.closest?.('.planner-template-menu'))return;document.querySelectorAll('.planner-template-menu:not(.hidden)').forEach(menu=>positionPlannerTemplateMenu(menu,menu.plannerTrigger));},{passive:true,capture:true});
+const renderProjectsBeforeProjectPlanner=renderProjects;renderProjects=function(){const x=renderProjectsBeforeProjectPlanner();cleanupPlannerTemplateMenus();if(currentUser&&document.querySelector('#projects-container button[aria-label="Discard draft milestone"]')){if(plannerTemplatesLoadedAt&&Date.now()-plannerTemplatesLoadedAt<60000)requestAnimationFrame(decoratePlannerDraft);else loadPlanners().then(()=>requestAnimationFrame(decoratePlannerDraft));}return x;};
 </script>
 
 
@@ -18195,7 +18241,7 @@ if (typeof Chart !== 'undefined') Chart.register(analyticsProfessionalColorScale
   function reviewedInitiatives(){try{return new Set(JSON.parse(localStorage.getItem(`deliveryHubDailyReviews:${userKey()}:${localToday()}`)||'[]'));}catch(error){return new Set();}}
   function isReviewed(row){return reviewedInitiatives().has(`initiatives:${Number(row.i.id)}`);}
   function cleanMilestoneDisplay(row){return String(row.m.actions||row.m.title||'-');}
-  function unique(rows,getter){return [...new Set(rows.map(getter).filter(value=>value!==''&&value!==null&&value!==undefined))].sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'}));}
+  function unique(rows,getter){return [...new Set(rows.map(getter).filter(value=>value!==''&&value!==null&&value!==undefined))].sort((a,b)=>deliveryGridCollator.compare(String(a),String(b)));}
   function optionList(values,current,label){return `<option value="">${label}</option>`+values.map(value=>`<option value="${escapeHtml(value)}" ${String(value)===String(current)?'selected':''}>${escapeHtml(value)}</option>`).join('');}
   function initiativeStatus(row){return evaluateProjectStatus(row.i.name,row.i.revisedStartDate||row.i.startDate,getEffectiveEndDate(row.i.targetEndDate,row.i.revisedEndDate),row.i.actualEndDate);}
   function recordMatches(row){const record=String(row.m.recordStatus||'active').toLowerCase();return trackerFilterSome('daily-record-filter',selected=>selected==='all'||(selected==='deleted'?record==='deleted':record!=='deleted'),trackerState.record);}
@@ -19877,9 +19923,14 @@ window.importCurrentWorkspacePage=async function(e){
     const hierarchyPage=['programs','initiatives','tracks','milestones'].includes(p);
     const sourceRecords=p==='programs'?programs:p==='initiatives'?projects:p==='tracks'?projects.flatMap(initiative=>initiative.tracks||[]):p==='milestones'?projects.flatMap(initiative=>initiative.milestones||[]):[];
     const idHeading={programs:'Program ID',initiatives:'Initiative ID',tracks:'Track ID',milestones:'Milestone ID'}[p];
-    const existing=row=>sourceRecords.find(record=>String(record.id)===String(row[idHeading]));
+    const recordsById=new Map(sourceRecords.map(record=>[String(record.id),record]));
+    const initiativesById=new Map(projects.map(record=>[String(record.id),record]));
+    const programsById=new Map(programs.map(record=>[String(record.id),record]));
+    const tracksByInitiative=new Map(projects.map(record=>[String(record.id),new Map((record.tracks||[]).map(track=>[String(track.id),track]))]));
+    const existing=row=>recordsById.get(String(row[idHeading]));
     const errors=[];
-    rows.forEach((row,index)=>{
+    for(const [index,row] of rows.entries()){
+      if(index%200===0){progress(Math.round(index/rows.length*10),`Validating ${index} of ${rows.length} rows`);await new Promise(resolve=>setTimeout(resolve,0));}
       c.required.forEach(heading=>{if(!safe(row[heading]).trim())errors.push(`Row ${index+2}: ${heading} is required.`)});
       if(engineers){
         try{
@@ -19889,7 +19940,7 @@ window.importCurrentWorkspacePage=async function(e){
         }catch(error){errors.push(`Row ${index+2}: ${error.message}`)}
       }
       if((p==='user_master'||p==='user_roles')&&row.Email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.Email))errors.push(`Row ${index+2}: invalid email.`);
-    });
+    }
     let importRows=rows,verticalValidationFailures=[];
     if(p==='initiatives'){
       const validVerticals=await getActiveDepartmentValueSet();
@@ -19902,6 +19953,7 @@ window.importCurrentWorkspacePage=async function(e){
     let nextSequence=null;
     const hierarchySequences=new Map();
     for(const row of importRows){
+      if(payload.length%200===0){progress(10+Math.round(payload.length/importRows.length*20),`Preparing ${payload.length} of ${importRows.length} rows`);await new Promise(resolve=>setTimeout(resolve,0));}
       const record={};
       const previous=existing(row);
       if(hierarchyPage&&previous){
@@ -19930,7 +19982,7 @@ window.importCurrentWorkspacePage=async function(e){
         if(!previous&&!record.sequence_no){if(nextSequence===null)nextSequence=await (p==='programs'?getNextProgramSequence():getNextInitiativeSequence());record.sequence_no=nextSequence++;}
       }
       if(p==='tracks'||p==='milestones'){
-        const parent=projects.find(initiative=>String(initiative.id)===String(record.initiative_id));
+        const parent=initiativesById.get(String(record.initiative_id));
         if(!parent||!canEditInitiative(parent))throw new Error(`Invalid or inaccessible Initiative ID: ${record.initiative_id}`);
         if(p==='tracks'&&!record.sequence_no){
           const key=String(parent.id);
@@ -19939,8 +19991,8 @@ window.importCurrentWorkspacePage=async function(e){
           hierarchySequences.set(key,Math.max(hierarchySequences.get(key),record.sequence_no)+1);
         }
         if(p==='milestones'){
-          const program=programs.find(item=>String(item.id)===String(parent.programId));
-          const track=record.track_id?(parent.tracks||[]).find(item=>String(item.id)===String(record.track_id)):null;
+          const program=programsById.get(String(parent.programId));
+          const track=record.track_id?tracksByInitiative.get(String(parent.id))?.get(String(record.track_id)):null;
           if(record.track_id&&!track)throw new Error(`Track ${record.track_id} does not belong to Initiative ${parent.id}.`);
           for(const [heading,expected] of [['Program ID',program?.id],['Program Name',program?.name],['Initiative Name',parent.name],['Track Name',track?.name]]){
             if(safe(row[heading]).trim()&&safe(row[heading]).trim()!==safe(expected).trim())throw new Error(`${heading} does not match the stored Milestone hierarchy.`);
@@ -24752,7 +24804,7 @@ Remaining scale work: Overview, Dashboard, and report sources still hydrate the 
     if(!trackerFilterMatches('flat-shared-critical',hasCritical?'critical':'noncritical',critical))return false;
     const review=value('filter-reviewed'),hasReviewed=initiatives.some(item=>reviewedItems.has(`initiatives:${Number(item.id)}`));
     if(!trackerFilterMatches('flat-shared-review',hasReviewed?'reviewed':'pending',review))return false;
-    const record=row.milestone||row.track||row.initiative||row.program,initiative=row.initiative||initiatives[0],summary=row.track&&initiative?getTrackSummary(initiative,row.track):null;
+    const record=row.milestone||row.track||row.initiative||row.program,initiative=row.initiative||initiatives[0],summary=!row.milestone&&row.track&&initiative?getTrackSummary(initiative,row.track):null;
     const dateFields=[
       ['created',record?.createdAt||initiative?.createdAt],['modified',record?.updatedAt||initiative?.updatedAt],
       ['start',record?.revisedStartDate||record?.startDate||initiative?.revisedStartDate||initiative?.startDate],
