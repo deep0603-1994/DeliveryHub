@@ -8283,6 +8283,8 @@ async function cascadeTrackMilestoneSchedule(project, milestoneId, options = {})
     const milestone = milestones[index];
 
     if (!isSameTrack(milestone.trackId, trackId)) continue;
+    if (['on hold', 'done', 'closed'].includes(String(milestone.status || '').trim().toLowerCase().replace(/[-_]+/g, ' ')) ||
+      ['deleted', 'archived'].includes(String(milestone.recordStatus || '').trim().toLowerCase())) continue;
     if (options.preserveMilestoneIds?.has(Number(milestone.id))) {
       referenceDate = getReferenceDate(milestone) || referenceDate;
       continue;
@@ -8402,7 +8404,9 @@ async function saveInlineMilestone(projectId, milestoneId, options = {}) {
   const isDraft=Number(milestoneId)<0;
   let sequenceNo=milestone.sequenceNo||null;
   if(isDraft){try{sequenceNo=await getNextMilestoneSequence(projectId,milestone.trackId||null);}catch(error){console.error('Inline Milestone sequence generation failed:',error);showToast('Unable to generate the next Milestone number.','error');return false;}}
-  const scrollX=window.scrollX,scrollY=window.scrollY;
+  const viewState=captureDeliveryViewState();
+  viewState.milestoneId=milestoneId;
+  const scrollX=viewState.scrollX,scrollY=viewState.scrollY;
   window.inlineMilestoneSaveLocks.add(saveKey);
   document.querySelectorAll(`[id$="-${milestoneId}"]`).forEach(c=>{if('disabled' in c)c.disabled=true;});
   try{
@@ -8421,7 +8425,7 @@ async function saveInlineMilestone(projectId, milestoneId, options = {}) {
     if(impactBelow && !await cascadeTrackMilestoneSchedule(project,milestone.id))return false;
     await synchronizeInitiativeRevisedEndDates([project]);
     if(addNextRow){const savedId=milestone.id,savedTrackId=milestone.trackId||null;addMilestoneInline(projectId,savedTrackId,null,savedId);requestAnimationFrame(()=>{window.scrollTo(scrollX,scrollY);requestAnimationFrame(()=>{const input=document.getElementById(`inline-actions-${inlineMilestoneEditId}`);input?.focus({preventScroll:true});input?.scrollIntoView({block:'nearest',inline:'nearest'});});});}
-    else{renderProjects();requestAnimationFrame(()=>window.scrollTo(scrollX,scrollY));}
+    else{viewState.milestoneId=milestone.id;renderProjects();restoreDeliveryViewState(viewState);}
     showToast('Milestone saved successfully.','success');return true;
   }catch(error){console.error('Unable to save Milestone:',error);showToast(`Unable to save Milestone: ${error?.message||error}`,'error');return false;}
   finally{window.inlineMilestoneSaveLocks.delete(saveKey);document.querySelectorAll(`[id$="-${milestoneId}"]`).forEach(c=>{if('disabled' in c)c.disabled=false;});}
@@ -15153,8 +15157,53 @@ function getMilestoneTotalOverallDeviation(milestone){
 function formatMilestoneTotalOverallDeviation(milestone){return `${getMilestoneTotalOverallDeviation(milestone)} day(s)`;}
 
 function findMilestoneRecord(pid,mid){const project=projects.find(p=>Number(p.id)===Number(pid));return{project,milestone:project?.milestones?.find(m=>Number(m.id)===Number(mid))};}
-function captureDeliveryViewState(){return{scrollX:window.scrollX,scrollY:window.scrollY,programs:new Map(programs.map(p=>[Number(p.id),p.collapsed])),projects:new Map(projects.map(p=>[Number(p.id),p.collapsed])),tracks:new Map(projects.flatMap(p=>(p.tracks||[]).map(t=>[Number(t.id),t.collapsed])))};}
-function restoreDeliveryViewState(state){if(!state)return;programs.forEach(p=>{if(state.programs.has(Number(p.id)))p.collapsed=state.programs.get(Number(p.id));});projects.forEach(p=>{if(state.projects.has(Number(p.id)))p.collapsed=state.projects.get(Number(p.id));(p.tracks||[]).forEach(t=>{if(state.tracks.has(Number(t.id)))t.collapsed=state.tracks.get(Number(t.id));});});requestAnimationFrame(()=>window.scrollTo(state.scrollX,state.scrollY));}
+function deliveryElementSelector(element){
+  if(!element||element===document.body)return null;
+  if(element.id)return `#${CSS.escape(element.id)}`;
+  const parent=element.parentElement;
+  if(!parent)return null;
+  const siblings=[...parent.children].filter(sibling=>sibling.tagName===element.tagName);
+  return `${deliveryElementSelector(parent)||'body'} > ${element.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(element)+1})`;
+}
+function captureDeliveryViewState(origin=document.activeElement){
+  const row=origin?.closest('[data-inline-milestone-id],[data-milestone-id]');
+  return{
+    scrollX:window.scrollX,scrollY:window.scrollY,
+    focusElement:origin,focusSelector:deliveryElementSelector(origin),
+    milestoneId:row?.dataset.inlineMilestoneId||row?.dataset.milestoneId||null,
+    scrollContainers:[...document.querySelectorAll('body *')].filter(element=>element.scrollTop||element.scrollLeft).map(element=>({element,selector:deliveryElementSelector(element),top:element.scrollTop,left:element.scrollLeft})),
+    programs:new Map(programs.map(program=>[Number(program.id),program.collapsed])),
+    projects:new Map(projects.map(project=>[Number(project.id),project.collapsed])),
+    tracks:new Map(projects.flatMap(project=>(project.tracks||[]).map(track=>[Number(track.id),track.collapsed])))
+  };
+}
+function restoreDeliveryViewState(state){
+  if(!state)return;
+  programs.forEach(program=>{if(state.programs.has(Number(program.id)))program.collapsed=state.programs.get(Number(program.id));});
+  projects.forEach(project=>{
+    if(state.projects.has(Number(project.id)))project.collapsed=state.projects.get(Number(project.id));
+    (project.tracks||[]).forEach(track=>{if(state.tracks.has(Number(track.id)))track.collapsed=state.tracks.get(Number(track.id));});
+  });
+  const restorePosition=()=>{
+    let target=state.focusElement?.isConnected?state.focusElement:state.focusSelector?document.querySelector(state.focusSelector):null;
+    if(target===document.body||target===document.documentElement)target=null;
+    if((!target||!target.getClientRects().length||target.closest('.hidden,[hidden]'))&&state.milestoneId){
+      const id=CSS.escape(String(state.milestoneId));
+      target=[...document.querySelectorAll(`[data-inline-milestone-id="${id}"],[data-milestone-id="${id}"],tr[ondblclick="startDailyTrackerEdit(${id})"]`)].find(element=>element.getClientRects().length&&!element.closest('.hidden,[hidden]'));
+    }
+    if(target&&target.getClientRects().length&&!target.closest('.hidden,[hidden]')){
+      if(!target.matches('input,textarea,select,button,a[href],[tabindex]'))target.tabIndex=-1;
+      target.focus({preventScroll:true});
+    }
+    (state.scrollContainers||[]).forEach(saved=>{
+      const element=saved.element.isConnected?saved.element:saved.selector?document.querySelector(saved.selector):null;
+      element?.scrollTo({left:saved.left,top:saved.top,behavior:'instant'});
+    });
+    window.scrollTo({left:state.scrollX,top:state.scrollY,behavior:'instant'});
+  };
+  restorePosition();
+  requestAnimationFrame(restorePosition);
+}
 function openMilestoneDeviationModal(pid,mid){const {project,milestone}=findMilestoneRecord(pid,mid);if(!project||!milestone||!canEditInitiative(project))return showToast('Permission denied.','error');const currentStatus=getEffectiveMilestoneStatus(milestone);if(!['WIP','Pending','Deviated','Deviation'].includes(currentStatus))return showToast('Deviation can be recorded only for WIP, Pending, or Deviated Milestones.','error');const end=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);document.getElementById('deviation-project-id').value=pid;document.getElementById('deviation-milestone-id').value=mid;document.getElementById('milestone-deviation-context').innerText=`${project.name} | ${milestone.actions||milestone.title}`;document.getElementById('deviation-current-start').innerText=formatDate(milestone.startDate);document.getElementById('deviation-current-end').innerText=formatDate(end);document.getElementById('deviation-new-start').value=getNextWorkingDay(end||localToday());document.getElementById('deviation-new-days').value=/^\d+$/.test(String(milestone.days||''))?milestone.days:'';document.getElementById('deviation-dependency').value=milestone.dependency||'';document.getElementById('deviation-remarks').value='';calculateDeviationPreview();const x=document.getElementById('milestone-deviation-modal');x.classList.remove('hidden');x.classList.add('flex');lucide.createIcons();}
 function closeMilestoneDeviationModal(){const x=document.getElementById('milestone-deviation-modal');x.classList.add('hidden');x.classList.remove('flex');}
 function calculateDeviationPreview(){const start=document.getElementById('deviation-new-start')?.value||'',days=document.getElementById('deviation-new-days')?.value||'',end=calculateMilestoneEndDate(days,start);document.getElementById('deviation-new-end').value=end||'';document.getElementById('deviation-preview').innerText=end?`New commitment: ${formatDate(start)} to ${formatDate(end)}.`:'Enter Start Date and Days.';}
@@ -15314,6 +15363,8 @@ async function saveBulkEdit(event){
   if(field==='milestone_remarks'&&value.length>MAX_MILESTONE_REMARKS_LENGTH){showToast(`Remarks cannot exceed ${MAX_MILESTONE_REMARKS_LENGTH.toLocaleString()} characters.`,'error');return;}
   const impactBelow=document.getElementById('bulk-edit-impact-below')?.checked===true;
   if(bulkEditEntity==='milestones'&&field==='start_date'&&!confirm(`Apply this Start Date to ${ids.length} selected Milestones? Impact Below Dates? ${impactBelow?'Yes':'No'}.`))return;
+  const viewState=bulkEditEntity==='milestones'&&['days','start_date','completion_date'].includes(field)?captureDeliveryViewState():null;
+  if(viewState)viewState.milestoneId=ids[0];
   const button=document.getElementById('bulk-edit-save');button.disabled=true;
   try{
     if(bulkEditEntity==='tracks'&&field==='append_track_name'){
@@ -15345,7 +15396,7 @@ async function saveBulkEdit(event){
       const table=bulkEditEntity==='programs'?'programs':bulkEditEntity==='initiatives'?'initiatives':'milestones',payload={[field]:engineerField?(clearEngineer?null:Number(value)):value};if(table!=='milestones')payload.updated_at=new Date().toISOString();
       const {error}=await supabaseClient.from(table).update(payload).in('id',ids);if(error)throw error;
     }
-    finishHierarchyBulkEdit();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records updated successfully.','success');
+    finishHierarchyBulkEdit();await loadInitiativesFromSupabase();if(viewState){restoreDeliveryViewState(viewState);renderActiveDeliveryWorkspace();restoreDeliveryViewState(viewState);}else renderFlatWorkspacePage();showToast('Selected records updated successfully.','success');
   }catch(error){showToast('Bulk edit failed: '+error.message,'error');}finally{button.disabled=false;}
 }
 async function bulkDeleteSelected(){const entity=currentWorkspaceView,ids=selectedBulkIds();if(!ids.length)return;if(!confirm(`Archive ${ids.length} selected ${entity}?`))return;try{if(entity==='programs'){let r=await supabaseClient.from('initiatives').update({program_id:null}).in('program_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('programs').update({is_active:false,updated_at:new Date().toISOString()}).in('id',ids);if(r.error)throw r.error;}else if(entity==='initiatives'){let r=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('initiative_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('milestone_tracks').update({record_status:'deleted',updated_at:new Date().toISOString()}).in('initiative_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('initiatives').update({record_status:'deleted'}).in('id',ids);if(r.error)throw r.error;}else if(entity==='tracks'){const r1=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('track_id',ids);if(r1.error)throw r1.error;const r2=await softDeleteRecords('milestone_tracks',ids);if(r2.error)throw r2.error;}else{const r=await softDeleteRecords('milestones',ids);if(r.error)throw r.error;}clearBulkSelection();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records archived successfully.','success');}catch(error){showToast('Bulk archive failed: '+error.message,'error');}}
@@ -18022,7 +18073,7 @@ if (typeof Chart !== 'undefined') Chart.register(analyticsProfessionalColorScale
   const priorOpen=openMilestoneModal;openMilestoneModal=function(pid,mid,tid){const r=priorOpen.apply(this,arguments);addCriticalControl();const c=document.getElementById('m-critical');if(c)c.checked=mid?isCritical(mid):false;return r;};
   const priorSave=saveMilestone;saveMilestone=async function(e){const critical=document.getElementById('m-critical')?.checked,pid=Number(document.getElementById('m-project-id')?.value),mid=Number(document.getElementById('m-id')?.value||0),actions=document.getElementById('m-actions')?.value.trim();await priorSave.apply(this,arguments);const p=projects.find(x=>Number(x.id)===pid),m=mid?p?.milestones?.find(x=>Number(x.id)===mid):[...(p?.milestones||[])].reverse().find(x=>(x.actions||x.title)===actions);if(m){const set=loadSet(criticalKey());critical&&isOpenMilestone(m)?set.add(Number(m.id)):set.delete(Number(m.id));saveSet(criticalKey(),set);renderProjects();}};
   const priorInline=renderInlineMilestoneRow;renderInlineMilestoneRow=function(project,m,canEdit){const html=priorInline.apply(this,arguments);criticalDrafts.set(Number(m.id),isCritical(m.id));return html.replace('id="inline-actions-',`data-critical-row="${m.id}" id="inline-actions-`).replace('</textarea></td>',`</textarea><label class="mt-1 flex items-center gap-1 text-[10px] font-semibold text-red-700"><input type="checkbox" id="inline-critical-${m.id}" ${criticalDrafts.get(Number(m.id))?'checked':''}> Critical</label></td>`);};
-  const priorInlineSave=saveInlineMilestone;saveInlineMilestone=async function(pid,mid){const checked=document.getElementById(`inline-critical-${mid}`)?.checked,actions=document.getElementById(`inline-actions-${mid}`)?.value.trim();await priorInlineSave.apply(this,arguments);const p=projects.find(x=>Number(x.id)===Number(pid)),m=Number(mid)>0?p?.milestones?.find(x=>Number(x.id)===Number(mid)):[...(p?.milestones||[])].reverse().find(x=>(x.actions||x.title)===actions);if(m){const set=loadSet(criticalKey());checked&&isOpenMilestone(m)?set.add(Number(m.id)):set.delete(Number(m.id));saveSet(criticalKey(),set);renderProjects();}};
+  const priorInlineSave=saveInlineMilestone;saveInlineMilestone=async function(pid,mid){const viewState=captureDeliveryViewState();viewState.milestoneId=mid;const checked=document.getElementById(`inline-critical-${mid}`)?.checked,actions=document.getElementById(`inline-actions-${mid}`)?.value.trim();const result=await priorInlineSave.apply(this,arguments);if(result===false)return result;const p=projects.find(x=>Number(x.id)===Number(pid)),m=Number(mid)>0?p?.milestones?.find(x=>Number(x.id)===Number(mid)):[...(p?.milestones||[])].reverse().find(x=>(x.actions||x.title)===actions);if(m){const set=loadSet(criticalKey());checked&&isOpenMilestone(m)?set.add(Number(m.id)):set.delete(Number(m.id));saveSet(criticalKey(),set);renderProjects();if(!arguments[2]?.addNextRow){viewState.milestoneId=m.id;restoreDeliveryViewState(viewState);}}return result;};
   document.addEventListener('DOMContentLoaded',()=>requestAnimationFrame(decorate));
 })();
 </script>
@@ -20702,7 +20753,7 @@ RLS/function security review required:
  function statuses(){const values=['Pending','WIP','In-Queue','On-Hold','Deviated','Critical','Done'];return '<option value="">'+(state.multi?'Mixed Values / No Change':'-- Select Status --')+'</option>'+values.map(v=>`<option value="${v}">${v==='On-Hold'?'On Hold':v}</option>`).join('');}
  function appendChangeActions(){const list=document.getElementById('daily-milestone-action-list');if(!list)return;list.insertAdjacentHTML('beforeend',`<button type="button" class="daily-milestone-action-button" data-action="change-status"><i data-lucide="refresh-cw" class="text-indigo-600"></i><span>Change Status</span></button><button type="button" class="daily-milestone-action-button" data-action="change-owner"><i data-lucide="user-round" class="text-indigo-600"></i><span>Change Milestone Owner</span></button><button type="button" class="daily-milestone-action-button" data-action="change-dependency"><i data-lucide="users-round" class="text-indigo-600"></i><span>Change Dependency</span></button><button type="button" class="daily-milestone-action-button" data-action="change-start"><i data-lucide="calendar-days" class="text-indigo-600"></i><span>Change Start Date</span></button><button type="button" class="daily-milestone-action-button" data-action="change-planner-type"><i data-lucide="list-tree" class="text-indigo-600"></i><span>Change Milestone Planner Type</span></button><div id="daily-action-change-editor" class="daily-change-editor hidden"></div>`);lucide.createIcons();}
  function showMenu(){const modal=document.getElementById('daily-milestone-action-modal');document.getElementById('daily-milestone-action-context').textContent=state.multi?`${state.rows.length} Milestones selected`: `${state.rows[0].milestone.actions||state.rows[0].milestone.title||'Milestone'} · ${getEffectiveMilestoneStatus(state.rows[0].milestone)}`;const actions=[];const open=state.rows.filter(r=>getEffectiveMilestoneStatus(r.milestone)!=='Done');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="complete"><i data-lucide="check-circle" class="text-emerald-600"></i><span>Complete / Close Milestone</span></button>');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="deviate"><i data-lucide="git-branch" class="text-rose-600"></i><span>Mark as Deviated</span></button>');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="hold"><i data-lucide="pause-circle" class="text-slate-600"></i><span>Put On Hold</span></button><button type="button" class="daily-milestone-action-button" data-action="critical"><i data-lucide="alert-triangle" class="text-red-800"></i><span>Mark as Critical</span></button>');if(!state.multi&&typeof openMilestoneRevisionHistory==='function'&&getMilestoneTotalOverallDeviation?.(state.rows[0].milestone)>0)actions.push('<button type="button" class="daily-milestone-action-button" data-action="history"><i data-lucide="history"></i><span>Revision History</span></button>');document.getElementById('daily-milestone-action-list').innerHTML=actions.join('');appendChangeActions();modal.classList.remove('hidden');modal.classList.add('flex');modal.querySelector('[data-action]')?.focus();lucide.createIcons();}
- function openRows(ids,origin){const rows=findRows([...new Set(ids.map(Number))]);if(!rows.length)return showToast('Select at least one Milestone.','error');state.rows=rows;state.multi=rows.length>1;state.origin=origin||document.activeElement;state.snapshot={x:scrollX,y:scrollY};if(!canUpdate())return showToast('One or more selected Milestones cannot be updated.','error');if(!state.multi){baseOpen(Number(rows[0].milestone.id),origin);appendChangeActions();return;}showMenu();}
+ function openRows(ids,origin){const rows=findRows([...new Set(ids.map(Number))]);if(!rows.length)return showToast('Select at least one Milestone.','error');state.rows=rows;state.multi=rows.length>1;state.origin=origin||document.activeElement;state.snapshot={x:scrollX,y:scrollY};state.viewState=captureDeliveryViewState(state.origin);state.viewState.milestoneId=rows[0].milestone.id;if(!canUpdate())return showToast('One or more selected Milestones cannot be updated.','error');if(!state.multi){baseOpen(Number(rows[0].milestone.id),origin);appendChangeActions();return;}showMenu();}
  window.openDailyMilestoneActionMenu=function(id,row){openRows([id],row);};
  window.startDailyTrackerEdit=function(id){openRows([id],document.activeElement);};
  window.dailyBulkEdit=function(){openRows([...dailySelectedMilestones],document.activeElement);};
@@ -20731,8 +20782,8 @@ RLS/function security review required:
      await applyMilestoneScheduleImpact(state.rows,impactBelow);
     await loadInitiativesFromSupabase();if(state.multi||action==='change-planner-type'&&typeof dailyMultiSelectEnabled!=='undefined'&&dailyMultiSelectEnabled&&state.rows.every(row=>dailySelectedMilestones.has(Number(row.milestone.id)))){resetDailyMultiSelectAfterSuccess();}
      document.getElementById('daily-milestone-action-modal').classList.add('hidden');
-     if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();
-     requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));showToast(`${updated} Milestone${updated===1?'':'s'} updated.`,'success');
+    restoreDeliveryViewState(state.viewState);renderActiveDeliveryWorkspace();restoreDeliveryViewState(state.viewState);
+    showToast(`${updated} Milestone${updated===1?'':'s'} updated.`,'success');
    }catch(error){console.error('Daily Tracker Milestone change failed:',error);showToast(error?.message||'Milestone update failed.','error');save.disabled=false;save.textContent='Apply Change';}finally{state.busy=false;}
  }
  async function applyMultiWorkflow(action){if(state.busy)return;const active=state.rows.filter(r=>getEffectiveMilestoneStatus(r.milestone)!=='Done');if(!active.length)return showToast('No eligible selected Milestones.','error');let completionDate='';if(action==='complete'){completionDate=prompt('Completion Date (YYYY-MM-DD)',localToday())||'';if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)||completionDate>localToday())return showToast('Enter a valid Completion Date.','error');}if(!confirm(`${action==='complete'?'Complete':action==='hold'?'Put On Hold':'Mark as Critical'} ${active.length} selected Milestone${active.length===1?'':'s'}?`))return;state.busy=true;try{for(const row of active){let patch;if(action==='complete'){const end=row.milestone.deadline||row.milestone.endDate||calculateMilestoneEndDate(row.milestone.days,row.milestone.startDate);patch={completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,row.milestone.startDate,completionDate)||null};}else patch={status:action==='hold'?'On-Hold':'Critical'};const {data:updatedMilestone,error}=await supabaseClient.from('milestones').update(patch).eq('id',row.milestone.id).select('id,status,completion_date,deviation_days').single();if(error)throw error;if(!updatedMilestone||String(updatedMilestone.id)!==String(row.milestone.id))throw new Error(`Supabase did not confirm the update for Milestone ${row.milestone.id}.`);if(action==='hold'&&String(updatedMilestone.status||'').trim()!=='On-Hold')throw new Error(`Milestone ${row.milestone.id} was not saved as On-Hold in Supabase.`);Object.assign(row.milestone,{status:updatedMilestone.status,completionDate:updatedMilestone.completion_date,deviationDays:updatedMilestone.deviation_days});}await loadInitiativesFromSupabase();resetDailyMultiSelectAfterSuccess();document.getElementById('daily-milestone-action-modal').classList.add('hidden');if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));showToast(`${active.length} Milestone${active.length===1?'':'s'} updated.`,'success');}catch(error){console.error('Daily Tracker Milestone action failed:',error);showToast(error?.message||'Milestone action failed.','error');}finally{state.busy=false;}}
@@ -21200,8 +21251,8 @@ function openMilestoneRevisionHistory(pid,mid){
   const istTimestamp=()=>typeof window.getISTTimestamp==='function'?window.getISTTimestamp():new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date()).replace(' ','T')+'+05:30';
   const normalizeIds=ids=>[...new Set((Array.isArray(ids)?ids:[ids]).map(Number).filter(Number.isFinite).filter(id=>id>0))];
   function findMilestone(id){for(const initiative of (window.projects||projects||[])){const milestone=(initiative.milestones||[]).find(row=>Number(row.id)===Number(id));if(milestone)return{initiative,milestone};}return null;}
-  function captureState(){return{view:window.currentWorkspaceView||null,x:scrollX,y:scrollY,dailyCategory:window.activeDailyTaskBucket,trackerState:window.trackerState?JSON.parse(JSON.stringify(window.trackerState)):null,overviewSelection:window.overviewSelectedIds?[...window.overviewSelectedIds]:null,dailySelection:window.dailySelectedMilestones?[...window.dailySelectedMilestones]:null};}
-  function restoreState(state){if(!state)return;if(state.trackerState&&window.trackerState)Object.assign(window.trackerState,state.trackerState);if(state.dailyCategory!==undefined)window.activeDailyTaskBucket=state.dailyCategory;requestAnimationFrame(()=>scrollTo(state.x,state.y));}
+  function captureState(){return{delivery:captureDeliveryViewState(),view:window.currentWorkspaceView||null,x:scrollX,y:scrollY,dailyCategory:window.activeDailyTaskBucket,trackerState:window.trackerState?JSON.parse(JSON.stringify(window.trackerState)):null,overviewSelection:window.overviewSelectedIds?[...window.overviewSelectedIds]:null,dailySelection:window.dailySelectedMilestones?[...window.dailySelectedMilestones]:null};}
+  function restoreState(state){if(!state)return;if(state.trackerState&&window.trackerState)Object.assign(window.trackerState,state.trackerState);if(state.dailyCategory!==undefined)window.activeDailyTaskBucket=state.dailyCategory;if(state.delivery)restoreDeliveryViewState(state.delivery);else requestAnimationFrame(()=>scrollTo(state.x,state.y));}
   const authoritativeEffectiveStatus = window.getEffectiveMilestoneStatus;
   function effectiveStatus(m){return authoritativeEffectiveStatus(m);}
   function assertPermission(row){if(!row)throw new Error('Milestone was not found in authoritative data.');if(typeof window.canEditInitiative==='function'&&!window.canEditInitiative(row.initiative))throw new Error('You do not have permission to modify one or more selected Milestones.');}
@@ -21238,9 +21289,10 @@ function openMilestoneRevisionHistory(pid,mid){
     return patch;
   }
   function toDatabasePatch(patch){const db={},typed=Object.hasOwn(patch,'plannerTypeId');for(const[key,value]of Object.entries(patch)){if(protectedFields.has(key)||value===undefined)continue;const column=key==='plannerTypeId'?'planner_type_id':typed&&key==='actions'?'actions':DB_FIELD_MAP[key];if(column)db[column]=value;}if(Object.keys(db).length===1&&Object.hasOwn(db,'planner_type_id'))return db;db.modified_by=currentActor();if(typed)db.updated_at=new Date().toISOString();else db.modified_time=istTimestamp();return db;}
-  async function refreshViews(state){await window.loadInitiativesFromSupabase();if(typeof window.renderProjects==='function')window.renderProjects();if(typeof window.renderDailyTrackerPage==='function')window.renderDailyTrackerPage();if(typeof window.renderAnalyticsDashboard==='function')window.renderAnalyticsDashboard();if(typeof window.renderMilestonesPage==='function')window.renderMilestonesPage();restoreState(state);}
+  async function refreshViews(state){await window.loadInitiativesFromSupabase();restoreState(state);if(typeof window.renderActiveDeliveryWorkspace==='function')window.renderActiveDeliveryWorkspace();restoreState(state);}
   async function applyMilestoneChanges(options={}){
     const ids=normalizeIds(options.milestoneIds),state=captureState(),success=[],failed=[],skipped=[];
+    state.delivery.milestoneId=ids[0]||state.delivery.milestoneId;
     if(!ids.length)return{ok:false,success,failed:[{id:null,message:'No valid Milestone IDs were supplied.'}],skipped};
     if(Object.hasOwn(options.changes||{},'plannerTypeId')||String(options.actionType).toLowerCase()==='restore'){try{await milestoneTypeIntegrity.validate(ids.map(id=>{const row=findMilestone(id);assertPermission(row);return {id,initiative_id:row.initiative.id,...(Object.hasOwn(options.changes||{},'plannerTypeId')?{planner_type_id:options.changes.plannerTypeId}:{}),record_status:String(options.actionType).toLowerCase()==='restore'?'active':row.milestone.recordStatus||'active'};}));}catch(error){return {ok:false,success,failed:ids.map(id=>({id,message:error.message})),skipped};}}
     if(Object.hasOwn(options.changes||{},'plannerTypeId')&&Object.keys(options.changes).every(field=>field==='plannerTypeId')&&String(options.actionType||'edit').toLowerCase()==='edit'){try{const result=await window.milestoneTypeEditing.saveTypes(ids,options.changes.plannerTypeId);await refreshViews(state);return {ok:true,success:result.data.map(record=>({id:record.id,record})),failed,skipped,state};}catch(error){return {ok:false,success:[],failed:ids.map(id=>({id,message:error.message})),skipped,state};}}
@@ -21271,7 +21323,7 @@ function openMilestoneRevisionHistory(pid,mid){
     const typeOnly=Object.entries(changes).filter(([,value])=>value!==undefined).every(([field])=>field==='plannerTypeId');
     const typed=Object.hasOwn(changes,'plannerTypeId'),completionChanged=Object.hasOwn(changes,'completionDate');
     const result=await applyMilestoneChanges({milestoneIds:[id],actionType:!typeOnly&&fields.completionDate&&(!typed||completionChanged)?'complete':'edit',changes,actionData:typeOnly||typed&&!completionChanged?{}:{completionDate:fields.completionDate},impactBelow:document.getElementById('m-impact-below')?.checked===true,sourcePage:'unified-modal',mode:'single'});
-    if(result.ok){window.closeMilestoneModal?.();window.showToast?.('Milestone updated successfully.','success');}else window.showToast?.(result.failed[0]?.message||'Milestone update failed.','error');
+    if(result.ok){window.closeMilestoneModal?.();restoreState(result.state);window.showToast?.('Milestone updated successfully.','success');}else window.showToast?.(result.failed[0]?.message||'Milestone update failed.','error');
   };
 
   window.applySelectedMilestoneChanges=async function(actionType,changes={},actionData={}){const ids=normalizeIds([...(window.dailySelectedMilestones||[]),...(window.overviewSelectedIds||[])]);const result=await applyMilestoneChanges({milestoneIds:ids,actionType,changes,actionData,sourcePage:window.currentWorkspaceView||'multiple',mode:'multiple'});if(result.ok){window.dailySelectedMilestones?.clear?.();window.overviewSelectedIds?.clear?.();if(typeof window.setDailyMultiSelect==='function')window.setDailyMultiSelect(false);if(typeof window.setOverviewMultiSelect==='function')window.setOverviewMultiSelect(false);window.showToast?.(`${result.success.length} Milestone${result.success.length===1?'':'s'} updated.`,'success');}else{result.success.forEach(item=>{window.dailySelectedMilestones?.delete?.(Number(item.id));window.overviewSelectedIds?.delete?.(Number(item.id));});window.showToast?.(`Successful: ${result.success.length}. Failed: ${result.failed.length}. Skipped: ${result.skipped.length}. ${result.failed[0]?.message||''}`,'error');}return result;};
