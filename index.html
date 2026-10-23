@@ -1595,11 +1595,6 @@
             <textarea id="m-actions" rows="2" required placeholder="Specific concrete steps to execute this milestone..." class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"></textarea>
           </div>
 
-          <div>
-            <label for="m-remarks" class="block font-semibold text-slate-700 mb-1">Remarks</label>
-            <textarea id="m-remarks" rows="4" maxlength="10000" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 whitespace-pre-wrap break-words" placeholder="Add milestone remarks..."></textarea>
-          </div>
-
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block font-semibold text-slate-700 mb-1">Owner / Assigned To (User Master) *</label>
@@ -1613,7 +1608,7 @@
 
           <div>
             <label class="block font-semibold text-slate-700 mb-1">Days (Effort)</label>
-            <input type="text" id="m-days" placeholder="e.g. 5, TBD or -" oninput="updateMilestoneRuntimeDates()" onchange="updateMilestoneRuntimeDates()" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
+            <input type="text" id="m-days" placeholder="e.g. 5, TBD or -" oninput="updateMilestoneRuntimeDates(true)" onchange="updateMilestoneRuntimeDates(true)" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
           </div>
 
           <div
@@ -1627,20 +1622,20 @@
       <input
         type="date"
         id="m-start-date"
-        oninput="updateMilestoneRuntimeDates()"
-        onchange="updateMilestoneRuntimeDates()"
-        class="w-full px-2 py-1.5 bg-white border rounded"
+        oninput="updateMilestoneRuntimeDates(true)"
+        onchange="updateMilestoneRuntimeDates(true)"
+        class="milestone-date-control w-full px-2 py-1.5 bg-white border rounded"
       >
       <label for="m-impact-below" class="mt-1 flex items-center gap-1 text-[10px] font-semibold text-red-700"><input id="m-impact-below" type="checkbox"><span class="min-w-0 whitespace-normal">Impact Below Dates?</span></label>
     </div>
 
     <div>
       <label class="block font-medium text-slate-600 mb-1">End Date</label>
-      <input type="date" id="m-end-date" readonly class="w-full px-2 py-1.5 bg-slate-100 border rounded text-slate-700">
+      <input type="date" id="m-end-date" oninput="updateMilestoneRuntimeDates(false)" class="milestone-date-control w-full px-2 py-1.5 bg-white border rounded text-slate-700">
     </div>
     <div>
       <label class="block font-medium text-slate-600 mb-1">Deadline</label>
-      <input type="date" id="m-deadline" readonly class="w-full px-2 py-1.5 bg-slate-100 border rounded text-slate-700">
+      <input type="date" id="m-deadline" oninput="updateMilestoneRuntimeDates(false)" class="milestone-date-control w-full px-2 py-1.5 bg-white border rounded text-slate-700">
     </div>
     <div>
       <label class="block font-medium text-slate-600 mb-1">
@@ -1650,10 +1645,15 @@
       <input
         type="date"
         id="m-completion-date"
-        class="w-full px-2 py-1.5 bg-white border rounded"
+        class="milestone-date-control w-full px-2 py-1.5 bg-white border rounded"
       >
     </div>
   </div>
+
+            <div>
+              <label for="m-remarks" class="block font-semibold text-slate-700 mb-1">Remarks</label>
+              <textarea id="m-remarks" rows="4" maxlength="10000" class="w-full min-w-0 px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 whitespace-pre-wrap break-words" placeholder="Add milestone remarks..."></textarea>
+            </div>
             
           <div class="pt-4 border-t flex justify-end gap-2">
             <button type="button" onclick="closeMilestoneModal()" class="px-4 py-1.5 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-medium rounded-lg">Cancel</button>
@@ -2524,6 +2524,8 @@
         description: row.description || '',
         functional_engineer_id: row.functional_engineer_id ?? null,
         technical_engineer_id: row.technical_engineer_id ?? null,
+        functional_engineer_name: row.functional_engineer_name || '',
+        technical_engineer_name: row.technical_engineer_name || '',
         id:
     Number(row.id),
 
@@ -3443,37 +3445,45 @@
     select.value = matchingOption?.value || selectedValue;
   }
 
-  function updateMilestoneRuntimeDates() {
+  function milestoneDateInputValue(value) {
+    const raw = String(value ?? '').trim();
+    if (!raw) return '';
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : normalizeExcelDate(raw);
+  }
+
+  function updateMilestoneRuntimeDates(recalculateDates = false) {
     const days = document.getElementById('m-days')?.value || '';
     const startField = document.getElementById('m-start-date');
     const projectId = document.getElementById('m-project-id')?.value;
     const milestoneId = document.getElementById('m-id')?.value;
     const project = projects.find(item => Number(item.id) === Number(projectId));
     const milestone = project?.milestones?.find(item => Number(item.id) === Number(milestoneId));
-    const startDate = project && startField
-      ? getMilestoneScheduleStartDate(project,milestone||{id:null,trackId:document.getElementById('m-track-id')?.value||null},startField.value)
+    if (!recalculateDates) return;
+    const scheduleMilestone = milestone || { id: null, trackId: document.getElementById('m-track-id')?.value || null };
+    const startDate = project && scheduleMilestone.scheduleMode === 'parallel'
+      ? getMilestoneScheduleStartDate(project, scheduleMilestone, startField?.value || '')
       : startField?.value || '';
-    if(startField)startField.value=startDate;
+    if (startField && startDate) startField.value = startDate;
     const calculatedDate = calculateMilestoneSchedule(milestone || {}, {days,startDate}).endDate;
     const endDateField = document.getElementById('m-end-date');
     const deadlineField = document.getElementById('m-deadline');
-    if (endDateField) endDateField.value = calculatedDate;
-    if (deadlineField) deadlineField.value = calculatedDate;
+    if (endDateField) endDateField.value = calculatedDate || '';
+    if (deadlineField) deadlineField.value = calculatedDate || '';
   }
 
-  function updateInlineMilestoneRuntimeDates(milestoneId) {
+  function updateInlineMilestoneRuntimeDates(milestoneId, recalculateDates = false) {
     const days = document.getElementById(`inline-days-${milestoneId}`)?.value || '';
     const startField=document.getElementById(`inline-start-date-${milestoneId}`);
     const project=projects.find(item=>(item.milestones||[]).some(milestone=>Number(milestone.id)===Number(milestoneId)));
     const milestone=project?.milestones?.find(item=>Number(item.id)===Number(milestoneId));
-    const startDate=project&&milestone?getMilestoneScheduleStartDate(project,milestone,startField?.value||''):startField?.value||'';
-    if(startField)startField.value=startDate;
+    if (!recalculateDates) return;
+    const startDate=project&&milestone?.scheduleMode==='parallel'?getMilestoneScheduleStartDate(project,milestone,startField?.value||''):startField?.value||'';
+    if(startField&&startDate)startField.value=startDate;
     const calculatedDate = calculateMilestoneSchedule(milestone || {}, {days,startDate}).endDate;
-    const displayValue = formatDate(calculatedDate);
     const endDateField = document.getElementById(`inline-end-date-${milestoneId}`);
     const deadlineField = document.getElementById(`inline-deadline-${milestoneId}`);
-    if (endDateField) endDateField.textContent = displayValue;
-    if (deadlineField) deadlineField.textContent = displayValue;
+    if (endDateField) endDateField.value = calculatedDate || '';
+    if (deadlineField) deadlineField.value = calculatedDate || '';
   }
 
   function getMilestoneScheduleStartDate(project,milestone,fallbackStartDate=''){
@@ -6459,28 +6469,37 @@
     users: [],
     fields: ['functional_engineer_id', 'technical_engineer_id'],
     labels: ['Functional Engineer', 'Technical Engineer'],
-    importPayload(row, prefix = '', record = null) {
+    importPayload(row, prefix = '', record = null, includeNames = false) {
       return Object.fromEntries(this.fields.flatMap((field, index) => {
         const heading = prefix + this.labels[index] + ' ID';
         if (!Object.hasOwn(row, heading) || String(row[heading] ?? '').trim() === '') return [];
         const value = String(row[heading]).trim();
         if (String(record?.[field] ?? '') !== value && !this.users.some(user => String(user.id) === value && user.is_active === true)) throw new Error(`${heading}: select an active User Master ID.`);
-        return [[field, Number(value)]];
+        const assignments = [[field, Number(value)]];
+        if (includeNames) {
+          const nameField = field.replace(/_id$/, '_name');
+          assignments.push([nameField, this.name(value, record?.[nameField])]);
+        }
+        return assignments;
       }));
     },
-    display(id) {
-      if (id == null || id === '') return 'Not Assigned';
+    name(id, fallback = '') {
+      if (id == null || id === '') return null;
       const user = this.users.find(item => String(item.id) === String(id));
-      return user?.full_name || user?.name || user?.email || `User #${id}`;
+      return user?.full_name || user?.name || user?.email || fallback || null;
+    },
+    display(id, fallback = '') {
+      if (id == null || id === '') return 'Not Assigned';
+      return this.name(id, fallback) || `User #${id}`;
     },
     picker(id, value = '', allowClear = true) {
       const selected = String(value ?? '');
       const users = this.users.filter(user => user.is_active === true || String(user.id) === selected);
-      const options = users.map(user => `<option value="${escapeHtml(String(user.id))}" ${String(user.id) === selected ? 'selected' : ''} ${user.is_active !== true ? 'disabled' : ''}>${escapeHtml(user.full_name || user.email || String(user.id))}${user.is_active !== true ? ' (Inactive)' : ''}</option>`).join('');
+      const options = users.map(user => `<option value="${escapeHtml(String(user.id))}" ${String(user.id) === selected ? 'selected' : ''} ${user.is_active !== true ? 'disabled' : ''}>${escapeHtml(user.full_name || user.name || user.email || String(user.id))}${user.is_active !== true ? ' (Inactive)' : ''}</option>`).join('');
       const empty = allowClear ? 'Not Assigned' : '-- Choose a user --';
       const user = users.find(item => String(item.id) === selected);
-      const label = user ? (user.full_name || user.email || String(user.id)) + (user.is_active !== true ? ' (Inactive)' : '') : empty;
-      const buttons = `<button type="button" data-engineer-value="" onclick="engineerAssignments.choose(this)">${empty}</button>` + users.map(user => `<button type="button" data-engineer-value="${escapeHtml(String(user.id))}" ${user.is_active !== true ? 'disabled' : ''} onclick="engineerAssignments.choose(this)">${escapeHtml(user.full_name || user.email || String(user.id))}${user.is_active !== true ? ' (Inactive)' : ''}</button>`).join('');
+      const label = user ? (user.full_name || user.name || user.email || String(user.id)) + (user.is_active !== true ? ' (Inactive)' : '') : empty;
+      const buttons = `<button type="button" data-engineer-value="" onclick="engineerAssignments.choose(this)">${empty}</button>` + users.map(user => `<button type="button" data-engineer-value="${escapeHtml(String(user.id))}" ${user.is_active !== true ? 'disabled' : ''} onclick="engineerAssignments.choose(this)">${escapeHtml(user.full_name || user.name || user.email || String(user.id))}${user.is_active !== true ? ' (Inactive)' : ''}</button>`).join('');
       return `<div class="engineer-picker"><select id="${id}" hidden onchange="engineerAssignments.sync(this)"><option value="">${empty}</option>${options}</select><details ontoggle="engineerAssignments.toggle(this)" onkeydown="engineerAssignments.keydown(event)"><summary class="flex items-center justify-between gap-2 w-full px-3 py-2 border rounded-lg bg-white text-slate-700"><span>${escapeHtml(label)}</span><i data-lucide="chevron-down" class="w-3 h-3 shrink-0" aria-hidden="true"></i></summary><div class="engineer-user-menu"><input type="search" aria-label="Search users" placeholder="Search users" class="w-full px-2 py-1.5 border rounded mb-1" oninput="engineerAssignments.search(this)"><div class="engineer-user-options">${buttons}<div class="engineer-no-users px-2 py-2 text-slate-500" role="status" hidden>No matching users</div></div></div></details></div>`;
     },
     search(input) {
@@ -6532,14 +6551,20 @@
       const textField = prefix === 'pg' ? 'purpose' : 'description';
       document.getElementById(`${prefix}-${textField}`).value = record?.[textField] || '';
     },
-    payload(prefix, record) {
+    payload(prefix, record, includeNames = false) {
       return Object.fromEntries(this.fields.flatMap(field => {
         const control = document.getElementById(`${prefix}-${field}`);
         if (!control) return [];
         const value = control.value;
         const previous = String(record?.[field] ?? '');
         if (value && value !== previous && !this.users.some(user => String(user.id) === value && user.is_active === true)) throw new Error('Select an active engineer.');
-        return [[field, value ? Number(value) : null]];
+        const assignments = [[field, value ? Number(value) : null]];
+        if (includeNames) {
+          const nameField = field.replace(/_id$/, '_name');
+          const previousName = value === previous ? record?.[nameField] : '';
+          assignments.push([nameField, this.name(value, previousName)]);
+        }
+        return assignments;
       }));
     }
   };
@@ -7801,20 +7826,20 @@
                 </div>
               ` : `
                 <div class="overflow-x-auto custom-scrollbar">
-                  <table class="w-full text-left border-collapse text-xs">
+                  <table class="milestone-resizable-grid w-full text-left border-collapse text-xs">
                     <thead class="bg-slate-100/75 text-slate-600 uppercase font-semibold border-b border-slate-200 text-[10px]">
                       <tr>  
                         <th class="w-10 px-2" aria-label="Add milestone"></th>
                         <th class="py-2.5 px-3 min-w-[220px]">Milestone - Actions</th>  
                         <th class="py-2.5 px-3 min-w-[140px]">Milestone Owner</th>
                         <th class="py-2.5 px-3 min-w-[140px]">Dependency</th>
-                        <th class="py-2.5 px-3 min-w-[180px] max-w-[360px]">Remarks</th>
                         <th class="py-2.5 px-3 min-w-[120px] text-center">Status</th>
                         <th class="py-2.5 px-3 min-w-[80px]">Days</th>
-                        <th class="py-2.5 px-3 min-w-[90px]">Start Date</th>
-                        <th class="py-2.5 px-3 min-w-[90px]">End Date</th>
-                        <th class="py-2.5 px-3 min-w-[90px]">Deadline</th>
-                        <th class="py-2.5 px-3 min-w-[90px]">Completion Date</th>
+                        <th class="milestone-date-column py-2.5 px-3">Start Date</th>
+                        <th class="milestone-date-column py-2.5 px-3">End Date</th>
+                        <th class="milestone-date-column py-2.5 px-3">Deadline</th>
+                        <th class="milestone-date-column py-2.5 px-3">Completion Date</th>
+                        <th class="milestone-remarks-column py-2.5 px-3">Remarks</th>
                         <th class="py-2.5 px-3 min-w-[70px] text-center">Deviation</th>
                         <th class="py-2.5 px-3 min-w-[100px]">Day Status</th>
                         <th class="py-2.5 px-3 text-center w-16">Actions</th>
@@ -7826,8 +7851,8 @@
                           return renderInlineMilestoneRow(p, m, canEdit);
                         }
                         const days = m.days || '';
-                        const calculatedEndDate = calculateMilestoneEndDate(days, m.startDate);
-                        const calculatedDeadline = calculatedEndDate;
+                        const calculatedEndDate = m.endDate || '';
+                        const calculatedDeadline = m.deadline || '';
                         const mStat = getEffectiveMilestoneStatus({
                           ...m,
                           days,
@@ -7871,15 +7896,15 @@
                               ${getMilestoneUserCell(m.owner)}
                             </td>
                             <td class="py-2.5 px-3">${getMilestoneUserCell(m.dependency)}</td>
-                            <td class="py-2.5 px-3 min-w-[180px] max-w-[360px] whitespace-pre-wrap break-words">${renderMilestoneRemarks(m.milestoneRemarks)}</td>
                             <td class="py-2.5 px-3 whitespace-nowrap text-center">
     ${getStatusBadge(mStat)}
   </td>
                             <td class="py-2.5 px-3 font-mono text-slate-700">${escapeHtml(days || '-')}</td>
-                            <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(m.startDate)}</td>
-                            <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(calculatedEndDate)}</td>
-                            <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(calculatedDeadline)}</td>
-                            <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(m.completionDate)}</td>
+                            <td class="milestone-date-column py-2.5 px-3 font-mono text-slate-700">${formatDate(m.startDate)}</td>
+                            <td class="milestone-date-column py-2.5 px-3 font-mono text-slate-700">${formatDate(calculatedEndDate)}</td>
+                            <td class="milestone-date-column py-2.5 px-3 font-mono text-slate-700">${formatDate(calculatedDeadline)}</td>
+                            <td class="milestone-date-column py-2.5 px-3 font-mono text-slate-700">${formatDate(m.completionDate)}</td>
+                            <td class="milestone-remarks-column py-2.5 px-3">${renderMilestoneRemarks(m.milestoneRemarks)}</td>
                             <td class="py-2.5 px-3 text-center font-mono">${formatMilestoneTotalOverallDeviation(m)}</td>
                             <td class="py-2.5 px-3">${dayStatus || '-'}</td>
                             <td class="py-2.5 px-3">
@@ -8137,7 +8162,10 @@
   }
 
   function renderAgileTracks(project, matchingMilestones, canEdit) {
-    const tracks = getVisibleInitiativeTracks(project);
+    const tracks = getVisibleInitiativeTracks(project).slice().sort((first, second) =>
+      Number(first.sequenceNo || first.displayOrder || Number.MAX_SAFE_INTEGER) - Number(second.sequenceNo || second.displayOrder || Number.MAX_SAFE_INTEGER) ||
+      Number(first.id) - Number(second.id)
+    );
     const milestones = [...(matchingMilestones || [])].sort(compareMilestonesChronologically);
 
     // Keep every Track as one consolidated card. Milestones within each Track are
@@ -8167,8 +8195,200 @@
       return renderAgileTrackCards(project, [], canEdit, []);
     }
 
-    return unassignedRows + groupedTrackCards;
+    return unassignedRows + `<div class="track-order-list" data-track-order-list="${Number(project.id)}">${groupedTrackCards}</div>`;
   }
+
+  function getOrderedInitiativeTracks(project) {
+    return [...(project?.tracks || [])].sort((first, second) =>
+      Number(first.sequenceNo || first.displayOrder || Number.MAX_SAFE_INTEGER) - Number(second.sequenceNo || second.displayOrder || Number.MAX_SAFE_INTEGER) ||
+      Number(first.id) - Number(second.id)
+    );
+  }
+
+  function trackReorderBlockReason(project) {
+    if (!project || !canEditInitiative(project)) return 'You do not have permission to reorder Tracks.';
+    if (currentWorkspaceView !== 'overview') return 'Track reordering is available from Project Overview.';
+    if (getSelectedRecordStatusFilter() !== 'active') return 'Select Active Records before reordering Tracks.';
+    if (activeKpiFilter) return 'Clear the KPI filter before reordering Tracks.';
+    if ((project.tracks || []).some(track => track.recordStatus === 'deleted')) return 'Restore or remove archived Tracks before reordering this list.';
+    const filterBar = document.querySelector('[data-delivery-filter-page="overview"]');
+    const activeFilter = [...(filterBar?.querySelectorAll('input,select') || [])].some(control => {
+      if (control.id === 'filter-record-status' || control.type === 'checkbox' || control.disabled) return false;
+      return String(control.value || '').trim() !== '';
+    });
+    if (activeFilter) return 'Clear Overview filters before reordering Tracks.';
+    return '';
+  }
+
+  function trackCardIdentity(card) {
+    const editButton = card.querySelector('.track-card-header button[onclick^="openTrackModal("]');
+    const match = (editButton?.getAttribute('onclick') || '').match(/openTrackModal\((\d+)\s*,\s*(\d+)\)/);
+    if (!match) return null;
+    return { initiativeId: Number(match[1]), trackId: Number(match[2]) };
+  }
+
+  function updateTrackOrderDom(project) {
+    const list = document.querySelector(`.track-order-list[data-track-order-list="${Number(project.id)}"]`);
+    if (!list) return;
+    const cards = new Map([...list.querySelectorAll(':scope > [data-track-order-id]')].map(card => [Number(card.dataset.trackOrderId), card]));
+    for (const track of getOrderedInitiativeTracks(project)) {
+      const card = cards.get(Number(track.id));
+      if (!card) continue;
+      const title = card.querySelector('.track-card-title');
+      if (title) title.textContent = `Track ${track.sequenceNo} - ${track.name}`;
+      list.appendChild(card);
+    }
+    decorateTrackReorderControls();
+  }
+
+  function clearTrackDragState() {
+    window._draggingTrack = null;
+    document.querySelectorAll('.track-order-dragging,.track-order-drop-before,.track-order-drop-after').forEach(card => card.classList.remove('track-order-dragging','track-order-drop-before','track-order-drop-after'));
+  }
+
+  function decorateTrackReorderControls() {
+    document.querySelectorAll('#projects-container [data-track-completed]').forEach(card => {
+      const expandButton = card.querySelector('.track-card-header button[onclick^="toggleMilestoneTrack("]');
+      expandButton?.classList.add('border','border-sky-200','bg-sky-50','text-sky-700','hover:bg-sky-100','hover:text-sky-900');
+      expandButton?.querySelector('svg')?.classList.add('text-sky-700');
+      const identity = trackCardIdentity(card);
+      if (!identity) return;
+      const project = projects.find(item => Number(item.id) === identity.initiativeId);
+      const track = project?.tracks?.find(item => Number(item.id) === identity.trackId);
+      if (!project || !track || track.recordStatus === 'deleted') return;
+      card.dataset.trackOrderId = String(track.id);
+      card.dataset.trackOrderInitiativeId = String(project.id);
+      const actionGroup = card.querySelector('.track-card-header')?.lastElementChild;
+      if (!actionGroup) return;
+      let controls = actionGroup.querySelector('.track-reorder-controls');
+      if (!controls) {
+        controls = document.createElement('div');
+        controls.className = 'track-reorder-controls inline-flex items-center gap-1';
+        controls.innerHTML = '<button type="button" draggable="true" data-track-drag-handle title="Drag to reorder Track" aria-label="Drag to reorder Track" class="track-reorder-handle rounded border border-sky-300 bg-sky-50 p-1.5 text-sky-700 hover:bg-sky-100"><i data-lucide="grip-vertical" class="h-4 w-4"></i></button><button type="button" data-track-move="up" title="Move Track Up" aria-label="Move Track Up" class="rounded border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-100"><i data-lucide="arrow-up" class="h-4 w-4"></i></button><button type="button" data-track-move="down" title="Move Track Down" aria-label="Move Track Down" class="rounded border border-slate-300 bg-white p-1.5 text-slate-600 hover:bg-slate-100"><i data-lucide="arrow-down" class="h-4 w-4"></i></button>';
+        actionGroup.prepend(controls);
+      }
+      const tracks = getOrderedInitiativeTracks(project).filter(item => item.recordStatus !== 'deleted');
+      const index = tracks.findIndex(item => Number(item.id) === Number(track.id));
+      const reason = trackReorderBlockReason(project);
+      const saving = window._trackSequenceSaveLocks?.has(Number(project.id)) === true;
+      const up = controls.querySelector('[data-track-move="up"]');
+      const down = controls.querySelector('[data-track-move="down"]');
+      const drag = controls.querySelector('[data-track-drag-handle]');
+      if (up) { up.disabled = Boolean(reason) || saving || index <= 0; up.title = reason || (index <= 0 ? 'Track is already first' : 'Move Track Up'); up.onclick = () => queueTrackSequenceMove(project.id, track.id, tracks[index - 1]?.id, false); }
+      if (down) { down.disabled = Boolean(reason) || saving || index < 0 || index >= tracks.length - 1; down.title = reason || (index >= tracks.length - 1 ? 'Track is already last' : 'Move Track Down'); down.onclick = () => queueTrackSequenceMove(project.id, track.id, tracks[index + 1]?.id, true); }
+      if (drag) { drag.disabled = Boolean(reason) || saving; drag.draggable = !reason && !saving; drag.title = reason || 'Drag to reorder Track'; }
+      if (reason) controls.setAttribute('aria-label', reason);
+      else controls.removeAttribute('aria-label');
+    });
+    if (window.lucide?.createIcons) window.lucide.createIcons();
+  }
+
+  function queueTrackSequenceMove(initiativeId, sourceTrackId, targetTrackId, afterTarget) {
+    if (targetTrackId == null || Number(sourceTrackId) === Number(targetTrackId)) return;
+    const project = projects.find(item => Number(item.id) === Number(initiativeId));
+    const reason = trackReorderBlockReason(project);
+    if (reason) return showToast(reason, 'info');
+    window._trackSequenceQueues ||= new Map();
+    let queue = window._trackSequenceQueues.get(Number(initiativeId));
+    if (!queue) { queue = { moves: [], timer: null }; window._trackSequenceQueues.set(Number(initiativeId), queue); }
+    queue.moves.push({ sourceTrackId: Number(sourceTrackId), targetTrackId: Number(targetTrackId), afterTarget: Boolean(afterTarget) });
+    clearTimeout(queue.timer);
+    queue.timer = setTimeout(() => flushTrackSequenceMoves(Number(initiativeId)), 160);
+  }
+
+  async function flushTrackSequenceMoves(initiativeId) {
+    const queue = window._trackSequenceQueues?.get(Number(initiativeId));
+    if (!queue?.moves.length) return;
+    window._trackSequenceSaveLocks ||= new Set();
+    if (window._trackSequenceSaveLocks.has(Number(initiativeId))) { queue.timer = setTimeout(() => flushTrackSequenceMoves(Number(initiativeId)), 160); return; }
+    const moves = queue.moves.splice(0);
+    const project = projects.find(item => Number(item.id) === Number(initiativeId));
+    const reason = trackReorderBlockReason(project);
+    if (reason) { queue.moves.length = 0; window._trackSequenceQueues.delete(Number(initiativeId)); return showToast(reason, 'info'); }
+    const originalTracks = [...(project.tracks || [])];
+    const originalValues = new Map(originalTracks.map(track => [Number(track.id), { sequenceNo: track.sequenceNo, displayOrder: track.displayOrder }]));
+    const ordered = getOrderedInitiativeTracks(project);
+    for (const move of moves) {
+      const sourceIndex = ordered.findIndex(track => Number(track.id) === move.sourceTrackId);
+      const targetIndex = ordered.findIndex(track => Number(track.id) === move.targetTrackId);
+      if (sourceIndex < 0 || targetIndex < 0) continue;
+      const [source] = ordered.splice(sourceIndex, 1);
+      const adjustedTargetIndex = ordered.findIndex(track => Number(track.id) === move.targetTrackId);
+      ordered.splice(adjustedTargetIndex + (move.afterTarget ? 1 : 0), 0, source);
+    }
+    if (ordered.every((track, index) => Number(track.id) === Number(originalTracks.slice().sort((a,b)=>Number(a.sequenceNo||a.displayOrder||0)-Number(b.sequenceNo||b.displayOrder||0))[index]?.id))) {
+      if (!queue.moves.length) window._trackSequenceQueues.delete(Number(initiativeId));
+      return;
+    }
+    window._trackSequenceSaveLocks.add(Number(initiativeId));
+    decorateTrackReorderControls();
+    const timestamp = new Date().toISOString();
+    const payload = ordered.map((track, index) => ({ id: Number(track.id), initiative_id: Number(initiativeId), sequence_no: index + 1, display_order: index + 1, updated_at: timestamp }));
+    try {
+      const result = await supabaseClient.from('milestone_tracks').upsert(payload, { onConflict: 'id' }).select('id,initiative_id,sequence_no,display_order');
+      if (result.error) throw result.error;
+      if (!Array.isArray(result.data) || result.data.length !== payload.length) throw new Error('Supabase did not confirm the complete Track order.');
+      const confirmed = new Map(result.data.map(row => [Number(row.id), row]));
+      for (const [index, track] of ordered.entries()) {
+        const row = confirmed.get(Number(track.id));
+        if (!row || Number(row.initiative_id) !== Number(initiativeId) || Number(row.sequence_no) !== index + 1 || Number(row.display_order) !== index + 1) throw new Error('Supabase returned an inconsistent Track order.');
+        track.sequenceNo = index + 1;
+        track.displayOrder = index + 1;
+      }
+      project.tracks = ordered;
+      updateTrackOrderDom(project);
+      showToast('Track order saved.', 'success');
+    } catch (error) {
+      project.tracks = originalTracks;
+      originalTracks.forEach(track => Object.assign(track, originalValues.get(Number(track.id))));
+      updateTrackOrderDom(project);
+      showToast(`Unable to save Track order: ${error?.message || error}`, 'error');
+    } finally {
+      window._trackSequenceSaveLocks.delete(Number(initiativeId));
+      decorateTrackReorderControls();
+      if (queue.moves.length) { queue.timer = setTimeout(() => flushTrackSequenceMoves(Number(initiativeId)), 0); }
+      else window._trackSequenceQueues.delete(Number(initiativeId));
+    }
+  }
+
+  (function installTrackReorderInteractions() {
+    if (window._trackReorderInteractionsInstalled) return;
+    window._trackReorderInteractionsInstalled = true;
+    document.addEventListener('dragstart', event => {
+      const handle = event.target.closest?.('[data-track-drag-handle]');
+      const card = handle?.closest('[data-track-order-id]');
+      if (!handle || !card || handle.disabled || !handle.draggable) { if (handle) event.preventDefault(); return; }
+      const initiativeId = Number(card.dataset.trackOrderInitiativeId), trackId = Number(card.dataset.trackOrderId);
+      const project = projects.find(item => Number(item.id) === initiativeId);
+      const reason = trackReorderBlockReason(project);
+      if (reason) { event.preventDefault(); showToast(reason, 'info'); return; }
+      window._draggingTrack = { initiativeId, trackId };
+      event.dataTransfer?.setData('text/plain', `${initiativeId}:${trackId}`);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+      card.classList.add('track-order-dragging');
+    }, true);
+    document.addEventListener('dragover', event => {
+      const target = event.target.closest?.('[data-track-order-id]'), dragging = window._draggingTrack;
+      if (!target || !dragging || Number(target.dataset.trackOrderInitiativeId) !== dragging.initiativeId) return;
+      event.preventDefault();
+      document.querySelectorAll('.track-order-drop-before,.track-order-drop-after').forEach(card => card.classList.remove('track-order-drop-before','track-order-drop-after'));
+      const after = event.clientY > target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
+      target.classList.add(after ? 'track-order-drop-after' : 'track-order-drop-before');
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+    }, true);
+    document.addEventListener('drop', event => {
+      const target = event.target.closest?.('[data-track-order-id]'), dragging = window._draggingTrack;
+      if (!target || !dragging || Number(target.dataset.trackOrderInitiativeId) !== dragging.initiativeId) return;
+      event.preventDefault();
+      const after = target.classList.contains('track-order-drop-after');
+      queueTrackSequenceMove(dragging.initiativeId, dragging.trackId, Number(target.dataset.trackOrderId), after);
+      clearTrackDragState();
+    }, true);
+    document.addEventListener('dragend', clearTrackDragState, true);
+    const previousRender = renderProjects;
+    renderProjects = function(...args) { const result = previousRender.apply(this, args); requestAnimationFrame(decorateTrackReorderControls); return result; };
+    requestAnimationFrame(decorateTrackReorderControls);
+  })();
 
 
   function renderTrackMilestones(project, milestones, trackId = null) {
@@ -8193,7 +8413,7 @@
 
       return `  
       <div class="overflow-x-auto custom-scrollbar">  
-        <table class="w-full text-left border-collapse text-xs">  
+        <table class="milestone-resizable-grid w-full text-left border-collapse text-xs">  
           <thead class="bg-slate-50 text-slate-600 uppercase font-semibold border-b border-slate-200 text-[10px]">
             <tr>
             
@@ -8201,13 +8421,13 @@
               <th class="py-2.5 px-3 min-w-[200px]">Actions / Deliverables</th>
               <th class="py-2.5 px-3 min-w-[130px]">Owner</th>
               <th class="py-2.5 px-3 min-w-[140px]">Dependency</th>
-              <th class="py-2.5 px-3 min-w-[180px] max-w-[360px]">Remarks</th>
               <th class="py-2.5 px-3 min-w-[120px] text-center">Status</th>
               <th class="py-2.5 px-3 min-w-[80px]">Days</th>
-              <th class="py-2.5 px-3 min-w-[90px]">Start Date</th>
-              <th class="py-2.5 px-3 min-w-[90px]">End Date</th>
-              <th class="py-2.5 px-3 min-w-[90px]">Deadline</th>
-              <th class="py-2.5 px-3 min-w-[90px]">Completion</th>
+              <th class="milestone-date-column py-2.5 px-3">Start Date</th>
+              <th class="milestone-date-column py-2.5 px-3">End Date</th>
+              <th class="milestone-date-column py-2.5 px-3">Deadline</th>
+              <th class="milestone-date-column py-2.5 px-3">Completion</th>
+              <th class="milestone-remarks-column py-2.5 px-3">Remarks</th>
               <th class="py-2.5 px-3 min-w-[70px] text-center">Deviation</th>
               <th class="py-2.5 px-3 min-w-[100px]">Day Status</th>
               <th class="py-2.5 px-3 text-center w-16">Actions</th>
@@ -8218,8 +8438,8 @@
               if (inlineMilestoneEditId === Number(m.id)) {
                 return renderInlineMilestoneRow(project, m, canEdit);
               }
-              const calculatedEndDate = calculateMilestoneEndDate(m.days, m.startDate);
-              const calculatedDeadline = calculatedEndDate;
+              const calculatedEndDate = m.endDate || '';
+              const calculatedDeadline = m.deadline || '';
               const mStat = getEffectiveMilestoneStatus({...m, endDate: calculatedEndDate, deadline: calculatedDeadline});
               const dev = calculateDeviation(calculatedDeadline, m.startDate, m.completionDate);
               const dayStatus = calculateMilestoneDayStatus(calculatedDeadline, m.completionDate);
@@ -8245,13 +8465,13 @@
                     ${getMilestoneUserCell(m.owner)}
                   </td>
                   <td class="py-2.5 px-3">${getMilestoneUserCell(m.dependency)}</td>
-                  <td class="py-2.5 px-3 min-w-[180px] max-w-[360px] whitespace-pre-wrap break-words">${renderMilestoneRemarks(m.milestoneRemarks)}</td>
                   <td class="py-2.5 px-3 whitespace-nowrap text-center">${getStatusBadge(mStat)}</td>
                   <td class="py-2.5 px-3 font-mono text-slate-700">${escapeHtml(m.days || '-')}</td>
-                  <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(m.startDate)}</td>
-                  <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(calculatedEndDate)}</td>
-                  <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(calculatedDeadline)}</td>
-                  <td class="py-2.5 px-3 font-mono text-slate-700">${formatDate(m.completionDate)}</td>
+                  <td class="milestone-date-column py-2.5 px-3 font-mono text-slate-700">${formatDate(m.startDate)}</td>
+                  <td class="milestone-date-column py-2.5 px-3 font-mono text-slate-700">${formatDate(calculatedEndDate)}</td>
+                  <td class="milestone-date-column py-2.5 px-3 font-mono text-slate-700">${formatDate(calculatedDeadline)}</td>
+                  <td class="milestone-date-column py-2.5 px-3 font-mono text-slate-700">${formatDate(m.completionDate)}</td>
+                  <td class="milestone-remarks-column py-2.5 px-3">${renderMilestoneRemarks(m.milestoneRemarks)}</td>
                   <td class="py-2.5 px-3 text-center font-mono">${formatMilestoneTotalOverallDeviation(m)}</td>
                   <td class="py-2.5 px-3">${dayStatus || '-'}</td>
                   <td class="py-2.5 px-3">
@@ -8290,6 +8510,33 @@
         </table>
       </div>
     `;
+  }
+
+  function refreshMilestoneRowInPlace(project, milestoneId) {
+    const milestone=project?.milestones?.find(item=>Number(item.id)===Number(milestoneId));
+    if(!project||!milestone||Number(inlineMilestoneEditId)===Number(milestoneId))return false;
+    const selector=`tr[data-inline-milestone-project-id="${Number(project.id)}"][data-inline-milestone-id="${Number(milestone.id)}"]`;
+    const current=document.querySelector(selector);
+    if(!current&&currentWorkspaceView==='milestones'){
+      const flatRow=[...document.querySelectorAll('#flat-list-body tr')].find(row=>{
+        const button=row.querySelector('button[onclick^="openMilestoneModal("]');
+        const match=(button?.getAttribute('onclick')||'').match(/openMilestoneModal\(\s*\d+\s*,\s*(\d+)/);
+        return match&&Number(match[1])===Number(milestone.id);
+      });
+      if(!flatRow)return false;
+      const track=(project.tracks||[]).find(item=>Number(item.id)===Number(milestone.trackId))||null;
+      const cells=flatConfig().row({program:flatProgram(project),initiative:project,track,milestone});
+      flatRow.innerHTML=cells.map(cell=>`<td class="px-3 py-3 align-top whitespace-nowrap">${cell}</td>`).join('');
+      return true;
+    }
+    if(!current)return false;
+    const holder=document.createElement('div');
+    holder.innerHTML=renderTrackMilestones(project,[milestone],milestone.trackId??null);
+    const replacement=holder.querySelector('tr[data-inline-milestone-id]');
+    if(!replacement)return false;
+    current.replaceWith(replacement);
+    lucide.createIcons();
+    return true;
   }
 
   function startInlineMilestoneEdit(projectId, milestoneId) {
@@ -8417,6 +8664,7 @@
         showToast(`Unable to update following milestone dates: ${error.message}`, 'error');
         return false;
       }
+      refreshMilestoneRowInPlace(project, milestone.id);
 
       referenceDate = getReferenceDate(milestone);
     }
@@ -8460,7 +8708,10 @@
     const el = name => document.getElementById(`${name}-${milestoneId}`);
     const val = name => el(name)?.value.trim() || '';
     const actions=val('inline-actions'), owner=val('inline-owner'), dependency=val('inline-dependency'), remarks=val('inline-remarks'), days=val('inline-days'), completionDate=val('inline-completion-date');
-    const startDate=getMilestoneScheduleStartDate(project,milestone,val('inline-start-date'));
+    const scheduleMode=milestone.scheduleMode==='parallel'?'parallel':'sequential';
+    const enteredStartDate=val('inline-start-date');
+    const startDate=scheduleMode==='parallel'?getMilestoneScheduleStartDate(project,milestone,enteredStartDate):enteredStartDate;
+    const endDate=val('inline-end-date'),deadline=val('inline-deadline');
     const impactBelow = el('inline-impact-below')?.checked === true;
     if(!actions){showToast('Actions and Milestoner Owner are required.','error');el('inline-actions')?.focus();return false;}
     if(!owner){showToast('Actions and Milestoner Owner are required.','error');el('inline-owner')?.focus();return false;}
@@ -8469,9 +8720,7 @@
     const duplicate=(project.milestones||[]).some(item=>Number(item.id)!==Number(milestoneId||0)&&item.recordStatus!=='deleted'&&Number(item.trackId||0)===Number(milestone.trackId||0)&&String(item.actions||item.title||'').trim().toLowerCase()===actions.toLowerCase());
     if(duplicate){showToast('An active Milestone with the same action already exists in this Initiative and Track.','error');el('inline-actions')?.focus();return false;}
     const schedule=calculateMilestoneSchedule(milestone,{days,startDate});
-    const endDate=schedule.endDate, deadline=schedule.deadline;
     const status=getEffectiveMilestoneStatus({...milestone,days,startDate,endDate,deadline,completionDate});
-    const scheduleMode=milestone.scheduleMode==='parallel'?'parallel':'sequential';
     const milestoneRecord={actions,owner,dependency:dependency||null,days:normalizeMilestoneDays(days),start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,completion_date:completionDate||null,status,deviation_days:calculateDeviation(deadline,startDate,completionDate)||null,record_status:milestone.recordStatus||'active',schedule_mode:scheduleMode,...(scheduleMode==='parallel'?{reference_milestone_id:milestone.referenceMilestoneId||null}:{})};
     const plannerTypeControl=el('inline-planner-type');if(plannerTypeControl)milestoneRecord.planner_type_id=plannerTypeControl.value||null;
     if(schedule.hasHistory)Object.assign(milestoneRecord,{start_date:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),deviation_days:schedule.deviationDays,remarks:schedule.remarks});
@@ -8500,7 +8749,7 @@
       if(impactBelow && !await cascadeTrackMilestoneSchedule(project,milestone.id))return false;
       await synchronizeInitiativeRevisedEndDates([project]);
       if(addNextRow){const savedId=milestone.id,savedTrackId=milestone.trackId||null;addMilestoneInline(projectId,savedTrackId,null,savedId);requestAnimationFrame(()=>{window.scrollTo(scrollX,scrollY);requestAnimationFrame(()=>{const input=document.getElementById(`inline-actions-${inlineMilestoneEditId}`);input?.focus({preventScroll:true});input?.scrollIntoView({block:'nearest',inline:'nearest'});});});}
-      else{viewState.milestoneId=milestone.id;renderProjects();restoreDeliveryViewState(viewState);}
+      else{viewState.milestoneId=milestone.id;refreshMilestoneRowInPlace(project,milestone.id);restoreDeliveryViewState(viewState);}
       showToast('Milestone saved successfully.','success');return true;
     }catch(error){console.error('Unable to save Milestone:',error);showToast(`Unable to save Milestone: ${error?.message||error}`,'error');return false;}
     finally{window.inlineMilestoneSaveLocks.delete(saveKey);document.querySelectorAll(`[id$="-${milestoneId}"]`).forEach(c=>{if('disabled' in c)c.disabled=false;});}
@@ -8798,8 +9047,8 @@
     const isDraft = Number(id) < 0;
     const track = (project.tracks || []).find(item => Number(item.id) === Number(milestone.trackId));
     const days = milestone.days || '';
-    const endDate = calculateMilestoneEndDate(days, milestone.startDate);
-    const deadline = endDate;
+    const endDate = milestoneDateInputValue(milestone.endDate) || '';
+    const deadline = milestoneDateInputValue(milestone.deadline) || '';
     const status = getEffectiveMilestoneStatus({
       ...milestone,
       days,
@@ -8828,13 +9077,13 @@
         <td class="py-2 px-3 milestone-action-text"><textarea id="inline-actions-${id}" rows="2" class="milestone-cell-control milestone-action-input w-full px-2 py-1 border rounded">${escapeHtml(milestone.actions || '')}</textarea></td>
         <td class="py-2 px-3"><select id="inline-owner-${id}" class="milestone-cell-control w-full px-2 py-1 border rounded bg-white">${getMilestoneUserOptions(milestone.owner || '')}</select></td>
         <td class="py-2 px-3"><select id="inline-dependency-${id}" class="milestone-cell-control w-full px-2 py-1 border rounded bg-white">${getMilestoneUserOptions(milestone.dependency || '')}</select></td>
-        <td class="py-2 px-3 min-w-[180px]"><textarea id="inline-remarks-${id}" rows="3" maxlength="10000" aria-label="Milestone Remarks" class="milestone-cell-control w-full min-w-[160px] px-2 py-1 border rounded whitespace-pre-wrap break-words">${escapeHtml(milestone.milestoneRemarks || '')}</textarea></td>
         <td class="py-2 px-3 text-center">${getStatusBadge(status || '-')}</td>
-        <td class="py-2 px-3"><input id="inline-days-${id}" value="${escapeHtml(days)}" placeholder="5 / TBD / -" oninput="updateInlineMilestoneRuntimeDates(${id})" onchange="updateInlineMilestoneRuntimeDates(${id})" class="milestone-cell-control w-full px-2 py-1 border rounded"></td>
-        <td class="py-2 px-3"><input id="inline-start-date-${id}" type="date" value="${escapeHtml(milestone.startDate || '')}" oninput="updateInlineMilestoneRuntimeDates(${id})" onchange="updateInlineMilestoneRuntimeDates(${id})" class="milestone-cell-control w-full px-2 py-1 border rounded">${milestoneScheduleImpactControl(`inline-impact-below-${id}`)}</td>
-        <td id="inline-end-date-${id}" class="py-2 px-3 font-mono">${formatDate(endDate)}</td>
-        <td id="inline-deadline-${id}" class="py-2 px-3 font-mono">${formatDate(deadline)}</td>
-        <td class="py-2 px-3"><input id="inline-completion-date-${id}" type="date" value="${escapeHtml(milestone.completionDate || '')}" class="milestone-cell-control w-full px-2 py-1 border rounded"></td>
+        <td class="py-2 px-3"><input id="inline-days-${id}" value="${escapeHtml(days)}" placeholder="5 / TBD / -" oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control w-full px-2 py-1 border rounded"></td>
+        <td class="milestone-date-column py-2 px-3"><input id="inline-start-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.startDate))}" oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded">${milestoneScheduleImpactControl(`inline-impact-below-${id}`)}</td>
+        <td class="milestone-date-column py-2 px-3"><input id="inline-end-date-${id}" type="date" value="${escapeHtml(endDate)}" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
+        <td class="milestone-date-column py-2 px-3"><input id="inline-deadline-${id}" type="date" value="${escapeHtml(deadline)}" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
+        <td class="milestone-date-column py-2 px-3"><input id="inline-completion-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.completionDate))}" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
+        <td class="milestone-remarks-column py-2 px-3"><textarea id="inline-remarks-${id}" rows="3" maxlength="10000" aria-label="Milestone Remarks" class="milestone-cell-control milestone-remarks-editor w-full px-2 py-1 border rounded whitespace-pre-wrap break-words">${escapeHtml(milestone.milestoneRemarks || '')}</textarea></td>
         <td class="py-2 px-3 text-center font-mono">${deviation === '' ? '-' : deviation}</td>
         <td class="py-2 px-3 milestone-inline-day-status">${dayStatus || '-'}</td>
         <td class="py-2 px-3 align-middle milestone-inline-actions">
@@ -9858,7 +10107,7 @@
       const name=String(row['Initiative Name*']||'').trim(); if(!name) throw new Error('Initiative Name is required.');
       const programName=String(row['Program Name']||'').trim().toLowerCase(); const program=programs.find(p=>String(p.name).trim().toLowerCase()===programName);
       const sequence_no=await getNextInitiativeSequence(); const start=normalizeExcelDate(row['Start Date']), end=normalizeExcelDate(row['Target End Date']), actual=normalizeExcelDate(row['Actual End Date']);
-      const {error}=await supabaseClient.from('initiatives').insert({...engineerAssignments.importPayload(row),sequence_no,program_id:program?.id||null,title:name,description:row.Description||null,initiative_type:row['Type*']||null,cr_no:row['CR No']||null,vertical:row['Vertical*']||null,delivery_method:row['Delivery Method*']||'Waterfall',business_owner:row['Business Owner*']||null,assigned_to:row['Assigned To*']||null,start_date:start||null,target_end_date:end||null,revised_start_date:normalizeExcelDate(row['Revised Start Date'])||null,revised_end_date:normalizeExcelDate(row['Revised End Date'])||null,actual_end_date:actual||null,impact_category:row['Impact Category*']||null,measurable_impact:row['Measurable Impact*']||null,business_benefit:row['Business Benefit*']||null,initiative_status:evaluateProjectStatus(name,normalizeExcelDate(row['Revised Start Date'])||start,getEffectiveEndDate(end,normalizeExcelDate(row['Revised End Date'])),actual),record_status:'active',updated_at:new Date().toISOString()});
+      const {error}=await supabaseClient.from('initiatives').insert({...engineerAssignments.importPayload(row,'',null,true),sequence_no,program_id:program?.id||null,title:name,description:row.Description||null,initiative_type:row['Type*']||null,cr_no:row['CR No']||null,vertical:row['Vertical*']||null,delivery_method:row['Delivery Method*']||'Waterfall',business_owner:row['Business Owner*']||null,assigned_to:row['Assigned To*']||null,start_date:start||null,target_end_date:end||null,revised_start_date:normalizeExcelDate(row['Revised Start Date'])||null,revised_end_date:normalizeExcelDate(row['Revised End Date'])||null,actual_end_date:actual||null,impact_category:row['Impact Category*']||null,measurable_impact:row['Measurable Impact*']||null,business_benefit:row['Business Benefit*']||null,initiative_status:evaluateProjectStatus(name,normalizeExcelDate(row['Revised Start Date'])||start,getEffectiveEndDate(end,normalizeExcelDate(row['Revised End Date'])),actual),record_status:'active',updated_at:new Date().toISOString()});
       if(error) throw error;
     }
     if (verticalValidationFailures.length) alert(formatInitiativeVerticalValidationSummary(validRows.length, verticalValidationFailures));
@@ -11081,7 +11330,7 @@
       );
 
     const databaseRecord = {
-      ...engineerAssignments.payload('p', existingProject),
+      ...engineerAssignments.payload('p', existingProject, true),
       description: document.getElementById('p-description').value.trim() || null,
       program_id:
         document.getElementById(
@@ -11525,14 +11774,20 @@
       document.getElementById(
         'm-start-date'
       ).value =
-        milestone.startDate || '';
+        milestoneDateInputValue(milestone.startDate);
+
+      document.getElementById('m-end-date').value =
+        milestoneDateInputValue(milestone.endDate);
+
+      document.getElementById('m-deadline').value =
+        milestoneDateInputValue(milestone.deadline);
 
       document.getElementById(
         'm-completion-date'
       ).value =
-        milestone.completionDate || '';
+        milestoneDateInputValue(milestone.completionDate);
 
-      updateMilestoneRuntimeDates();
+      updateMilestoneRuntimeDates(false);
     } else {
       updateMilestoneRuntimeDates();
     }
@@ -12087,7 +12342,6 @@
       document.getElementById(
         'm-start-date'
       ).value;
-
     const days =
       document.getElementById(
         'm-days'
@@ -12122,10 +12376,13 @@
     const duplicateMilestone = (initiative.milestones || []).some(item => Number(item.id) !== Number(milestoneId || 0) && item.recordStatus !== 'deleted' && Number(item.trackId || 0) === Number(initiative.deliveryMethod === 'Agile' ? selectedTrackId : 0) && String(item.actions || item.title || '').trim().toLowerCase() === actions.toLowerCase());
     if (duplicateMilestone) { showToast('An active Milestone with the same action already exists in this Initiative and Track.', 'error'); return; }
     const sourceMilestone=(initiative.milestones||[]).find(item=>Number(item.id)===Number(milestoneId))||{};
-    startDate=getMilestoneScheduleStartDate(initiative,{...sourceMilestone,id:milestoneId||null,trackId:initiative.deliveryMethod==='Agile'?Number(selectedTrackId):null},startDate);
+    const scheduleMode=sourceMilestone.scheduleMode==='parallel'?'parallel':'sequential';
+    const referenceMilestoneId=scheduleMode==='parallel'?sourceMilestone.referenceMilestoneId||null:null;
+    if(scheduleMode==='parallel'&&!referenceMilestoneId){showToast('The parallel Reference Milestone is missing. Re-select a valid earlier Milestone.','error');return;}
+    if(scheduleMode==='parallel')startDate=getMilestoneScheduleStartDate(initiative,{...sourceMilestone,id:milestoneId||null,trackId:initiative.deliveryMethod==='Agile'?Number(selectedTrackId):null},startDate);
     const schedule=calculateMilestoneSchedule(sourceMilestone,{days,startDate});
-    const endDate = schedule.endDate;
-    const deadline = schedule.deadline;
+    const endDate = milestoneDateInputValue(document.getElementById('m-end-date')?.value ?? schedule.endDate);
+    const deadline = milestoneDateInputValue(document.getElementById('m-deadline')?.value ?? schedule.deadline);
     const finalStatus = schedule.hasHistory?getEffectiveMilestoneStatus({...sourceMilestone,days:schedule.days,startDate:schedule.startDate,endDate,deadline,completionDate}):evaluateMilestoneStatus(
       title,
       days,
@@ -12175,8 +12432,8 @@
   }
 
     const existingMilestone = milestoneId ? (initiative.milestones || []).find(m => Number(m.id) === Number(milestoneId)) : null;
-    const scheduleMode = existingMilestone?.scheduleMode === 'parallel' ? 'parallel' : 'sequential';
-    const referenceMilestoneId = scheduleMode === 'parallel' ? existingMilestone?.referenceMilestoneId || null : null;
+    const savedScheduleMode = existingMilestone?.scheduleMode === 'parallel' ? 'parallel' : 'sequential';
+    const savedReferenceMilestoneId = savedScheduleMode === 'parallel' ? existingMilestone?.referenceMilestoneId || null : null;
     const impactBelow = document.getElementById('m-impact-below')?.checked === true;
     const databaseRecord = {
 
@@ -12194,9 +12451,9 @@
           ? Number(selectedTrackId)
           : null,
 
-      schedule_mode: existingMilestone?.scheduleMode || 'sequential',
+      schedule_mode: savedScheduleMode,
 
-      ...(scheduleMode === 'parallel' ? { reference_milestone_id: referenceMilestoneId } : {}),
+      ...(savedScheduleMode === 'parallel' ? { reference_milestone_id: savedReferenceMilestoneId } : {}),
 
       milestone_title:
         title,
@@ -12631,7 +12888,7 @@
             const targetEndDate = normalizeExcelDate(item.row['Initiative Target End Date']);
             const actualEndDate = normalizeExcelDate(item.row['Initiative Actual End Date']);
             const { data, error } = await supabaseClient.from('initiatives').insert({
-              ...engineerAssignments.importPayload(item.row,'Initiative '),
+              ...engineerAssignments.importPayload(item.row,'Initiative ',null,true),
               sequence_no: nextInitiativeSequence++,
               program_id: programId,
               title: item.initiativeName,
@@ -15161,7 +15418,7 @@
   // REALTIME PORTAL SYNCHRONIZATION
   let deliveryRealtimeChannel=null,deliveryRealtimeRefreshTimer=null,deliveryRealtimeRefreshInProgress=false,deliveryRealtimeRefreshPending=false;
   function renderActiveDeliveryWorkspace(){updateDailyTrackerBadge();if(currentWorkspaceView==='daily')renderDailyTrackerPage();else if(currentWorkspaceView==='overview')renderProjects();else renderFlatWorkspacePage();}
-  async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._initiativeSequenceSaveLocks?.size){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
+  async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
   function queueDeliveryRealtimeRefresh(){clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
   function initializeDeliveryRealtime(){if(deliveryRealtimeChannel||!currentUser||!supabaseClient?.channel)return;deliveryRealtimeChannel=supabaseClient.channel('delivery-hub-live').on('postgres_changes',{event:'*',schema:'public',table:'programs'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'initiatives'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestone_tracks'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestones'},queueDeliveryRealtimeRefresh).subscribe(status=>{if(status==='CHANNEL_ERROR')console.error('Delivery Hub realtime channel failed.');});}
   const existingLoadInitiativesFromSupabase=loadInitiativesFromSupabase;
@@ -15428,10 +15685,10 @@
     if(entity==='programs')return[{value:'program_status',label:'Status',type:'status'},{value:'program_owner',label:'Program Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'},...engineers];
     if(entity==='initiatives')return[{value:'initiative_status',label:'Status',type:'status'},{value:'business_owner',label:'Business Owner',type:'user'},{value:'assigned_to',label:'Assigned To',type:'user'},{value:'vertical',label:'Vertical',type:'vertical'},{value:'initiative_type',label:'Initiative Type',type:'initiativeType'},...engineers];
     if(entity==='tracks')return[{value:'append_track_name',label:'Append text to Track Name',type:'text'}];
-    return[{value:'status',label:'Status',type:'status'},{value:'owner',label:'Milestone Owner',type:'user'},{value:'dependency',label:'Dependency',type:'text'},{value:'milestone_remarks',label:'Remarks',type:'remarks'},{value:'days',label:'Days',type:'number'},{value:'start_date',label:'Start Date',type:'date'},{value:'completion_date',label:'Actual End Date',type:'date'}];
+    return[{value:'status',label:'Status',type:'status'},{value:'owner',label:'Milestone Owner',type:'user'},{value:'dependency',label:'Dependency',type:'text'},{value:'milestone_remarks',label:'Remarks',type:'remarks'},{value:'days',label:'Days',type:'number'},{value:'start_date',label:'Start Date',type:'date'},{value:'end_date',label:'End Date',type:'date'},{value:'deadline',label:'Deadline',type:'date'},{value:'completion_date',label:'Completion Date',type:'date'}];
   }
   function openBulkEditModal(){const ids=selectedBulkIds();if(!ids.length)return showToast('Select at least one record.','error');bulkEditEntity=currentWorkspaceView==='overview'?overviewBulkEntity:currentWorkspaceView;const fields=bulkEditFields(bulkEditEntity),select=document.getElementById('bulk-edit-field');select.innerHTML=fields.map(f=>`<option value="${f.value}" data-type="${f.type}">${f.label}</option>`).join('');document.getElementById('bulk-edit-context').innerText=`${ids.length} ${bulkEditEntity} selected`;renderBulkEditValueInput();const modal=document.getElementById('bulk-edit-modal');modal.classList.remove('hidden');modal.classList.add('flex');lucide.createIcons();}
-  function renderBulkEditValueInput(){const select=document.getElementById('bulk-edit-field'),type=select.selectedOptions[0]?.dataset.type||'text',area=document.getElementById('bulk-edit-value-area');let control='';if(type==='remarks')control='<textarea id="bulk-edit-value" rows="5" maxlength="10000" class="mt-1 w-full rounded-lg border px-3 py-2 whitespace-pre-wrap break-words" placeholder="Leave empty to clear Remarks"></textarea>';else if(type==='user')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="">-- Select User --</option>${userMaster.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join('')}</select>`;else if(type==='vertical')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${['Retail commercial','Finance','Merchandising'].map(v=>`<option>${v}</option>`).join('')}</select>`;else if(type==='initiativeType')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${getMasterValues('INITIATIVE_TYPE').map(v=>`<option value="${escapeHtml(v.value_name)}">${escapeHtml(v.value_name)}</option>`).join('')}</select>`;else if(type==='status')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="Pending">Pending</option><option value="In Progress">In Progress</option><option value="On-Hold">On Hold</option><option value="Delayed">Delayed</option><option value="Critical">Critical</option><option value="Done">Done</option><option value="In-Queue">In-Queue</option><option value="WIP">WIP</option><option value="Deviated">Deviated</option></select>`;else control=`<input id="bulk-edit-value" type="${type}" ${type==='number'?'min="1" step="1"':''} required class="mt-1 w-full rounded-lg border px-3 py-2">`;area.innerHTML=`<label class="block font-semibold text-slate-700">New value${control}</label>`+(bulkEditEntity==='milestones'&&['days','start_date','completion_date'].includes(select.value)?milestoneScheduleImpactControl('bulk-edit-impact-below'):'');}
+  function renderBulkEditValueInput(){const select=document.getElementById('bulk-edit-field'),type=select.selectedOptions[0]?.dataset.type||'text',area=document.getElementById('bulk-edit-value-area');let control='';if(type==='remarks')control='<textarea id="bulk-edit-value" rows="5" maxlength="10000" class="mt-1 w-full rounded-lg border px-3 py-2 whitespace-pre-wrap break-words" placeholder="Leave empty to clear Remarks"></textarea>';else if(type==='user')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="">-- Select User --</option>${userMaster.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join('')}</select>`;else if(type==='vertical')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${['Retail commercial','Finance','Merchandising'].map(v=>`<option>${v}</option>`).join('')}</select>`;else if(type==='initiativeType')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${getMasterValues('INITIATIVE_TYPE').map(v=>`<option value="${escapeHtml(v.value_name)}">${escapeHtml(v.value_name)}</option>`).join('')}</select>`;else if(type==='status')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="Pending">Pending</option><option value="In Progress">In Progress</option><option value="On-Hold">On Hold</option><option value="Delayed">Delayed</option><option value="Critical">Critical</option><option value="Done">Done</option><option value="In-Queue">In-Queue</option><option value="WIP">WIP</option><option value="Deviated">Deviated</option></select>`;else control=`<input id="bulk-edit-value" type="${type}" ${type==='number'?'min="1" step="1"':''} ${type==='date'?'':'required'} class="mt-1 w-full rounded-lg border px-3 py-2">`;area.innerHTML=`<label class="block font-semibold text-slate-700">New value${control}</label>`+(bulkEditEntity==='milestones'&&['days','start_date','end_date','deadline','completion_date'].includes(select.value)?milestoneScheduleImpactControl('bulk-edit-impact-below'):'');}
   function closeBulkEditModal(){const modal=document.getElementById('bulk-edit-modal');modal.classList.add('hidden');modal.classList.remove('flex');bulkEditEntity='';}
   async function saveBulkEdit(event){
     event.preventDefault();
@@ -15442,28 +15699,33 @@
       if(value&&!clearEngineer&&!engineerAssignments.users.some(user=>String(user.id)===value&&user.is_active===true))return showToast('Select an active engineer.','error');
       if(bulkEditEntity==='programs'?!canCreateInitiative():ids.some(id=>!canEditInitiative(projects.find(item=>Number(item.id)===Number(id)))))return showToast('Permission denied.','error');
     }
-    if(!ids.length||!field||(value===''&&field!=='milestone_remarks'&&!engineerField))return;
+    const clearableDate=bulkEditEntity==='milestones'&&['start_date','end_date','deadline','completion_date'].includes(field);
+    if(!ids.length||!field||(value===''&&field!=='milestone_remarks'&&!engineerField&&!clearableDate))return;
     if(field==='milestone_remarks'&&value.length>MAX_MILESTONE_REMARKS_LENGTH){showToast(`Remarks cannot exceed ${MAX_MILESTONE_REMARKS_LENGTH.toLocaleString()} characters.`,'error');return;}
     const impactBelow=document.getElementById('bulk-edit-impact-below')?.checked===true;
     if(bulkEditEntity==='milestones'&&field==='start_date'&&!confirm(`Apply this Start Date to ${ids.length} selected Milestones? Impact Below Dates? ${impactBelow?'Yes':'No'}.`))return;
-    const viewState=bulkEditEntity==='milestones'&&['days','start_date','completion_date'].includes(field)?captureDeliveryViewState():null;
+    const viewState=bulkEditEntity==='milestones'&&['days','start_date','end_date','deadline','completion_date','milestone_remarks'].includes(field)?captureDeliveryViewState():null;
     if(viewState)viewState.milestoneId=ids[0];
     const button=document.getElementById('bulk-edit-save');button.disabled=true;
     try{
       if(bulkEditEntity==='tracks'&&field==='append_track_name'){
         for(const id of ids){const track=projects.flatMap(initiative=>initiative.tracks||[]).find(item=>Number(item.id)===Number(id));if(!track)continue;const {error}=await supabaseClient.from('milestone_tracks').update({track_name:`${track.name} ${value}`.trim(),updated_at:new Date().toISOString()}).eq('id',id);if(error)throw error;}
-      }else if(bulkEditEntity==='milestones'&&['days','start_date','completion_date'].includes(field)){
+      }else if(bulkEditEntity==='milestones'&&['days','start_date','end_date','deadline','completion_date'].includes(field)){
         const records=[];
         for(const id of ids){
           const project=projects.find(initiative=>(initiative.milestones||[]).some(item=>Number(item.id)===Number(id)));
           const milestone=project?.milestones?.find(item=>Number(item.id)===Number(id));if(!milestone)continue;
+          const recalculate=field==='days'||field==='start_date';
           const schedule=calculateMilestoneSchedule(milestone,field==='days'?{days:value}:field==='start_date'?{startDate:value}:{});
-          const days=schedule.days,start=schedule.startDate,completion=field==='completion_date'?value:milestone.completionDate||'',end=schedule.endDate,status=completion?'Done':(hasMilestoneDeviationHistory(milestone)||milestone.status==='Deviated'?'Deviated':evaluateMilestoneStatus(milestone.title,days,start,end,end,''));
-          const payload={[field]:field==='days'?normalizeMilestoneDays(value):value,end_date:end||null,deadline:end||null,status,deviation_days:calculateDeviation(end,start,completion)||null};
-          if(schedule.hasHistory)Object.assign(payload,{start_date:start||null,days:normalizeMilestoneDays(days),deviation_days:schedule.deviationDays,remarks:schedule.remarks});
+          const days=schedule.days,start=field==='start_date'?(value||''):schedule.startDate,completion=field==='completion_date'?(value||''):milestone.completionDate||'',end=field==='end_date'?(value||''):recalculate?schedule.endDate:milestone.endDate||'',deadline=field==='deadline'?(value||''):recalculate?schedule.deadline:milestone.deadline||'',status=completion?'Done':(hasMilestoneDeviationHistory(milestone)||milestone.status==='Deviated'?'Deviated':evaluateMilestoneStatus(milestone.title,days,start,end,deadline,''));
+          if(field==='start_date'&&completion&&value&&completion<value)throw new Error('Completion Date cannot be before Start Date.');
+          const payload={[field]:field==='days'?normalizeMilestoneDays(value):(value||null),status,deviation_days:calculateDeviation(deadline,start,completion)||null};
+          if(recalculate)Object.assign(payload,{start_date:start||null,days:normalizeMilestoneDays(days),end_date:end||null,deadline:deadline||null});
+          if(field==='completion_date')payload.completion_date=value||null;
+          if(schedule.hasHistory&&recalculate)Object.assign(payload,{start_date:start||null,days:normalizeMilestoneDays(days),deviation_days:schedule.deviationDays,remarks:schedule.remarks});
           const {error}=await supabaseClient.from('milestones').update(payload).eq('id',id);if(error)throw error;
-          Object.assign(milestone,{days:normalizeMilestoneDays(days),startDate:start,endDate:end,deadline:end,completionDate:completion,status,deviationDays:payload.deviation_days});
-          if(schedule.hasHistory)milestone.remarks=schedule.remarks;
+          Object.assign(milestone,{days:normalizeMilestoneDays(days),startDate:start,endDate:end,deadline,completionDate:completion,status,deviationDays:payload.deviation_days});
+          if(schedule.hasHistory&&recalculate)milestone.remarks=schedule.remarks;
           records.push({project,milestone});
         }
         await applyMilestoneScheduleImpact(records,impactBelow);
@@ -15479,7 +15741,18 @@
         const table=bulkEditEntity==='programs'?'programs':bulkEditEntity==='initiatives'?'initiatives':'milestones',payload={[field]:engineerField?(clearEngineer?null:Number(value)):value};if(table!=='milestones')payload.updated_at=new Date().toISOString();
         const {error}=await supabaseClient.from(table).update(payload).in('id',ids);if(error)throw error;
       }
-      finishHierarchyBulkEdit();await loadInitiativesFromSupabase();if(viewState){restoreDeliveryViewState(viewState);renderActiveDeliveryWorkspace();restoreDeliveryViewState(viewState);}else renderFlatWorkspacePage();showToast('Selected records updated successfully.','success');
+      finishHierarchyBulkEdit();
+      const rowScopedMilestoneEdit=bulkEditEntity==='milestones'&&['days','start_date','end_date','deadline','completion_date','milestone_remarks'].includes(field);
+      if(rowScopedMilestoneEdit){
+        ids.forEach(id=>{const project=projects.find(initiative=>(initiative.milestones||[]).some(item=>Number(item.id)===Number(id)));if(project)refreshMilestoneRowInPlace(project,id);});
+        if(viewState)restoreDeliveryViewState(viewState);
+        else renderFlatWorkspacePage();
+      }else{
+        await loadInitiativesFromSupabase();
+        if(viewState){restoreDeliveryViewState(viewState);renderActiveDeliveryWorkspace();restoreDeliveryViewState(viewState);}
+        else renderFlatWorkspacePage();
+      }
+      showToast('Selected records updated successfully.','success');
     }catch(error){showToast('Bulk edit failed: '+error.message,'error');}finally{button.disabled=false;}
   }
   async function bulkDeleteSelected(){const entity=currentWorkspaceView,ids=selectedBulkIds();if(!ids.length)return;if(!confirm(`Archive ${ids.length} selected ${entity}?`))return;try{if(entity==='programs'){let r=await supabaseClient.from('initiatives').update({program_id:null}).in('program_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('programs').update({is_active:false,updated_at:new Date().toISOString()}).in('id',ids);if(r.error)throw r.error;}else if(entity==='initiatives'){let r=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('initiative_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('milestone_tracks').update({record_status:'deleted',updated_at:new Date().toISOString()}).in('initiative_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('initiatives').update({record_status:'deleted'}).in('id',ids);if(r.error)throw r.error;}else if(entity==='tracks'){const r1=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('track_id',ids);if(r1.error)throw r1.error;const r2=await softDeleteRecords('milestone_tracks',ids);if(r2.error)throw r2.error;}else{const r=await softDeleteRecords('milestones',ids);if(r.error)throw r.error;}clearBulkSelection();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records archived successfully.','success');}catch(error){showToast('Bulk archive failed: '+error.message,'error');}}
@@ -21643,10 +21916,21 @@
     function effectiveStatus(m){return authoritativeEffectiveStatus(m);}
     function assertPermission(row){if(!row)throw new Error('Milestone was not found in authoritative data.');if(typeof window.canEditInitiative==='function'&&!window.canEditInitiative(row.initiative))throw new Error('You do not have permission to modify one or more selected Milestones.');}
     function revisionData(m){if(typeof window.parseMilestoneRevisionData==='function')return window.parseMilestoneRevisionData(m?.remarks);try{const value=JSON.parse(m?.remarks||'{}');return value&&typeof value==='object'?value:{};}catch{return{};}}
-    function calculateSchedule(m,patch){const schedule=calculateMilestoneSchedule(m,patch.remarks!==undefined?{remarks:patch.remarks}:patch);patch.endDate=schedule.endDate||null;patch.deadline=schedule.deadline||null;if(schedule.hasHistory)Object.assign(patch,{startDate:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),deviationDays:schedule.deviationDays,remarks:schedule.remarks});return patch;}
+    function calculateSchedule(m,patch){
+      const schedule=calculateMilestoneSchedule(m,patch.remarks!==undefined?{remarks:patch.remarks}:patch);
+      if(!Object.hasOwn(patch,'endDate'))patch.endDate=schedule.endDate||null;
+      if(!Object.hasOwn(patch,'deadline'))patch.deadline=schedule.deadline||null;
+      if(schedule.hasHistory){
+        if(!Object.hasOwn(patch,'startDate'))patch.startDate=schedule.startDate||null;
+        if(!Object.hasOwn(patch,'days'))patch.days=normalizeMilestoneDays(schedule.days);
+        patch.deviationDays=schedule.deviationDays;
+        if(!Object.hasOwn(patch,'remarks'))patch.remarks=schedule.remarks;
+      }
+      return patch;
+    }
     function buildPatch(row,actionType,changes,actionData){
       const m=row.milestone,patch={};
-      Object.entries(changes||{}).forEach(([key,value])=>{if(protectedFields.has(key)||value===undefined||value==='__MIXED__')return;if(value===null||value===''||typeof value==='number'||typeof value==='boolean'||String(value).trim()!=='')patch[key]=value;});
+      Object.entries(changes||{}).forEach(([key,value])=>{if(protectedFields.has(key)||value===undefined||value==='__MIXED__')return;if(['startDate','endDate','deadline','completionDate'].includes(key)&&value!==null&&value!==''&&!validDate(value))throw new Error(`${key} must be a valid date.`);if(value===null||value===''&&['startDate','endDate','deadline','completionDate','milestoneRemarks'].includes(key)||typeof value==='number'||typeof value==='boolean'||String(value).trim()!=='')patch[key]=value;});
       const action=String(actionType||'edit').toLowerCase();
       if(action==='hold'||action==='on-hold')patch.status='On-Hold';
       if(action==='critical')patch.status='Critical';
@@ -21670,11 +21954,15 @@
         const rebuilt=rebuildDeviationSchedule(m,history);patch.remarks=JSON.stringify(history);patch.status=String(m.completionDate||'').trim()?'Done':rebuilt.active.length?'Deviated':canonicalStatus(actionData?.baseStatus||'Pending');
       }
       if(Object.hasOwn(patch,'plannerTypeId')&&action==='edit'&&!['days','startDate','endDate','deadline','completionDate','trackId','remarks'].some(field=>Object.hasOwn(patch,field)))return patch;
-      calculateSchedule(m,patch);
+      const scheduleChanged=['startDate','days'].some(field=>Object.hasOwn(patch,field));
+      if(scheduleChanged||['deviate','edit-deviation','delete-deviation'].includes(action))calculateSchedule(m,patch);
+      const startDate=Object.hasOwn(patch,'startDate')?patch.startDate:m.startDate;
+      const completionDate=Object.hasOwn(patch,'completionDate')?patch.completionDate:m.completionDate;
+      if(startDate&&completionDate&&completionDate<startDate)throw new Error('Completion Date cannot be before Start Date.');
       if(patch.completionDate)patch.status='Done';else if(canonicalStatus(patch.status||m.status)==='On-Hold')patch.status='On-Hold';
       return patch;
     }
-    function toDatabasePatch(patch){const db={},typed=Object.hasOwn(patch,'plannerTypeId');for(const[key,value]of Object.entries(patch)){if(protectedFields.has(key)||value===undefined)continue;const column=key==='plannerTypeId'?'planner_type_id':typed&&key==='actions'?'actions':DB_FIELD_MAP[key];if(column)db[column]=value;}if(Object.keys(db).length===1&&Object.hasOwn(db,'planner_type_id'))return db;db.modified_by=currentActor();if(typed)db.updated_at=new Date().toISOString();else db.modified_time=istTimestamp();return db;}
+    function toDatabasePatch(patch,row){const db={},typed=Object.hasOwn(patch,'plannerTypeId');for(const[key,value]of Object.entries(patch)){if(protectedFields.has(key)||value===undefined||key==='milestoneRemarks')continue;const column=key==='plannerTypeId'?'planner_type_id':typed&&key==='actions'?'actions':DB_FIELD_MAP[key];if(column)db[column]=value;}if(Object.hasOwn(patch,'milestoneRemarks'))Object.assign(db,milestoneRemarksRecord(patch.milestoneRemarks,row?.milestone?.remarks));if(Object.keys(db).length===1&&Object.hasOwn(db,'planner_type_id'))return db;db.modified_by=currentActor();if(typed)db.updated_at=new Date().toISOString();else db.modified_time=istTimestamp();return db;}
     async function refreshViews(state){await window.loadInitiativesFromSupabase();restoreState(state);if(typeof window.renderActiveDeliveryWorkspace==='function')window.renderActiveDeliveryWorkspace();restoreState(state);}
     async function applyMilestoneChanges(options={}){
       const ids=normalizeIds(options.milestoneIds),state=captureState(),success=[],failed=[],skipped=[];
@@ -21691,9 +21979,16 @@
         impactBelow=answer.trim().toLowerCase()==='yes';
       }
       const scheduledRecords=[];
-      for(const id of ids){try{const row=findMilestone(id);assertPermission(row);const patch=buildPatch(row,options.actionType,options.changes||{},options.actionData||{});if(!Object.keys(patch).length){skipped.push({id,message:'No explicit field changes.'});continue;}const dbPatch=toDatabasePatch(patch);const result=await (window.supabaseClient||supabaseClient).from('milestones').update(dbPatch).eq('id',id).select('*');if(result.error)throw result.error;if(!Array.isArray(result.data)||result.data.length!==1)throw new Error(`Supabase did not confirm exactly one updated row for Milestone ${id}.`);Object.assign(row.milestone,patch);success.push({id,record:result.data[0]});if(scheduleChange)scheduledRecords.push(row);}catch(error){failed.push({id,message:error?.message||String(error)});}}
+      for(const id of ids){try{const row=findMilestone(id);assertPermission(row);const patch=buildPatch(row,options.actionType,options.changes||{},options.actionData||{});if(!Object.keys(patch).length){skipped.push({id,message:'No explicit field changes.'});continue;}const dbPatch=toDatabasePatch(patch,row);const result=await (window.supabaseClient||supabaseClient).from('milestones').update(dbPatch).eq('id',id).select('*');if(result.error)throw result.error;if(!Array.isArray(result.data)||result.data.length!==1)throw new Error(`Supabase did not confirm exactly one updated row for Milestone ${id}.`);Object.assign(row.milestone,patch);if(Object.hasOwn(patch,'milestoneRemarks'))row.milestone.milestoneRemarks=normalizeMilestoneRemarks(patch.milestoneRemarks);success.push({id,record:result.data[0]});if(scheduleChange)scheduledRecords.push(row);}catch(error){failed.push({id,message:error?.message||String(error)});}}
       try{await applyMilestoneScheduleImpact(scheduledRecords,impactBelow);}catch(error){failed.push({id:null,message:error?.message||String(error)});}
-      if(success.length)await refreshViews(state);
+      if(success.length){
+        const fields=Object.keys(options.changes||{});
+        const action=String(options.actionType||'edit').toLowerCase();
+        const rowScopedEdit=options.sourcePage==='unified-modal'&&['edit','complete','close'].includes(action)||
+          action==='edit'&&options.mode==='multiple'&&fields.length>0&&fields.every(field=>['days','startDate','endDate','deadline','completionDate','milestoneRemarks'].includes(field));
+        if(rowScopedEdit){success.forEach(item=>{const row=findMilestone(item.id);if(row)refreshMilestoneRowInPlace(row.initiative,item.id);});restoreState(state);}
+        else await refreshViews(state);
+      }
       return{ok:failed.length===0&&success.length>0,success,failed,skipped,state};
     }
     window.applyMilestoneChanges=applyMilestoneChanges;
@@ -21703,7 +21998,7 @@
     window.saveMilestone=async function unifiedSaveMilestone(event){
       event?.preventDefault?.();const id=Number(document.getElementById('m-id')?.value||0);if(!id)return originalSave?.apply(this,arguments);
       const row=findMilestone(id);if(!row)return window.showToast?.('Milestone was not found.','error');
-      const fields={title:document.getElementById('m-title')?.value?.trim(),actions:document.getElementById('m-actions')?.value?.trim(),owner:document.getElementById('m-owner')?.value,dependency:document.getElementById('m-dependency')?.value?.trim()||null,days:Number(document.getElementById('m-days')?.value),startDate:document.getElementById('m-start-date')?.value||null,completionDate:document.getElementById('m-completion-date')?.value||null,trackId:document.getElementById('m-track-id')?.value?Number(document.getElementById('m-track-id').value):null,status:document.getElementById('m-status')?.value};
+      const fields={title:document.getElementById('m-title')?.value?.trim(),actions:document.getElementById('m-actions')?.value?.trim(),owner:document.getElementById('m-owner')?.value,dependency:document.getElementById('m-dependency')?.value?.trim()||null,days:Number(document.getElementById('m-days')?.value),startDate:document.getElementById('m-start-date')?.value||null,endDate:document.getElementById('m-end-date')?.value||null,deadline:document.getElementById('m-deadline')?.value||null,completionDate:document.getElementById('m-completion-date')?.value||null,milestoneRemarks:document.getElementById('m-remarks')?.value??row.milestone.milestoneRemarks??'',trackId:document.getElementById('m-track-id')?.value?Number(document.getElementById('m-track-id').value):null,status:document.getElementById('m-status')?.value};
       const changes={};for(const[k,v]of Object.entries(fields)){const old=row.milestone[k]??null;if(String(v??'')!==String(old??''))changes[k]=v;}
       const plannerTypeControl=document.getElementById('m-planner-type');if(plannerTypeControl&&String(plannerTypeControl.value||'')!==String(row.milestone.plannerTypeId||''))changes.plannerTypeId=plannerTypeControl.value||null;
       const typeOnly=Object.entries(changes).filter(([,value])=>value!==undefined).every(([field])=>field==='plannerTypeId');
@@ -22071,16 +22366,17 @@
   <style id="milestone-grid-column-contract">
   #projects-container .milestone-resizable-grid,
   #workspace-flat-page .milestone-resizable-grid {
-    table-layout: fixed !important;
+    table-layout: auto !important;
+    width: max-content !important;
+    min-width: 1840px !important;
   }
   #projects-container .milestone-resizable-grid th,
   #projects-container .milestone-resizable-grid td,
   #workspace-flat-page .milestone-resizable-grid th,
   #workspace-flat-page .milestone-resizable-grid td {
     box-sizing: border-box !important;
-    min-width: 0 !important;
     padding: 6px 7px !important;
-    overflow: hidden;
+    overflow: visible;
     vertical-align: middle;
   }
   #projects-container .milestone-resizable-grid th,
@@ -22093,14 +22389,26 @@
   #workspace-flat-page .milestone-resizable-grid tbody tr {
     height: 72px;
   }
-  #projects-container .milestone-resizable-grid td:nth-child(2),
   #projects-container .milestone-resizable-grid td.milestone-action-text,
-  #workspace-flat-page .milestone-resizable-grid td:nth-child(2),
   #workspace-flat-page .milestone-resizable-grid td.milestone-action-text {
     white-space: normal !important;
     overflow-wrap: anywhere;
     word-break: break-word;
     line-height: 1.25;
+  }
+  #projects-container .milestone-resizable-grid .milestone-date-column,
+  #workspace-flat-page .milestone-resizable-grid .milestone-date-column {
+    width: 168px !important;
+    min-width: 168px !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+  }
+  #projects-container .milestone-resizable-grid .milestone-remarks-column,
+  #workspace-flat-page .milestone-resizable-grid .milestone-remarks-column {
+    width: 260px !important;
+    min-width: 240px !important;
+    white-space: pre-wrap !important;
+    overflow-wrap: anywhere;
   }
   #projects-container .milestone-resizable-grid input:not([type="checkbox"]),
   #projects-container .milestone-resizable-grid select,
@@ -22121,13 +22429,22 @@
   }
   #projects-container .milestone-resizable-grid textarea,
   #workspace-flat-page .milestone-resizable-grid textarea {
-    height: 40px !important;
-    min-height: 40px !important;
-    max-height: 40px !important;
-    resize: none;
+    min-height: 80px !important;
+    height: 80px !important;
+    max-height: none !important;
+    resize: vertical;
     overflow: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+  #projects-container .milestone-resizable-grid input[type="date"],
+  #workspace-flat-page .milestone-resizable-grid input[type="date"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    height: 38px !important;
+    padding: 4px 6px !important;
+    font-size: 12px !important;
   }
   #projects-container .milestone-resizable-grid select.milestone-cell-control,
   #workspace-flat-page .milestone-resizable-grid select.milestone-cell-control {
@@ -22172,6 +22489,13 @@
     font-size: 9px !important;
     line-height: 1;
   }
+  </style>
+  <style id="track-reorder-styles">
+  .track-reorder-handle:not(:disabled) { cursor: grab; }
+  .track-reorder-handle:active { cursor: grabbing; }
+  .track-order-dragging { opacity: .45; }
+  .track-order-drop-before { box-shadow: inset 0 3px 0 #0284c7; }
+  .track-order-drop-after { box-shadow: inset 0 -3px 0 #0284c7; }
   </style>
   <style id="shared-workspace-control-surfaces">
   #daily-multi-actions {
@@ -25267,6 +25591,38 @@
     const priorConfig = window.flatConfig;
     window.flatConfig = function () {
       const config = priorConfig.apply(this, arguments), entity = currentWorkspaceView;
+      if (entity === 'milestones') {
+        const originalHeads = config.heads.slice();
+        const originalRow = config.row;
+        const dateHeadings = {
+          start: originalHeads.find(heading => /^Start Date$/i.test(heading)),
+          end: originalHeads.find(heading => /^End Date$/i.test(heading)),
+          deadline: originalHeads.find(heading => /^Deadline(?: Date)?$/i.test(heading)),
+          completion: originalHeads.find(heading => /^Completion(?: Date)?$/i.test(heading)),
+          remarks: originalHeads.find(heading => /^Remarks$/i.test(heading))
+        };
+        const replaced = new Set(Object.values(dateHeadings).filter(Boolean));
+        const daysIndex = originalHeads.findIndex(heading => /^Days$/i.test(heading));
+        const startIndex = originalHeads.findIndex(heading => dateHeadings.start === heading);
+        const anchor = daysIndex < 0 ? (startIndex < 0 ? originalHeads.length : startIndex) : daysIndex + 1;
+        const before = originalHeads.slice(0, anchor).filter(heading => !replaced.has(heading));
+        const after = originalHeads.slice(anchor).filter(heading => !replaced.has(heading));
+        const orderedHeads = [...before, 'Start Date', 'End Date', 'Deadline', 'Completion', 'Remarks', ...after];
+        config.heads = orderedHeads;
+        config.row = row => {
+          const cells = originalRow(row);
+          const values = new Map(originalHeads.map((heading, index) => [heading, cells[index]]));
+          const milestone = row.milestone;
+          const calculatedEnd = milestone.endDate ?? calculateMilestoneEndDate(milestone.days, milestone.startDate);
+          values.set('Start Date', formatDate(milestone.startDate));
+          values.set('End Date', formatDate(calculatedEnd));
+          values.set('Deadline', formatDate(milestone.deadline ?? calculatedEnd));
+          values.set('Completion', formatDate(milestone.completionDate));
+          values.set('Remarks', renderMilestoneRemarks(milestone.milestoneRemarks));
+          return orderedHeads.map(heading => values.get(heading) ?? '');
+        };
+        return config;
+      }
       if (!['programs', 'initiatives'].includes(entity)) return config;
       const index = config.heads.indexOf('Actions');
       const position = index < 0 ? config.heads.length : index;
@@ -25515,6 +25871,7 @@
   })();
   </script>
   <script src="support-ticket-tracker.js"></script>
+  <script src="support-connectors-ui.js"></script>
   </body>
   </html>
   
