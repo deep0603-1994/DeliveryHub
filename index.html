@@ -1611,6 +1611,30 @@
             <input type="text" id="m-days" placeholder="e.g. 5, TBD or -" oninput="updateMilestoneRuntimeDates(true)" onchange="updateMilestoneRuntimeDates(true)" class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500">
           </div>
 
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-white p-3">
+            <label class="block font-semibold text-slate-700">Schedule
+              <select id="m-schedule-mode" onchange="updateMilestoneScheduleControls('m')" class="mt-1 w-full rounded border bg-white px-2 py-2">
+                <option value="sequential">Sequential</option><option value="parallel">Parallel</option>
+              </select>
+            </label>
+            <div id="m-reference-controls" class="hidden sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label class="block font-semibold text-slate-700">Reference Milestone
+                <input id="m-reference-search" type="search" oninput="filterMilestoneReferenceOptions('m')" placeholder="Search Track, milestone, or date" class="mt-1 w-full rounded border px-2 py-2">
+                <select id="m-reference-milestone" required onchange="updateMilestoneRuntimeDates(true)" class="mt-1 w-full rounded border bg-white px-2 py-2"></select>
+              </label>
+              <label class="block font-semibold text-slate-700">Reference Date
+                <select id="m-reference-date-type" onchange="updateMilestoneRuntimeDates(true)" class="mt-1 w-full rounded border bg-white px-2 py-2">
+                  <option value="start_date">Start Date</option><option value="end_date">End Date</option><option value="deadline">Deadline</option><option value="completion_date">Completion</option>
+                </select>
+              </label>
+              <label class="block font-semibold text-slate-700">Offset (working days)
+                <input id="m-reference-offset-days" type="number" step="1" value="0" oninput="updateMilestoneRuntimeDates(true)" onchange="updateMilestoneRuntimeDates(true)" class="mt-1 w-full rounded border px-2 py-2">
+              </label>
+              <p id="m-reference-status" class="text-xs text-slate-600 sm:col-span-2" role="status"></p>
+            </div>
+            <p class="text-[10px] text-slate-500 sm:col-span-2">Sequential uses the preceding milestone. To set a manual Start Date, switch to Sequential; this removes the reference.</p>
+          </div>
+
           <div
     class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3 rounded-lg border border-slate-200"
   >
@@ -1635,7 +1659,7 @@
     </div>
     <div>
       <label class="block font-medium text-slate-600 mb-1">Deadline</label>
-      <input type="date" id="m-deadline" oninput="updateMilestoneRuntimeDates(false)" class="milestone-date-control w-full px-2 py-1.5 bg-white border rounded text-slate-700">
+      <input type="date" id="m-deadline" readonly aria-readonly="true" class="milestone-date-control w-full px-2 py-1.5 bg-slate-100 border rounded text-slate-700">
     </div>
     <div>
       <label class="block font-medium text-slate-600 mb-1">
@@ -1990,6 +2014,7 @@
       </div>
     </div>
 
+    <script src="delivery-import-common.js"></script>
     <script src="tracker-multi-filters.js"></script>
     <script>
 
@@ -2707,6 +2732,8 @@
                 milestone.reference_milestone_id
                   ? Number(milestone.reference_milestone_id)
                   : null,
+              referenceDateType: milestone.reference_date_type || 'start_date',
+              referenceOffsetDays: Number(milestone.reference_offset_days) || 0,
               plannerTypeId: milestone.planner_type_id || null,
               templateId: milestone.template_id || null,
               templateMilestoneId: milestone.template_milestone_id || null,
@@ -3451,6 +3478,16 @@
     return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : normalizeExcelDate(raw);
   }
 
+  function getMilestoneDeadline(startDate, endDate) {
+    const validDate = value => {
+      const date = milestoneDateInputValue(value);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+      const parsed = new Date(`${date}T00:00:00Z`);
+      return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ? '' : date;
+    };
+    return [validDate(startDate), validDate(endDate)].filter(Boolean).sort().pop() || '';
+  }
+
   function updateMilestoneRuntimeDates(recalculateDates = false) {
     const days = document.getElementById('m-days')?.value || '';
     const startField = document.getElementById('m-start-date');
@@ -3458,17 +3495,20 @@
     const milestoneId = document.getElementById('m-id')?.value;
     const project = projects.find(item => Number(item.id) === Number(projectId));
     const milestone = project?.milestones?.find(item => Number(item.id) === Number(milestoneId));
-    if (!recalculateDates) return;
     const scheduleMilestone = milestone || { id: null, trackId: document.getElementById('m-track-id')?.value || null };
-    const startDate = project && scheduleMilestone.scheduleMode === 'parallel'
-      ? getMilestoneScheduleStartDate(project, scheduleMilestone, startField?.value || '')
+    const configuredMilestone={...scheduleMilestone,scheduleMode:document.getElementById('m-schedule-mode')?.value||scheduleMilestone.scheduleMode||'sequential',referenceMilestoneId:Number(document.getElementById('m-reference-milestone')?.value)||null,referenceDateType:document.getElementById('m-reference-date-type')?.value||'start_date',referenceOffsetDays:document.getElementById('m-reference-offset-days')?.value??0};
+    const startDate = project && configuredMilestone.scheduleMode === 'parallel'
+      ? getMilestoneScheduleStartDate(project, configuredMilestone, startField?.value || '')
       : startField?.value || '';
-    if (startField && startDate) startField.value = startDate;
-    const calculatedDate = calculateMilestoneSchedule(milestone || {}, {days,startDate}).endDate;
+    if (startField) {startField.readOnly=configuredMilestone.scheduleMode==='parallel';startField.value=startDate;}
     const endDateField = document.getElementById('m-end-date');
+    if(endDateField)endDateField.readOnly=configuredMilestone.scheduleMode==='parallel';
     const deadlineField = document.getElementById('m-deadline');
-    if (endDateField) endDateField.value = calculatedDate || '';
-    if (deadlineField) deadlineField.value = calculatedDate || '';
+    if (recalculateDates) {
+      const calculatedDate = calculateMilestoneSchedule(milestone || {}, {days,startDate}).endDate;
+      if (endDateField) endDateField.value = calculatedDate || '';
+    }
+    if (deadlineField) deadlineField.value = getMilestoneDeadline(startDate, endDateField?.value) || '';
   }
 
   function updateInlineMilestoneRuntimeDates(milestoneId, recalculateDates = false) {
@@ -3476,25 +3516,29 @@
     const startField=document.getElementById(`inline-start-date-${milestoneId}`);
     const project=projects.find(item=>(item.milestones||[]).some(milestone=>Number(milestone.id)===Number(milestoneId)));
     const milestone=project?.milestones?.find(item=>Number(item.id)===Number(milestoneId));
-    if (!recalculateDates) return;
-    const startDate=project&&milestone?.scheduleMode==='parallel'?getMilestoneScheduleStartDate(project,milestone,startField?.value||''):startField?.value||'';
-    if(startField&&startDate)startField.value=startDate;
-    const calculatedDate = calculateMilestoneSchedule(milestone || {}, {days,startDate}).endDate;
+    const configuredMilestone={...milestone,scheduleMode:document.getElementById(`inline-schedule-mode-${milestoneId}`)?.value||milestone?.scheduleMode||'sequential',referenceMilestoneId:Number(document.getElementById(`inline-reference-milestone-${milestoneId}`)?.value)||null,referenceDateType:document.getElementById(`inline-reference-date-type-${milestoneId}`)?.value||'start_date',referenceOffsetDays:document.getElementById(`inline-reference-offset-days-${milestoneId}`)?.value??0};
+    const startDate=project&&configuredMilestone.scheduleMode==='parallel'?getMilestoneScheduleStartDate(project,configuredMilestone,startField?.value||''):startField?.value||'';
+    if(startField){startField.readOnly=configuredMilestone.scheduleMode==='parallel';startField.value=startDate;}
     const endDateField = document.getElementById(`inline-end-date-${milestoneId}`);
     const deadlineField = document.getElementById(`inline-deadline-${milestoneId}`);
-    if (endDateField) endDateField.value = calculatedDate || '';
-    if (deadlineField) deadlineField.value = calculatedDate || '';
+    if (recalculateDates) {
+      const calculatedDate = calculateMilestoneSchedule(milestone || {}, {days,startDate}).endDate;
+      if (endDateField) endDateField.value = calculatedDate || '';
+    }
+    if (deadlineField) deadlineField.value = getMilestoneDeadline(startDate, endDateField?.value) || '';
   }
 
   function getMilestoneScheduleStartDate(project,milestone,fallbackStartDate=''){
     const milestones=project?.milestones||[];
-    const currentIndex=milestones.findIndex(item=>Number(item.id)===Number(milestone?.id));
-    const limit=currentIndex<0?milestones.length:currentIndex;
     if(milestone?.scheduleMode==='parallel'){
       const reference=milestones.find(item=>Number(item.id)===Number(milestone.referenceMilestoneId));
-      if(!reference||reference.recordStatus==='deleted'||Number(reference.trackId||0)!==Number(milestone.trackId||0))return '';
-      return reference.startDate||'';
+      if(!reference||['deleted','archived'].includes(String(reference.recordStatus||'').toLowerCase())||Number(reference.id)===Number(milestone.id))return '';
+      const field=({start_date:'startDate',end_date:'endDate',deadline:'deadline',completion_date:'completionDate'})[milestone.referenceDateType||'start_date'];
+      const referenceDate=reference[field]||'';
+      return referenceDate?addWorkingDayOffset(referenceDate,Number(milestone.referenceOffsetDays)||0):'';
     }
+    const currentIndex=milestones.findIndex(item=>Number(item.id)===Number(milestone?.id));
+    const limit=currentIndex<0?milestones.length:currentIndex;
     for(let index=limit-1;index>=0;index--){
       const previous=milestones[index];
       if(Number(previous.trackId||0)!==Number(milestone?.trackId||0)||['deleted','archived'].includes(String(previous.recordStatus||'').toLowerCase()))continue;
@@ -3505,6 +3549,51 @@
       return referenceDate?getNextWorkingDay(referenceDate):fallbackStartDate||'';
     }
     return fallbackStartDate||'';
+  }
+
+  function milestoneReferenceCycle(project,currentId,candidateId){
+    const milestones=project?.milestones||[],visited=new Set();let item=milestones.find(row=>Number(row.id)===Number(candidateId));
+    while(item){const id=Number(item.id);if(id===Number(currentId)||visited.has(id))return true;visited.add(id);if(item.scheduleMode==='parallel'){item=milestones.find(row=>Number(row.id)===Number(item.referenceMilestoneId));continue;}const index=milestones.findIndex(row=>Number(row.id)===id);item=null;for(let cursor=index-1;cursor>=0;cursor--){const previous=milestones[cursor],status=String(previous.persistedStatus||previous.status||'').toLowerCase().replace(/[-_]+/g,' ');if(Number(previous.trackId||0)!==Number(milestones[index]?.trackId||0)||['deleted','archived'].includes(String(previous.recordStatus||'').toLowerCase())||['on hold','done','closed'].includes(status))continue;item=previous;break;}}
+    return false;
+  }
+
+  function milestoneReferenceOptionLabel(project,milestone){
+    const track=(project?.tracks||[]).find(row=>Number(row.id)===Number(milestone.trackId));
+    const trackLabel=track?`Track ${track.sequenceNo||track.id}`:'Track -';
+    return `${trackLabel} \u2013 ${milestone.actions||milestone.title||'Milestone'} \u2013 ${formatDate(milestone.startDate)||'-'} / ${formatDate(milestone.endDate)||'-'}`;
+  }
+
+  function renderMilestoneReferenceOptions(project,currentId,selectedId,query=''){
+    const normalized=String(query||'').trim().toLocaleLowerCase(),milestones=project?.milestones||[],byId=new Map(milestones.map(row=>[Number(row.id),row])),safeCache=new Map();
+    const canReference=candidateId=>{let cursor=Number(candidateId),path=[],pathSet=new Set(),valid=true;while(cursor){if(cursor===Number(currentId||0)){valid=false;break;}if(safeCache.has(cursor)){valid=safeCache.get(cursor);break;}if(pathSet.has(cursor)){valid=false;break;}const item=byId.get(cursor);if(!item){valid=true;break;}path.push(cursor);pathSet.add(cursor);if(item.scheduleMode==='parallel'){cursor=Number(item.referenceMilestoneId)||0;continue;}const index=milestones.findIndex(row=>Number(row.id)===cursor);let predecessor=null;for(let predecessorIndex=index-1;predecessorIndex>=0;predecessorIndex--){const row=milestones[predecessorIndex],status=String(row.persistedStatus||row.status||'').toLowerCase().replace(/[-_]+/g,' ');if(Number(row.trackId||0)!==Number(item.trackId||0)||['deleted','archived'].includes(String(row.recordStatus||'').toLowerCase())||['on hold','done','closed'].includes(status))continue;predecessor=row;break;}cursor=Number(predecessor?.id)||0;}path.forEach(id=>safeCache.set(id,valid));return valid;};
+    const selected=byId.get(Number(selectedId)),selectedIsValid=selected&&!['deleted','archived'].includes(String(selected.recordStatus||'').toLowerCase())&&canReference(selectedId);
+    const options=milestones.filter(row=>Number(row.id)!==Number(currentId)&&!['deleted','archived'].includes(String(row.recordStatus||'').toLowerCase())&&canReference(row.id)).map(row=>({row,label:milestoneReferenceOptionLabel(project,row)})).filter(item=>!normalized||item.label.toLocaleLowerCase().includes(normalized)||String(item.row.id)===normalized||Number(item.row.id)===Number(selectedId));
+    const stale=selectedId&&!selectedIsValid?`<option value="${escapeHtml(String(selectedId))}" selected disabled>Unavailable / deleted reference (ID ${escapeHtml(String(selectedId))}) - reselect</option>`:'';
+    return `<option value="">Select a reference milestone</option>${stale}${options.map(({row,label})=>`<option value="${escapeHtml(String(row.id))}" ${Number(row.id)===Number(selectedId)?'selected':''}>${escapeHtml(label)}</option>`).join('')}`;
+  }
+
+  function updateMilestoneScheduleControls(prefix,projectId,currentId){
+    const suffix=prefix==='m'?'':`-${currentId}`,mode=document.getElementById(`${prefix}-schedule-mode${suffix}`),referenceBox=document.getElementById(`${prefix}-reference-controls${suffix}`),search=document.getElementById(`${prefix}-reference-search${suffix}`),reference=document.getElementById(`${prefix}-reference-milestone${suffix}`),dateType=document.getElementById(`${prefix}-reference-date-type${suffix}`),offset=document.getElementById(`${prefix}-reference-offset-days${suffix}`),status=document.getElementById(`${prefix}-reference-status${suffix}`),resolvedCurrentId=currentId??(prefix==='m'?document.getElementById('m-id')?.value:null),project=projects.find(row=>Number(row.id)===Number(projectId||document.getElementById('m-project-id')?.value||(prefix==='inline'?projects.find(item=>(item.milestones||[]).some(milestone=>Number(milestone.id)===Number(currentId)))?.id:null)));
+    if(!mode)return;
+    const parallel=mode.value==='parallel',selected=reference?.value||'',oldStatus=status?.textContent||'';
+    if(referenceBox)referenceBox.classList.toggle('hidden',!parallel);
+    [search,reference,dateType,offset].forEach(control=>{if(control)control.disabled=!parallel;});
+    if(reference)reference.required=parallel;
+    if(offset)offset.required=parallel;
+    const start=document.getElementById(prefix==='m'?'m-start-date':`inline-start-date-${currentId}`);if(start)start.readOnly=parallel;
+    if(reference){reference.innerHTML=renderMilestoneReferenceOptions(project,resolvedCurrentId,selected,search?.value||'');if(selected&&reference.value!==String(selected)&&![...reference.options].some(option=>option.value===String(selected)))reference.value='';}
+    if(status){const selectedItem=(project?.milestones||[]).find(row=>Number(row.id)===Number(selected));status.textContent=parallel?(selectedItem&&selectedItem.recordStatus!=='deleted'?milestoneReferenceOptionLabel(project,selectedItem):selected?`Reference unavailable. Select another milestone.`:'Choose an active milestone in this Initiative.') : oldStatus;}
+    if(prefix==='m')updateMilestoneRuntimeDates(true);else if(currentId!=null)updateInlineMilestoneRuntimeDates(currentId,true);
+  }
+
+  function filterMilestoneReferenceOptions(prefix,currentId){const projectId=prefix==='m'?document.getElementById('m-project-id')?.value:projects.find(item=>(item.milestones||[]).some(milestone=>Number(milestone.id)===Number(currentId)))?.id;updateMilestoneScheduleControls(prefix,projectId,currentId);}
+
+  function addWorkingDayOffset(dateValue,offsetValue){
+    const value=milestoneDateInputValue(dateValue),offset=Number(offsetValue);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isInteger(offset))return '';
+    const date=new Date(`${value}T00:00:00`),direction=Math.sign(offset);let remaining=Math.abs(offset);
+    while(remaining){date.setDate(date.getDate()+direction);if(date.getDay()!==0&&date.getDay()!==6)remaining--;}
+    return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
   }
 
       function populateUserDropdowns() {
@@ -7852,7 +7941,7 @@
                         }
                         const days = m.days || '';
                         const calculatedEndDate = m.endDate || '';
-                        const calculatedDeadline = m.deadline || '';
+                        const calculatedDeadline = getMilestoneDeadline(m.startDate, calculatedEndDate);
                         const mStat = getEffectiveMilestoneStatus({
                           ...m,
                           days,
@@ -8214,7 +8303,9 @@
     const filterBar = document.querySelector('[data-delivery-filter-page="overview"]');
     const activeFilter = [...(filterBar?.querySelectorAll('input,select') || [])].some(control => {
       if (control.id === 'filter-record-status' || control.type === 'checkbox' || control.disabled) return false;
-      return String(control.value || '').trim() !== '';
+      const value=String(control.value||'').trim();
+      if(control.id==='filter-reviewed'&&value==='all')return false;
+      return value!=='';
     });
     if (activeFilter) return 'Clear Overview filters before reordering Tracks.';
     return '';
@@ -8325,10 +8416,14 @@
     const timestamp = new Date().toISOString();
     const payload = ordered.map((track, index) => ({ id: Number(track.id), initiative_id: Number(initiativeId), sequence_no: index + 1, display_order: index + 1, updated_at: timestamp }));
     try {
-      const result = await supabaseClient.from('milestone_tracks').upsert(payload, { onConflict: 'id' }).select('id,initiative_id,sequence_no,display_order');
-      if (result.error) throw result.error;
-      if (!Array.isArray(result.data) || result.data.length !== payload.length) throw new Error('Supabase did not confirm the complete Track order.');
-      const confirmed = new Map(result.data.map(row => [Number(row.id), row]));
+      const highWater = Math.max(0, ...originalTracks.flatMap(track=>[Number(track.sequenceNo)||0,Number(track.displayOrder)||0])) + ordered.length + 1;
+      for(const [index,track] of ordered.entries()){
+        const temporaryOrder=highWater+index,result=await supabaseClient.from('milestone_tracks').update({sequence_no:temporaryOrder,display_order:temporaryOrder,updated_at:timestamp}).eq('id',Number(track.id));
+        if(result.error)throw result.error;
+      }
+      const results=await Promise.all(payload.map(row=>supabaseClient.from('milestone_tracks').update({sequence_no:row.sequence_no,display_order:row.display_order,updated_at:timestamp}).eq('id',row.id).select('id,initiative_id,sequence_no,display_order').single()));
+      const failed=results.find(result=>result.error);if(failed)throw failed.error;
+      const confirmed = new Map(results.map(result=>[Number(result.data?.id),result.data]));
       for (const [index, track] of ordered.entries()) {
         const row = confirmed.get(Number(track.id));
         if (!row || Number(row.initiative_id) !== Number(initiativeId) || Number(row.sequence_no) !== index + 1 || Number(row.display_order) !== index + 1) throw new Error('Supabase returned an inconsistent Track order.');
@@ -8339,6 +8434,11 @@
       updateTrackOrderDom(project);
       showToast('Track order saved.', 'success');
     } catch (error) {
+      try{
+        const rollbackHighWater=Math.max(0,...ordered.map(track=>Number(track.sequenceNo)||0),...originalTracks.flatMap(track=>[Number(track.sequenceNo)||0,Number(track.displayOrder)||0]))+ordered.length*2+1;
+        for(const [index,track] of ordered.entries()){const temporaryOrder=rollbackHighWater+index;await supabaseClient.from('milestone_tracks').update({sequence_no:temporaryOrder,display_order:temporaryOrder,updated_at:new Date().toISOString()}).eq('id',Number(track.id));}
+        for(const track of originalTracks){const values=originalValues.get(Number(track.id));await supabaseClient.from('milestone_tracks').update({sequence_no:Number(values.sequenceNo),display_order:Number(values.displayOrder),updated_at:new Date().toISOString()}).eq('id',Number(track.id));}
+      }catch(rollbackError){console.error('Track order rollback failed:',rollbackError);}
       project.tracks = originalTracks;
       originalTracks.forEach(track => Object.assign(track, originalValues.get(Number(track.id))));
       updateTrackOrderDom(project);
@@ -8439,7 +8539,7 @@
                 return renderInlineMilestoneRow(project, m, canEdit);
               }
               const calculatedEndDate = m.endDate || '';
-              const calculatedDeadline = m.deadline || '';
+              const calculatedDeadline = getMilestoneDeadline(m.startDate, calculatedEndDate);
               const mStat = getEffectiveMilestoneStatus({...m, endDate: calculatedEndDate, deadline: calculatedDeadline});
               const dev = calculateDeviation(calculatedDeadline, m.startDate, m.completionDate);
               const dayStatus = calculateMilestoneDayStatus(calculatedDeadline, m.completionDate);
@@ -8608,7 +8708,7 @@
         ? milestones.find(item=>Number(item.id)===Number(milestone.referenceMilestoneId))
         : null;
       const scheduledStart=scheduleMode==='parallel'
-        ? (reference&&reference.recordStatus!=='deleted'&&isSameTrack(reference.trackId,milestone.trackId)?reference.startDate||'':milestone.startDate||'')
+        ? (reference&&reference.recordStatus!=='deleted'?getMilestoneScheduleStartDate(project,milestone,milestone.startDate||''):milestone.startDate||'')
         : getNextWorkingDay(referenceDate);
       const schedule = calculateMilestoneSchedule(milestone,{startDate:scheduledStart},{baseSchedule:true});
       const {startDate,endDate,deadline} = schedule;
@@ -8672,6 +8772,29 @@
     return true;
   }
 
+  async function cascadeReferencedMilestoneSchedule(project,sourceMilestoneId){
+    const milestones=project?.milestones||[],queue=(Array.isArray(sourceMilestoneId)?sourceMilestoneId:[sourceMilestoneId]).map(Number),visited=new Set(queue),updates=[];
+    while(queue.length){
+      const changedId=queue.shift();
+      const dependents=milestones.filter(item=>Number(item.referenceMilestoneId)===changedId&&item.scheduleMode==='parallel'&&!['deleted','archived'].includes(String(item.recordStatus||'').toLowerCase())).sort((a,b)=>Number(a.sequenceNo||0)-Number(b.sequenceNo||0));
+      for(const milestone of dependents){
+        const id=Number(milestone.id);if(visited.has(id))continue;visited.add(id);
+        if(['on hold','done','closed'].includes(String(milestone.status||'').trim().toLowerCase().replace(/[-_]+/g,' ')))continue;
+        const startDate=getMilestoneScheduleStartDate(project,milestone,'');if(!startDate)continue;
+        const schedule=calculateMilestoneSchedule(milestone,{startDate},{baseSchedule:true}),endDate=schedule.endDate||'',deadline=getMilestoneDeadline(startDate,endDate),status=getEffectiveMilestoneStatus({...milestone,startDate,endDate,deadline}),deviationDays=schedule.hasHistory?schedule.deviationDays:calculateDeviation(deadline,startDate,milestone.completionDate)||null;
+        const payload={start_date:startDate,end_date:endDate||null,deadline:deadline||null,status,deviation_days:deviationDays,...(schedule.hasHistory?{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks}:{})};
+        const changed=String(milestone.startDate||'')!==String(startDate||'')||String(milestone.endDate||'')!==String(endDate||'')||String(milestone.deadline||'')!==String(deadline||'')||String(milestone.status||'')!==String(status||'')||String(milestone.deviationDays||'')!==String(deviationDays||'');
+        Object.assign(milestone,{startDate,endDate,deadline,status,deviationDays,...(schedule.hasHistory?{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks}:{})});
+        const kpiMilestone=kpiMilestoneRows.find(row=>Number(row.id)===id);if(kpiMilestone)Object.assign(kpiMilestone,payload);
+        if(changed)updates.push({id,payload});queue.push(id);
+      }
+    }
+    if(!updates.length)return true;
+    const results=await Promise.all(updates.map(({id,payload})=>supabaseClient.from('milestones').update(payload).eq('id',id)));
+    const failed=results.find(result=>result.error);if(failed){showToast(`Unable to update referenced Milestone dates: ${failed.error.message}`,'error');return false;}
+    updates.forEach(({id})=>refreshMilestoneRowInPlace(project,id));return true;
+  }
+
   function milestoneScheduleImpactControl(id) {
     return `<label for="${id}" class="mt-1 flex items-center gap-1 text-[10px] font-semibold text-red-700"><input id="${id}" type="checkbox"><span class="min-w-0 whitespace-normal">Impact Below Dates?</span></label>`;
   }
@@ -8708,10 +8831,16 @@
     const el = name => document.getElementById(`${name}-${milestoneId}`);
     const val = name => el(name)?.value.trim() || '';
     const actions=val('inline-actions'), owner=val('inline-owner'), dependency=val('inline-dependency'), remarks=val('inline-remarks'), days=val('inline-days'), completionDate=val('inline-completion-date');
-    const scheduleMode=milestone.scheduleMode==='parallel'?'parallel':'sequential';
+    const scheduleMode=document.getElementById(`inline-schedule-mode-${milestoneId}`)?.value==='parallel'?'parallel':'sequential';
+    const referenceMilestoneId=scheduleMode==='parallel'?Number(document.getElementById(`inline-reference-milestone-${milestoneId}`)?.value)||null:null;
+    const referenceDateType=document.getElementById(`inline-reference-date-type-${milestoneId}`)?.value||'start_date';
+    const referenceOffsetRaw=document.getElementById(`inline-reference-offset-days-${milestoneId}`)?.value??'0',referenceOffsetDays=Number(referenceOffsetRaw);
+    if(scheduleMode==='parallel'&&(!referenceMilestoneId||!['start_date','end_date','deadline','completion_date'].includes(referenceDateType)||!Number.isInteger(referenceOffsetDays)||!(project.milestones||[]).some(item=>Number(item.id)===referenceMilestoneId&&!['deleted','archived'].includes(String(item.recordStatus||'').toLowerCase()))||milestoneReferenceCycle(project,milestoneId,referenceMilestoneId))){showToast('Choose an active, non-circular Reference Milestone, Reference Date, and whole-day offset.','error');return false;}
+    const scheduledMilestone={...milestone,scheduleMode,referenceMilestoneId,referenceDateType,referenceOffsetDays};
     const enteredStartDate=val('inline-start-date');
-    const startDate=scheduleMode==='parallel'?getMilestoneScheduleStartDate(project,milestone,enteredStartDate):enteredStartDate;
-    const endDate=val('inline-end-date'),deadline=val('inline-deadline');
+    const startDate=scheduleMode==='parallel'?getMilestoneScheduleStartDate(project,scheduledMilestone,''):enteredStartDate;
+    if(scheduleMode==='parallel'&&!startDate){showToast('The selected Reference Date has no date. Choose another Reference Date or milestone.','error');return false;}
+    const endDate=val('inline-end-date'),deadline=getMilestoneDeadline(startDate,endDate);
     const impactBelow = el('inline-impact-below')?.checked === true;
     if(!actions){showToast('Actions and Milestoner Owner are required.','error');el('inline-actions')?.focus();return false;}
     if(!owner){showToast('Actions and Milestoner Owner are required.','error');el('inline-owner')?.focus();return false;}
@@ -8719,9 +8848,9 @@
     if(startDate&&completionDate&&completionDate<startDate){showToast('Completion Date cannot be before Start Date.','error');el('inline-completion-date')?.focus();return false;}
     const duplicate=(project.milestones||[]).some(item=>Number(item.id)!==Number(milestoneId||0)&&item.recordStatus!=='deleted'&&Number(item.trackId||0)===Number(milestone.trackId||0)&&String(item.actions||item.title||'').trim().toLowerCase()===actions.toLowerCase());
     if(duplicate){showToast('An active Milestone with the same action already exists in this Initiative and Track.','error');el('inline-actions')?.focus();return false;}
-    const schedule=calculateMilestoneSchedule(milestone,{days,startDate});
+    const schedule=calculateMilestoneSchedule(scheduledMilestone,{days,startDate});
     const status=getEffectiveMilestoneStatus({...milestone,days,startDate,endDate,deadline,completionDate});
-    const milestoneRecord={actions,owner,dependency:dependency||null,days:normalizeMilestoneDays(days),start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,completion_date:completionDate||null,status,deviation_days:calculateDeviation(deadline,startDate,completionDate)||null,record_status:milestone.recordStatus||'active',schedule_mode:scheduleMode,...(scheduleMode==='parallel'?{reference_milestone_id:milestone.referenceMilestoneId||null}:{})};
+    const milestoneRecord={actions,owner,dependency:dependency||null,days:normalizeMilestoneDays(days),start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,completion_date:completionDate||null,status,deviation_days:calculateDeviation(deadline,startDate,completionDate)||null,record_status:milestone.recordStatus||'active',schedule_mode:scheduleMode,reference_milestone_id:referenceMilestoneId,reference_date_type:scheduleMode==='parallel'?referenceDateType:'start_date',reference_offset_days:scheduleMode==='parallel'?referenceOffsetDays:0};
     const plannerTypeControl=el('inline-planner-type');if(plannerTypeControl)milestoneRecord.planner_type_id=plannerTypeControl.value||null;
     if(schedule.hasHistory)Object.assign(milestoneRecord,{start_date:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),deviation_days:schedule.deviationDays,remarks:schedule.remarks});
     Object.assign(milestoneRecord,milestoneRemarksRecord(remarks,milestoneRecord.remarks??milestone.remarks));
@@ -8740,13 +8869,14 @@
       const {data,error}=result;
       if(error){showToast(`Unable to save Milestone: ${error.message}`,'error');return false;}
       if(data&&Object.hasOwn(data,'planner_type_id'))milestone.plannerTypeId=data.planner_type_id;
-      Object.assign(milestone,{id:Number(data?.id??milestone.id),sequenceNo:Number(data?.sequence_no??sequenceNo)||sequenceNo,recordStatus:data?.record_status||milestone.recordStatus||'active',actions:data?.actions??actions,owner:data?.owner??owner,dependency:data?.dependency??dependency,milestoneRemarks:data?.milestone_remarks??remarks,scheduleMode:data?.schedule_mode??milestoneRecord.schedule_mode,referenceMilestoneId:data?.reference_milestone_id??milestoneRecord.reference_milestone_id,days:data?.days??days,startDate:data?.start_date??startDate,endDate:data?.end_date??endDate,deadline:data?.deadline??deadline,completionDate:data?.completion_date??completionDate,status:data?.status??status,deviationDays:(data?.deviation_days??calculateDeviation(deadline,startDate,completionDate))||null,createdBy:data?.created_by_name??data?.created_by??milestone.createdBy??'',createdAt:data?.created_at??milestone.createdAt??'',modifiedBy:data?.modified_by_name??data?.updated_by_name??data?.modified_by??data?.updated_by??milestone.modifiedBy??'',updatedAt:data?.modified_at??data?.updated_at??milestone.updatedAt??'',archivedBy:data?.archived_by_name??data?.archived_by??milestone.archivedBy??'',archivedAt:data?.archived_at??milestone.archivedAt??''});
+      Object.assign(milestone,{id:Number(data?.id??milestone.id),sequenceNo:Number(data?.sequence_no??sequenceNo)||sequenceNo,recordStatus:data?.record_status||milestone.recordStatus||'active',actions:data?.actions??actions,owner:data?.owner??owner,dependency:data?.dependency??dependency,milestoneRemarks:data?.milestone_remarks??remarks,scheduleMode:data?.schedule_mode??milestoneRecord.schedule_mode,referenceMilestoneId:data?.reference_milestone_id??milestoneRecord.reference_milestone_id,referenceDateType:data?.reference_date_type??milestoneRecord.reference_date_type,referenceOffsetDays:data?.reference_offset_days??milestoneRecord.reference_offset_days,days:data?.days??days,startDate:data?.start_date??startDate,endDate:data?.end_date??endDate,deadline:data?.deadline??deadline,completionDate:data?.completion_date??completionDate,status:data?.status??status,deviationDays:(data?.deviation_days??calculateDeviation(deadline,startDate,completionDate))||null,createdBy:data?.created_by_name??data?.created_by??milestone.createdBy??'',createdAt:data?.created_at??milestone.createdAt??'',modifiedBy:data?.modified_by_name??data?.updated_by_name??data?.modified_by??data?.updated_by??milestone.modifiedBy??'',updatedAt:data?.modified_at??data?.updated_at??milestone.updatedAt??'',archivedBy:data?.archived_by_name??data?.archived_by??milestone.archivedBy??'',archivedAt:data?.archived_at??milestone.archivedAt??''});
       milestone.remarks=data?.remarks??milestoneRecord.remarks;
       milestone.milestoneRemarks=getStoredMilestoneRemarks({remarks:milestone.remarks});
       if(schedule.hasHistory)Object.assign(milestone,{startDate:data?.start_date??schedule.startDate,days:data?.days??schedule.days,deviationDays:data?.deviation_days??schedule.deviationDays});
       if(isDraft)kpiMilestoneRows.push({...data});else{const ri=kpiMilestoneRows.findIndex(r=>Number(r.id)===Number(milestone.id));if(ri>=0)kpiMilestoneRows[ri]={...kpiMilestoneRows[ri],...data};}
       inlineMilestoneEditId=null;
       if(impactBelow && !await cascadeTrackMilestoneSchedule(project,milestone.id))return false;
+      if(!await cascadeReferencedMilestoneSchedule(project,milestone.id))return false;
       await synchronizeInitiativeRevisedEndDates([project]);
       if(addNextRow){const savedId=milestone.id,savedTrackId=milestone.trackId||null;addMilestoneInline(projectId,savedTrackId,null,savedId);requestAnimationFrame(()=>{window.scrollTo(scrollX,scrollY);requestAnimationFrame(()=>{const input=document.getElementById(`inline-actions-${inlineMilestoneEditId}`);input?.focus({preventScroll:true});input?.scrollIntoView({block:'nearest',inline:'nearest'});});});}
       else{viewState.milestoneId=milestone.id;refreshMilestoneRowInPlace(project,milestone.id);restoreDeliveryViewState(viewState);}
@@ -9048,7 +9178,7 @@
     const track = (project.tracks || []).find(item => Number(item.id) === Number(milestone.trackId));
     const days = milestone.days || '';
     const endDate = milestoneDateInputValue(milestone.endDate) || '';
-    const deadline = milestoneDateInputValue(milestone.deadline) || '';
+    const deadline = getMilestoneDeadline(milestone.startDate, endDate);
     const status = getEffectiveMilestoneStatus({
       ...milestone,
       days,
@@ -9079,9 +9209,9 @@
         <td class="py-2 px-3"><select id="inline-dependency-${id}" class="milestone-cell-control w-full px-2 py-1 border rounded bg-white">${getMilestoneUserOptions(milestone.dependency || '')}</select></td>
         <td class="py-2 px-3 text-center">${getStatusBadge(status || '-')}</td>
         <td class="py-2 px-3"><input id="inline-days-${id}" value="${escapeHtml(days)}" placeholder="5 / TBD / -" oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control w-full px-2 py-1 border rounded"></td>
-        <td class="milestone-date-column py-2 px-3"><input id="inline-start-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.startDate))}" oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded">${milestoneScheduleImpactControl(`inline-impact-below-${id}`)}</td>
-        <td class="milestone-date-column py-2 px-3"><input id="inline-end-date-${id}" type="date" value="${escapeHtml(endDate)}" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
-        <td class="milestone-date-column py-2 px-3"><input id="inline-deadline-${id}" type="date" value="${escapeHtml(deadline)}" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
+        <td class="milestone-date-column py-2 px-3"><input id="inline-start-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.startDate))}" ${milestone.scheduleMode==='parallel'?'readonly':''} oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"><label class="mt-1 block text-[10px]">Schedule<select id="inline-schedule-mode-${id}" onchange="updateMilestoneScheduleControls('inline',${project.id},${id})" class="w-full rounded border bg-white px-1 py-1"><option value="sequential" ${milestone.scheduleMode!=='parallel'?'selected':''}>Sequential</option><option value="parallel" ${milestone.scheduleMode==='parallel'?'selected':''}>Parallel</option></select></label><div id="inline-reference-controls-${id}" class="${milestone.scheduleMode==='parallel'?'':'hidden'} mt-1 grid gap-1"><input id="inline-reference-search-${id}" type="search" ${milestone.scheduleMode==='parallel'?'':'disabled'} oninput="filterMilestoneReferenceOptions('inline',${id})" placeholder="Search reference milestones" aria-label="Search Reference Milestones" class="w-full rounded border px-1 py-1 text-[10px]"><select id="inline-reference-milestone-${id}" ${milestone.scheduleMode==='parallel'?'required':'disabled'} onchange="updateInlineMilestoneRuntimeDates(${id},true)" aria-label="Reference Milestone" class="w-full rounded border bg-white px-1 py-1 text-[10px]">${renderMilestoneReferenceOptions(project,id,milestone.referenceMilestoneId||'')}</select><select id="inline-reference-date-type-${id}" ${milestone.scheduleMode==='parallel'?'':'disabled'} onchange="updateInlineMilestoneRuntimeDates(${id},true)" aria-label="Reference Date" class="w-full rounded border bg-white px-1 py-1 text-[10px]"><option value="start_date" ${(milestone.referenceDateType||'start_date')==='start_date'?'selected':''}>Start Date</option><option value="end_date" ${milestone.referenceDateType==='end_date'?'selected':''}>End Date</option><option value="deadline" ${milestone.referenceDateType==='deadline'?'selected':''}>Deadline</option><option value="completion_date" ${milestone.referenceDateType==='completion_date'?'selected':''}>Completion</option></select><input id="inline-reference-offset-days-${id}" type="number" step="1" ${milestone.scheduleMode==='parallel'?'required':'disabled'} value="${Number(milestone.referenceOffsetDays)||0}" oninput="updateInlineMilestoneRuntimeDates(${id},true)" aria-label="Reference offset in working days" class="w-full rounded border px-1 py-1 text-[10px]"><p id="inline-reference-status-${id}" role="status" class="text-[10px] text-slate-600"></p></div>${milestoneScheduleImpactControl(`inline-impact-below-${id}`)}</td>
+        <td class="milestone-date-column py-2 px-3"><input id="inline-end-date-${id}" type="date" value="${escapeHtml(endDate)}" ${milestone.scheduleMode==='parallel'?'readonly':''} oninput="updateInlineMilestoneRuntimeDates(${id}, false)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
+        <td class="milestone-date-column py-2 px-3"><input id="inline-deadline-${id}" type="date" value="${escapeHtml(deadline)}" readonly aria-readonly="true" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded bg-slate-100"></td>
         <td class="milestone-date-column py-2 px-3"><input id="inline-completion-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.completionDate))}" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
         <td class="milestone-remarks-column py-2 px-3"><textarea id="inline-remarks-${id}" rows="3" maxlength="10000" aria-label="Milestone Remarks" class="milestone-cell-control milestone-remarks-editor w-full px-2 py-1 border rounded whitespace-pre-wrap break-words">${escapeHtml(milestone.milestoneRemarks || '')}</textarea></td>
         <td class="py-2 px-3 text-center font-mono">${deviation === '' ? '-' : deviation}</td>
@@ -11748,6 +11878,12 @@
       ).value =
         milestone.id;
 
+      document.getElementById('m-schedule-mode').value=milestone.scheduleMode==='parallel'?'parallel':'sequential';
+      document.getElementById('m-reference-date-type').value=milestone.referenceDateType||'start_date';
+      document.getElementById('m-reference-offset-days').value=Number(milestone.referenceOffsetDays)||0;
+      document.getElementById('m-reference-milestone').innerHTML=renderMilestoneReferenceOptions(project,milestone.id,milestone.referenceMilestoneId||'');
+      document.getElementById('m-reference-milestone').value=milestone.referenceMilestoneId?String(milestone.referenceMilestoneId):'';
+
       if (trackSelect) {
         trackSelect.value =
           milestone.trackId
@@ -11787,8 +11923,13 @@
       ).value =
         milestoneDateInputValue(milestone.completionDate);
 
-      updateMilestoneRuntimeDates(false);
+      updateMilestoneScheduleControls('m',projectId,milestone.id);
     } else {
+      document.getElementById('m-schedule-mode').value='sequential';
+      document.getElementById('m-reference-date-type').value='start_date';
+      document.getElementById('m-reference-offset-days').value='0';
+      document.getElementById('m-reference-milestone').innerHTML=renderMilestoneReferenceOptions(project,null,'');
+      updateMilestoneScheduleControls('m',projectId,null);
       updateMilestoneRuntimeDates();
     }
 
@@ -12376,13 +12517,16 @@
     const duplicateMilestone = (initiative.milestones || []).some(item => Number(item.id) !== Number(milestoneId || 0) && item.recordStatus !== 'deleted' && Number(item.trackId || 0) === Number(initiative.deliveryMethod === 'Agile' ? selectedTrackId : 0) && String(item.actions || item.title || '').trim().toLowerCase() === actions.toLowerCase());
     if (duplicateMilestone) { showToast('An active Milestone with the same action already exists in this Initiative and Track.', 'error'); return; }
     const sourceMilestone=(initiative.milestones||[]).find(item=>Number(item.id)===Number(milestoneId))||{};
-    const scheduleMode=sourceMilestone.scheduleMode==='parallel'?'parallel':'sequential';
-    const referenceMilestoneId=scheduleMode==='parallel'?sourceMilestone.referenceMilestoneId||null:null;
-    if(scheduleMode==='parallel'&&!referenceMilestoneId){showToast('The parallel Reference Milestone is missing. Re-select a valid earlier Milestone.','error');return;}
-    if(scheduleMode==='parallel')startDate=getMilestoneScheduleStartDate(initiative,{...sourceMilestone,id:milestoneId||null,trackId:initiative.deliveryMethod==='Agile'?Number(selectedTrackId):null},startDate);
-    const schedule=calculateMilestoneSchedule(sourceMilestone,{days,startDate});
+    const scheduleMode=document.getElementById('m-schedule-mode')?.value==='parallel'?'parallel':'sequential';
+    const referenceMilestoneId=scheduleMode==='parallel'?Number(document.getElementById('m-reference-milestone')?.value)||null:null;
+    const referenceDateType=document.getElementById('m-reference-date-type')?.value||'start_date';
+    const referenceOffsetRaw=document.getElementById('m-reference-offset-days')?.value??'0',referenceOffsetDays=Number(referenceOffsetRaw);
+    if(scheduleMode==='parallel'&&(!referenceMilestoneId||!['start_date','end_date','deadline','completion_date'].includes(referenceDateType)||!Number.isInteger(referenceOffsetDays)||!(initiative.milestones||[]).some(item=>Number(item.id)===referenceMilestoneId&&!['deleted','archived'].includes(String(item.recordStatus||'').toLowerCase()))||milestoneReferenceCycle(initiative,milestoneId,referenceMilestoneId))){showToast('Choose an active, non-circular Reference Milestone, Reference Date, and whole-day offset.','error');return;}
+    const scheduledMilestone={...sourceMilestone,id:Number(milestoneId)||null,scheduleMode,referenceMilestoneId,referenceDateType,referenceOffsetDays,trackId:initiative.deliveryMethod==='Agile'?Number(selectedTrackId)||null:null};
+    if(scheduleMode==='parallel'){startDate=getMilestoneScheduleStartDate(initiative,scheduledMilestone,'');if(!startDate){showToast('The selected Reference Date has no date. Choose another Reference Date or milestone.','error');return;}}
+    const schedule=calculateMilestoneSchedule(scheduledMilestone,{days,startDate});
     const endDate = milestoneDateInputValue(document.getElementById('m-end-date')?.value ?? schedule.endDate);
-    const deadline = milestoneDateInputValue(document.getElementById('m-deadline')?.value ?? schedule.deadline);
+    const deadline = getMilestoneDeadline(startDate, endDate);
     const finalStatus = schedule.hasHistory?getEffectiveMilestoneStatus({...sourceMilestone,days:schedule.days,startDate:schedule.startDate,endDate,deadline,completionDate}):evaluateMilestoneStatus(
       title,
       days,
@@ -12432,8 +12576,6 @@
   }
 
     const existingMilestone = milestoneId ? (initiative.milestones || []).find(m => Number(m.id) === Number(milestoneId)) : null;
-    const savedScheduleMode = existingMilestone?.scheduleMode === 'parallel' ? 'parallel' : 'sequential';
-    const savedReferenceMilestoneId = savedScheduleMode === 'parallel' ? existingMilestone?.referenceMilestoneId || null : null;
     const impactBelow = document.getElementById('m-impact-below')?.checked === true;
     const databaseRecord = {
 
@@ -12451,9 +12593,10 @@
           ? Number(selectedTrackId)
           : null,
 
-      schedule_mode: savedScheduleMode,
-
-      ...(savedScheduleMode === 'parallel' ? { reference_milestone_id: savedReferenceMilestoneId } : {}),
+      schedule_mode: scheduleMode,
+      reference_milestone_id: referenceMilestoneId,
+      reference_date_type: scheduleMode==='parallel'?referenceDateType:'start_date',
+      reference_offset_days: scheduleMode==='parallel'?referenceOffsetDays:0,
 
       milestone_title:
         title,
@@ -12527,11 +12670,12 @@
       return;
     }
 
-    if (existingMilestone && impactBelow) {
-      Object.assign(existingMilestone,{startDate:schedule.startDate,endDate,deadline,days:normalizeMilestoneDays(schedule.days),completionDate,status:finalStatus,trackId:databaseRecord.track_id,scheduleMode:databaseRecord.schedule_mode,referenceMilestoneId:databaseRecord.reference_milestone_id});
+    if (existingMilestone) {
+      Object.assign(existingMilestone,{startDate:schedule.startDate,endDate,deadline,days:normalizeMilestoneDays(schedule.days),completionDate,status:finalStatus,trackId:databaseRecord.track_id,scheduleMode:databaseRecord.schedule_mode,referenceMilestoneId:databaseRecord.reference_milestone_id,referenceDateType:databaseRecord.reference_date_type,referenceOffsetDays:databaseRecord.reference_offset_days});
       existingMilestone.remarks=databaseRecord.remarks;
       if(schedule.hasHistory)Object.assign(existingMilestone,{deviationDays:schedule.deviationDays});
-      await applyMilestoneScheduleImpact([{project:initiative,milestone:existingMilestone}],true);
+      if(impactBelow)await applyMilestoneScheduleImpact([{project:initiative,milestone:existingMilestone}],true);
+      if(!await cascadeReferencedMilestoneSchedule(initiative,existingMilestone.id)){closeMilestoneModal();await loadInitiativesFromSupabase();return;}
     }
     closeMilestoneModal();
     await loadInitiativesFromSupabase();
@@ -12851,6 +12995,7 @@
       const createdPrograms = [];
       const createdInitiatives = [];
       const createdTracks = [];
+      const importedMilestoneIds=new Map(),pendingReferenceLinks=[];
       let nextInitiativeSequence = await getNextInitiativeSequence();
       try {
         for (const item of prepared) {
@@ -12929,7 +13074,8 @@
           if (item.milestoneTitle) {
             const trackId = item.trackName ? tracksByKey.get(item.trackKey) : null;
             const endDate = calculateMilestoneEndDate(item.daysText, item.startDate);
-            const status = evaluateMilestoneStatus(item.milestoneTitle, item.daysText, item.startDate, endDate, endDate, item.completionDate);
+            const deadline = getMilestoneDeadline(item.startDate, endDate);
+            const status = evaluateMilestoneStatus(item.milestoneTitle, item.daysText, item.startDate, endDate, deadline, item.completionDate);
             const { error } = await supabaseClient.from('milestones').insert({
               initiative_id: initiativeId,
               initiative_name: item.initiativeName,
@@ -12944,7 +13090,7 @@
               status,
               start_date: item.startDate || null,
               end_date: endDate || null,
-              deadline: endDate || null,
+              deadline: deadline || null,
               completion_date: item.completionDate || null,
               deviation_days: calculateDeviation(endDate, item.startDate, item.completionDate) || null
             });
@@ -12973,7 +13119,7 @@
       programs: ['Program Name*', 'Purpose', 'Program Owner', 'Program Assigned To', 'Vertical*', 'Start Date', 'Target End Date', 'Revised End Date', 'Revised Start Date', 'Actual End Date', 'Impact Category', 'Measurable Impact', 'Business Benefit','Functional Engineer ID','Technical Engineer ID'],
       initiatives: ['Program Name', 'Initiative Name*', 'Description', 'Type*', 'CR No', 'Vertical*', 'Delivery Method*', 'Business Owner*', 'Assigned To*', 'Start Date', 'Target End Date', 'Revised End Date', 'Revised Start Date', 'Actual End Date', 'Impact Category*', 'Measurable Impact*', 'Business Benefit*','Functional Engineer ID','Technical Engineer ID'],
       tracks: ['Initiative Name*', 'Track Name*', 'Display Order'],
-      milestones: ['Initiative Name*', 'Track Name', 'Track - User Story*', 'Milestone - Actions*', 'Milestoner Owner*', 'Dependency', 'Days', 'Start Date', 'Completion Date', 'Program Name', 'Milestone Planner Type ID', 'Remarks', 'Revision History']
+      milestones: ['Initiative Name*', 'Track Name', 'Track - User Story*', 'Milestone - Actions*', 'Milestoner Owner*', 'Dependency', 'Days', 'Start Date', 'Completion Date', 'Program Name', 'Milestone Planner Type ID', 'Remarks', 'Revision History', 'Milestone ID', 'Schedule Mode', 'Reference Milestone ID', 'Reference Date Type', 'Reference Offset (Working Days)']
     };
   }
 
@@ -13011,7 +13157,7 @@
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
       projects.flatMap(initiative => (initiative.milestones || []).map(milestone => {
         const track = (initiative.tracks || []).find(item => Number(item.id) === Number(milestone.trackId));
-        return [initiative.name, value(track?.name), value(milestone.title), value(milestone.actions), value(milestone.owner), value(milestone.dependency), value(milestone.days), value(milestone.startDate), value(milestone.completionDate),value(programs.find(program=>String(program.id)===String(initiative.programId))?.name),value(milestone.plannerTypeId),value(milestone.milestoneRemarks),value(milestone.remarks)];
+        return [initiative.name, value(track?.name), value(milestone.title), value(milestone.actions), value(milestone.owner), value(milestone.dependency), value(milestone.days), value(milestone.startDate), value(milestone.completionDate),value(programs.find(program=>String(program.id)===String(initiative.programId))?.name),value(milestone.plannerTypeId),value(milestone.milestoneRemarks),value(milestone.remarks),value(milestone.id),value(milestone.scheduleMode||'sequential'),value(milestone.referenceMilestoneId),value(milestone.referenceDateType||'start_date'),value(Number(milestone.referenceOffsetDays)||0)];
       })),
       headers.milestones
     ), 'Milestones');
@@ -13037,7 +13183,7 @@
       ['Retail Express', 'Functional Track', 1]
     ], headers.tracks), 'Tracks');
     XLSX.utils.book_append_sheet(workbook, deliverySheet([
-      ['Retail Express', 'Functional Track', 'Requirement Signoff', 'Finalize BRD and stakeholder signoff', 'Amit Kumar', '', 5, '2026-09-01', '']
+      ['Retail Express', 'Functional Track', 'Requirement Signoff', 'Finalize BRD and stakeholder signoff', 'Amit Kumar', '', 5, '2026-09-01', '', '', '', '', '', '', 'sequential', '', 'start_date', 0]
     ], headers.milestones), 'Milestones');
     XLSX.writeFile(workbook, 'Delivery_Hub_Import_Template.xlsx');
     closeImportModal();
@@ -13130,14 +13276,21 @@
         if (!String(row['Initiative Name*'] || '').trim() || !String(row['Track Name*'] || '').trim()) errors.push(`Tracks row ${index + 2}: Initiative Name and Track Name are required.`);
       });
 
+      const milestoneRowsBySourceId=new Map();
+      milestoneRows.forEach((row,index)=>{const sourceId=String(row['Milestone ID']||'').trim();if(sourceId){if(milestoneRowsBySourceId.has(sourceId))errors.push(`Milestones row ${index+2}: Duplicate Milestone ID.`);else milestoneRowsBySourceId.set(sourceId,row);}});
       milestoneRows.forEach((row, index) => {
         const story = String(milestoneValue(row, 'Workstream / User Story*', 'Track - User Story*', 'Track - User Story') || '').trim();
         const actions = String(milestoneValue(row, 'Milestone / Executive Action*', 'Milestone - Actions*', 'Milestone - Actions') || '').trim();
         const owner = String(milestoneValue(row, 'Milestone Owner*', 'Milestoner Owner*', 'Milestone Owner') || '').trim();
+        const scheduleMode=String(row['Schedule Mode']||'sequential').trim().toLowerCase(),referenceId=String(row['Reference Milestone ID']||'').trim(),referenceDateType=String(row['Reference Date Type']||'start_date').trim(),referenceOffset=Number(String(row['Reference Offset (Working Days)']??'0').trim()||0);
         if (!String(row['Initiative Name*'] || '').trim()) errors.push(`Milestones row ${index + 2}: Initiative Name is required.`);
         if (!story || !actions || !owner) errors.push(`Milestones row ${index + 2}: Workstream / User Story, Milestone / Executive Action, and Milestone Owner are required.`);
         if (owner && !activeUsers.has(owner.toLowerCase())) errors.push(`Milestones row ${index + 2}: Owner is not in User Master.`);
+        if(!['sequential','parallel'].includes(scheduleMode))errors.push(`Milestones row ${index+2}: Schedule Mode must be Sequential or Parallel.`);
+        if(scheduleMode==='parallel'&&(!String(row['Milestone ID']||'').trim()||!referenceId||referenceId===String(row['Milestone ID']).trim()||!['start_date','end_date','deadline','completion_date'].includes(referenceDateType)||!Number.isInteger(referenceOffset)))errors.push(`Milestones row ${index+2}: Parallel scheduling requires a stable Milestone ID, a valid different Reference Milestone ID, Reference Date Type, and whole-day offset.`);
+        if(scheduleMode==='sequential'&&referenceId)errors.push(`Milestones row ${index+2}: Sequential scheduling cannot keep a Reference Milestone ID.`);
       });
+      milestoneRows.forEach((row,index)=>{if(String(row['Schedule Mode']||'sequential').trim().toLowerCase()!=='parallel')return;const sourceId=String(row['Milestone ID']||'').trim(),referenceId=String(row['Reference Milestone ID']||'').trim(),initiativeKey=String(row['Initiative Name*']||'').trim().toLowerCase(),reference=milestoneRowsBySourceId.get(referenceId);if(!reference||String(reference['Initiative Name*']||'').trim().toLowerCase()!==initiativeKey){errors.push(`Milestones row ${index+2}: Reference Milestone must be included in the workbook and belong to the same Initiative.`);return;}let nextId=referenceId;const visited=new Set([sourceId]);while(nextId){if(visited.has(nextId)){errors.push(`Milestones row ${index+2}: Reference Milestone would create a dependency cycle.`);break;}visited.add(nextId);const next=milestoneRowsBySourceId.get(nextId);if(!next||String(next['Schedule Mode']||'sequential').trim().toLowerCase()!=='parallel')break;nextId=String(next['Reference Milestone ID']||'').trim();}});
 
       if (errors.length) throw new Error(`Import validation failed:\n\n${errors.slice(0, 20).join('\n')}`);
       if (!initiativeRowsByKey.size && verticalValidationFailures.length) throw new Error(formatInitiativeVerticalValidationSummary(0, verticalValidationFailures));
@@ -13159,7 +13312,7 @@
           const startDate = normalizeExcelDate(row['Start Date']);
           const targetEndDate = normalizeExcelDate(row['Target End Date']);
           const actualEndDate = normalizeExcelDate(row['Actual End Date']);
-          const { data, error } = await supabaseClient.from('programs').insert({
+          const { data, error } = await deliveryImportCommon.write(supabaseClient,'programs',{
             ...engineerAssignments.importPayload(row),
             program_name: row['Program Name*'], purpose: row.Purpose || null, program_owner: row['Program Owner'] || null, assigned_to: row['Program Assigned To'] || null,
             vertical: row['Vertical*'], start_date: startDate || null, target_end_date: targetEndDate || null,
@@ -13167,7 +13320,7 @@
             actual_end_date: actualEndDate || null, impact_category: row['Impact Category'] || null,
             measurable_impact: row['Measurable Impact'] || null, business_benefit: row['Business Benefit'] || null,
             program_status: evaluateProjectStatus(row['Program Name*'], normalizeExcelDate(row['Revised Start Date']) || startDate, getEffectiveEndDate(targetEndDate, normalizeExcelDate(row['Revised End Date'])), actualEndDate), is_active: true
-          }).select('id').single();
+          },{selection:'id',single:true});
           if (error) throw error;
           programIds.set(key, Number(data.id));
           createdPrograms.push(Number(data.id));
@@ -13180,7 +13333,7 @@
           const targetEndDate = normalizeExcelDate(row['Target End Date']);
           const actualEndDate = normalizeExcelDate(row['Actual End Date']);
           const initiativeSequenceNo = nextInitiativeSequence;
-          const { data, error } = await supabaseClient.from('initiatives').insert({
+          const { data, error } = await deliveryImportCommon.write(supabaseClient,'initiatives',{
             ...engineerAssignments.importPayload(row),
             sequence_no: initiativeSequenceNo,
             program_id: programIds.get(String(row['Program Name'] || '').trim().toLowerCase()) || null,
@@ -13191,7 +13344,7 @@
             actual_end_date: actualEndDate || null, impact_category: row['Impact Category*'] || null,
             measurable_impact: row['Measurable Impact*'] || null, business_benefit: row['Business Benefit*'] || null,
             initiative_status: evaluateProjectStatus(row['Initiative Name*'], normalizeExcelDate(row['Revised Start Date']) || startDate, getEffectiveEndDate(targetEndDate, normalizeExcelDate(row['Revised End Date'])), actualEndDate)
-          }).select('id, sequence_no').single();
+          },{selection:'id, sequence_no',single:true});
           if (error) throw error;
           if (Number(data.sequence_no) !== initiativeSequenceNo) {
             const { error: sequenceError } = await supabaseClient
@@ -13212,7 +13365,7 @@
           const initiativeId = [...initiativeIds.entries()].find(([key]) => key.endsWith(`|${initiativeKey}`))?.[1];
           if (!initiativeId) throw new Error(`Track references an unknown Initiative: ${row['Initiative Name*']}`);
           const trackKey = `${initiativeId}|${String(row['Track Name*']).trim().toLowerCase()}`;
-          const { data, error } = await supabaseClient.from('milestone_tracks').insert({ initiative_id: initiativeId, track_name: row['Track Name*'], display_order: Number(row['Display Order']) || 1 }).select('id').single();
+          const { data, error } = await deliveryImportCommon.write(supabaseClient,'milestone_tracks',{ initiative_id: initiativeId, track_name: row['Track Name*'], display_order: Number(row['Display Order']) || 1 },{selection:'id',single:true});
           if (error) throw error;
           trackIds.set(trackKey, Number(data.id));
           createdTracks.push(Number(data.id));
@@ -13230,19 +13383,26 @@
           const startDate = normalizeExcelDate(row['Start Date']);
           const completionDate = normalizeExcelDate(row['Completion Date']);
           const endDate = calculateMilestoneEndDate(days, startDate);
-          const { error } = await supabaseClient.from('milestones').insert({
+          const deadline = getMilestoneDeadline(startDate, endDate);
+          const sourceMilestoneId=String(row['Milestone ID']||'').trim(),scheduleMode=String(row['Schedule Mode']||'sequential').trim().toLowerCase()==='parallel'?'parallel':'sequential',referenceSourceId=String(row['Reference Milestone ID']||'').trim(),referenceDateType=String(row['Reference Date Type']||'start_date').trim(),referenceOffsetDays=Number(String(row['Reference Offset (Working Days)']??'0').trim()||0);
+          const { data:insertedMilestone,error } = await deliveryImportCommon.write(supabaseClient,'milestones',{
             initiative_id: initiativeId, initiative_name: row['Initiative Name*'], track_id: trackId || null,
             milestone_title: milestoneValue(row, 'Workstream / User Story*', 'Track - User Story*', 'Track - User Story'), actions: milestoneValue(row, 'Milestone / Executive Action*', 'Milestone - Actions*', 'Milestone - Actions'), owner: milestoneValue(row, 'Milestone Owner*', 'Milestoner Owner*', 'Milestone Owner'), dependency: row.Dependency || null,
             ...(Object.hasOwn(row,'Milestone Planner Type ID')?{planner_type_id:row['Milestone Planner Type ID']||null}:{}),
             ...milestoneRemarksRecord(row.Remarks||'',row['Revision History']||''),
-            days: normalizeMilestoneDays(days), status: evaluateMilestoneStatus(milestoneValue(row, 'Workstream / User Story*', 'Track - User Story*', 'Track - User Story'), days, startDate, endDate, endDate, completionDate),
-            start_date: startDate || null, end_date: endDate || null, deadline: endDate || null, completion_date: completionDate || null,
-            deviation_days: calculateDeviation(endDate, startDate, completionDate) || null
-          });
+            schedule_mode:scheduleMode,reference_milestone_id:null,reference_date_type:scheduleMode==='parallel'?referenceDateType:'start_date',reference_offset_days:scheduleMode==='parallel'?referenceOffsetDays:0,
+            days: normalizeMilestoneDays(days), status: evaluateMilestoneStatus(milestoneValue(row, 'Workstream / User Story*', 'Track - User Story*', 'Track - User Story'), days, startDate, endDate, deadline, completionDate),
+            start_date: startDate || null, end_date: endDate || null, deadline: deadline || null, completion_date: completionDate || null,
+            deviation_days: calculateDeviation(deadline, startDate, completionDate) || null
+          },{selection:'id',single:true});
           if (error) throw error;
+          if(sourceMilestoneId)importedMilestoneIds.set(`${initiativeId}:${sourceMilestoneId}`,Number(insertedMilestone.id));
+          if(scheduleMode==='parallel')pendingReferenceLinks.push({initiativeId,milestoneId:Number(insertedMilestone.id),referenceSourceId});
           updateImportProgress(++importProcessedRows, importTotalRows, 'Processing Milestone');
           if (importProcessedRows % 10 === 0) await yieldImportUi();
         }
+        const referenceUpdates=await Promise.all(pendingReferenceLinks.map(link=>{const referenceId=importedMilestoneIds.get(`${link.initiativeId}:${link.referenceSourceId}`);if(!referenceId)throw new Error('An imported Reference Milestone ID could not be resolved within its Initiative.');return supabaseClient.from('milestones').update({reference_milestone_id:referenceId}).eq('id',link.milestoneId);}));
+        const referenceUpdateError=referenceUpdates.find(result=>result.error);if(referenceUpdateError)throw referenceUpdateError.error;
       } catch (error) {
         await archiveImportedRecords({programIds:createdPrograms,initiativeIds:createdInitiatives,trackIds:createdTracks});
         throw error;
@@ -13250,6 +13410,9 @@
 
       updateImportProgress(importTotalRows, importTotalRows, 'Processing');
       await loadInitiativesFromSupabase();
+      const referenceRootsByInitiative=new Map();pendingReferenceLinks.forEach(link=>{const rootId=importedMilestoneIds.get(`${link.initiativeId}:${link.referenceSourceId}`);if(!rootId)return;if(!referenceRootsByInitiative.has(link.initiativeId))referenceRootsByInitiative.set(link.initiativeId,[]);referenceRootsByInitiative.get(link.initiativeId).push(rootId);});
+      for(const [initiativeId,rootIds] of referenceRootsByInitiative){const project=projects.find(item=>Number(item.id)===Number(initiativeId));if(project)await cascadeReferencedMilestoneSchedule(project,rootIds);}
+      if(pendingReferenceLinks.length)renderProjects();
       showImportSuccess({total:importTotalRows,initiatives:createdInitiatives.length,tracks:createdTracks.length,milestones:milestoneRows.length});
       showToast('Programs, Initiatives, Tracks, and Milestones imported successfully.', 'success');
     } catch (error) {
@@ -13875,7 +14038,7 @@
             );
 
           const endDate = calculateMilestoneEndDate(days, startDate);
-          const deadline = endDate;
+          const deadline = getMilestoneDeadline(startDate, endDate);
           const milestoneStatus = evaluateMilestoneStatus(
             milestoneTitle,
             days,
@@ -14461,22 +14624,21 @@
     if (importModalProcessing) return;
     document.getElementById('import-modal').classList.add('hidden');
   }
-  function showImportProgress(totalRows) {
+  function showImportProgress(totalRows, title = 'Importing Initiatives & Milestones') {
     openImportModal();
     setImportModalProcessing(true);
     document.getElementById('import-modal-default')?.classList.add('hidden');
     const status = document.getElementById('import-modal-status');
     status.classList.remove('hidden');
-    status.innerHTML = `<div class="space-y-5"><div><h3 class="text-lg font-bold text-slate-800">Importing Initiatives &amp; Milestones</h3><p class="text-sm text-slate-500 mt-1">Please do not close this window.</p></div><div class="import-progress-track"><div id="import-progress-bar" class="import-progress-bar"></div></div><div class="flex items-center justify-between"><span id="import-progress-detail" class="text-sm font-medium text-slate-700">Preparing import...</span><span id="import-progress-percent" class="text-lg font-bold text-indigo-600">0%</span></div></div>`;
+    status.innerHTML = `<div class="space-y-5"><div><h3 class="text-lg font-bold text-slate-800">${escapeHtml(title)}</h3><p class="text-sm text-slate-500 mt-1">Please do not close this window.</p></div><div class="import-progress-track"><div id="import-progress-bar" class="import-progress-bar"></div></div><div class="flex items-center justify-between"><span id="import-progress-detail" class="text-sm font-medium text-slate-700">Preparing import...</span><span id="import-progress-percent" class="text-lg font-bold text-indigo-600">0%</span></div></div>`;
     updateImportProgress(0,totalRows,'Preparing import');
   }
   function updateImportProgress(processed,total,label='Processing') {
-    const safeTotal=Math.max(1,Number(total)||1), safeProcessed=Math.min(safeTotal,Math.max(0,Number(processed)||0));
-    const percent=Math.round((safeProcessed/safeTotal)*100);
+    const {total:safeTotal,processed:safeProcessed,percent}=deliveryImportCommon.progress(processed,total);
     const bar=document.getElementById('import-progress-bar'), pct=document.getElementById('import-progress-percent'), detail=document.getElementById('import-progress-detail');
     if(bar) bar.style.width=`${percent}%`; if(pct) pct.textContent=`${percent}%`; if(detail) detail.textContent=`${label} ${safeProcessed} of ${safeTotal} rows`;
   }
-  function yieldImportUi(){return new Promise(resolve=>requestAnimationFrame(()=>setTimeout(resolve,0)));}
+  function yieldImportUi(){return deliveryImportCommon.yieldUi();}
   function showImportSuccess(summary) {
     setImportModalProcessing(false);
     const status=document.getElementById('import-modal-status'); status.classList.remove('hidden');
@@ -14486,7 +14648,7 @@
   function showImportError(error,processed,total) {
     setImportModalProcessing(false);
     const status=document.getElementById('import-modal-status'); status.classList.remove('hidden');
-    const message=escapeHtml(error?.message||String(error||'Unknown error'));
+    const message=escapeHtml(deliveryImportCommon.errorMessage(error));
     status.innerHTML=`<div class="space-y-5"><div class="text-center"><div class="mx-auto w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-3xl">!</div><h3 class="text-xl font-bold text-slate-800 mt-3">Import Failed</h3></div><div class="rounded-xl bg-red-50 border border-red-200 p-4"><p class="text-xs font-semibold text-red-700">Reason</p><p class="text-sm text-red-800 mt-1 break-words">${message}</p></div><p class="text-sm text-slate-600">Records Processed: <strong>${processed} of ${total}</strong></p><button type="button" onclick="closeImportModal()" class="w-full px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold">Close</button></div>`;
   }
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!importModalProcessing&&!document.getElementById('import-modal')?.classList.contains('hidden'))closeImportModal();});
@@ -15458,7 +15620,7 @@
       const result=await supabaseClient.rpc('close_daily_milestone_with_next',{p_milestone_id:milestoneId,p_completion_date:date,p_next_milestones:rows.map(row=>({...row,days:Number(row.days)}))});
       if(result.error){if(result.error.code==='PGRST202')throw new Error('Database setup required: run supabase-migration-daily-tracker-closure.sql before saving. Nothing has been changed.');throw result.error;}
       if(!Array.isArray(result.data?.created)||result.data.created.length!==rows.length)throw new Error('Supabase did not confirm every next Milestone. Refresh before retrying.');
-      saved=true;await loadInitiativesFromSupabase();renderDailyTrackerPage();showToast('Milestone completed and next Milestones created.','success');
+      saved=true;await loadInitiativesFromSupabase();const refreshedProject=projects.find(item=>Number(item.id)===initiativeId);if(refreshedProject&&!await cascadeReferencedMilestoneSchedule(refreshedProject,milestoneId))throw new Error('Completion was saved, but dependent reference dates could not be updated.');renderDailyTrackerPage();showToast('Milestone completed and next Milestones created.','success');
     }catch(error){showToast(saved?'Milestones were saved, but refresh failed. Refresh the page to view them.':error.message||'Unable to complete Milestone.','error');}
     finally{setDailyFlowSaving(false);if(saved)closeDailyFlow();}
   }
@@ -15701,6 +15863,7 @@
     }
     const clearableDate=bulkEditEntity==='milestones'&&['start_date','end_date','deadline','completion_date'].includes(field);
     if(!ids.length||!field||(value===''&&field!=='milestone_remarks'&&!engineerField&&!clearableDate))return;
+    if(bulkEditEntity==='milestones'&&['start_date','end_date','deadline'].includes(field)&&ids.some(id=>projects.some(project=>(project.milestones||[]).some(milestone=>Number(milestone.id)===Number(id)&&milestone.scheduleMode==='parallel')))){showToast('Bulk date changes cannot override a dynamically referenced Milestone. Switch it to Sequential in the Milestone editor first.','error');return;}
     if(field==='milestone_remarks'&&value.length>MAX_MILESTONE_REMARKS_LENGTH){showToast(`Remarks cannot exceed ${MAX_MILESTONE_REMARKS_LENGTH.toLocaleString()} characters.`,'error');return;}
     const impactBelow=document.getElementById('bulk-edit-impact-below')?.checked===true;
     if(bulkEditEntity==='milestones'&&field==='start_date'&&!confirm(`Apply this Start Date to ${ids.length} selected Milestones? Impact Below Dates? ${impactBelow?'Yes':'No'}.`))return;
@@ -15729,6 +15892,8 @@
           records.push({project,milestone});
         }
         await applyMilestoneScheduleImpact(records,impactBelow);
+        const recordsByProject=new Map();records.forEach(record=>{const key=String(record.project.id);if(!recordsByProject.has(key))recordsByProject.set(key,{project:record.project,ids:[]});recordsByProject.get(key).ids.push(record.milestone.id);});
+        for(const {project,ids:changedIds} of recordsByProject.values())if(!await cascadeReferencedMilestoneSchedule(project,changedIds))throw new Error('Some referenced Milestone dates could not be propagated.');
       }else if(bulkEditEntity==='milestones'&&field==='milestone_remarks'){
         for(const id of ids){
           const milestone=projects.flatMap(initiative=>initiative.milestones||[]).find(item=>Number(item.id)===Number(id));
@@ -17301,10 +17466,11 @@
   let plannerTemplates=[],plannerRows=[],activePlannerId=null;
   let plannerWorkbookBusy=false;
   const plannerWorkbookMetaSheet='_PMO_META';
-  const plannerRuleHeaders=['Planner ID','Planner Name','Description','Planner Milestone ID','Sequence','Milestone','Owner Mode','Owner Rule','Owner Fixed Value','Dependency Mode','Dependency Rule','Dependency Fixed Value','Days','Schedule','Reference Sequence','Planner Type ID'];
-  const plannerAppliedMilestoneHeaders=['Milestone ID','Initiative ID','Initiative','Track ID','Track','Sequence','Action / Deliverable','Owner','Dependency','Days','Start Date','End Date','Deadline','Completion Date','Status','Schedule','Reference Milestone ID','Reference Milestone','Planner Type ID'];
+  const plannerRuleHeaders=['Planner ID','Planner Name','Description','Planner Milestone ID','Sequence','Milestone','Owner Mode','Owner Rule','Owner Fixed Value','Dependency Mode','Dependency Rule','Dependency Fixed Value','Days','Schedule','Reference Milestone ID','Reference Sequence','Planner Type ID'];
+  const plannerAppliedMilestoneHeaders=['Milestone ID','Initiative ID','Initiative','Track ID','Track','Sequence','Action / Deliverable','Owner','Dependency','Days','Start Date','End Date','Deadline','Completion Date','Status','Schedule','Reference Milestone ID','Reference Milestone','Planner Type ID','Reference Date Type','Reference Offset (Working Days)'];
   const plannerDynamicRules=[['INITIATIVE_BUSINESS_OWNER','Initiative - Business Owner'],['INITIATIVE_ASSIGNED_TO','Initiative - Assigned To'],['INITIATIVE_NAME','Initiative - Name'],['INITIATIVE_VERTICAL','Initiative - Vertical'],['PROGRAM_OWNER','Program - Owner'],['PROGRAM_ASSIGNED_TO','Program - Assigned To'],['PROGRAM_NAME','Program - Name'],['PROGRAM_VERTICAL','Program - Vertical']];
   const plannerOwnerRules=new Set(['INITIATIVE_BUSINESS_OWNER','INITIATIVE_ASSIGNED_TO','PROGRAM_OWNER','PROGRAM_ASSIGNED_TO']);
+  function validatePlannerOwnerRules(rows){const activeUsers=new Set(userMaster.map(user=>String(user.name||'').trim().toLocaleLowerCase()));const errors=[];rows.forEach((row,index)=>{const label=`${index+1}. ${row.milestone_action||'Milestone'}`;if(row.owner_mode==='DYNAMIC'){if(!plannerOwnerRules.has(row.owner_rule))errors.push(`${label}: choose a valid User Master owner rule.`);}else if(!row.owner_fixed_value||!activeUsers.has(String(row.owner_fixed_value).trim().toLocaleLowerCase()))errors.push(`${label}: fixed owner must be an active User Master person.`);});if(errors.length)throw new Error(`Correct the Milestone Owner mapping: ${errors.slice(0,5).join('; ')}.`);}
   let plannerTemplatesLoadedAt=0,plannerTemplatesLoadPromise=null;
   async function loadPlanners(force=false){
     if(!force&&plannerTemplatesLoadedAt&&Date.now()-plannerTemplatesLoadedAt<60000){renderPlannerList();return true;}
@@ -17327,8 +17493,8 @@
   function newPlanner(){activePlannerId=null;plannerRows=[];document.getElementById('planner-id').value='';document.getElementById('planner-name').value='';document.getElementById('planner-desc').value='';renderPlannerRows();renderPlannerList();}
   async function selectPlanner(id){const t=plannerTemplates.find(x=>String(x.id)===String(id));if(!t)return;activePlannerId=id;document.getElementById('planner-id').value=id;document.getElementById('planner-name').value=t.template_name;document.getElementById('planner-desc').value=t.description||'';const r=await supabaseClient.from('project_planner_milestones').select('*').eq('template_id',id).eq('is_active',true).order('display_order');if(r.error)return showToast(r.error.message,'error');plannerRows=r.data||[];renderPlannerRows();renderPlannerList();updateSelectedPlannerIoButtons();}
   function plannerMetadataRow(template){return[['PMO_PROJECT_PLANNER','1.0',String(template.id),template.template_name||'',template.description||'']];}
-  function plannerRuleExportRows(template,rows){return rows.map((row,index)=>({'Planner ID':String(template.id),'Planner Name':template.template_name||'','Description':template.description||'','Planner Milestone ID':row.id||'','Sequence':Number(row.display_order||index+1),'Milestone':row.milestone_action||'','Owner Mode':row.owner_mode||'FIXED','Owner Rule':row.owner_rule||'','Owner Fixed Value':row.owner_fixed_value||'','Dependency Mode':row.dependency_mode||'FIXED','Dependency Rule':row.dependency_rule||'','Dependency Fixed Value':row.dependency_fixed_value||'','Days':row.days??'','Schedule':row.schedule_mode||'sequential','Reference Sequence':row.reference_display_order||'','Planner Type ID':row.planner_type_id||''}));}
-  function plannerAppliedMilestoneExportRows(rows){const byId=new Map(rows.map(row=>[String(row.id),row]));return rows.map(row=>{const initiative=projects.find(item=>Number(item.id)===Number(row.initiative_id)),track=(initiative?.tracks||[]).find(item=>Number(item.id)===Number(row.track_id)),reference=byId.get(String(row.reference_milestone_id));return{'Milestone ID':Number(row.id),'Initiative ID':Number(row.initiative_id),'Initiative':initiative?.name||row.initiative_name||'','Track ID':row.track_id||'','Track':track?.name||'','Sequence':Number(row.sequence_no||0),'Action / Deliverable':row.actions||row.milestone_title||'','Owner':row.owner||'','Dependency':row.dependency||'','Days':row.days??'','Start Date':row.start_date||'','End Date':row.end_date||'','Deadline':row.deadline||'','Completion Date':row.completion_date||'','Status':row.status||'','Schedule':row.schedule_mode||'sequential','Reference Milestone ID':row.reference_milestone_id||'','Reference Milestone':reference?.actions||reference?.milestone_title||'','Planner Type ID':row.planner_type_id||''};});}
+  function plannerRuleExportRows(template,rows){return rows.map((row,index)=>({'Planner ID':String(template.id),'Planner Name':template.template_name||'','Description':template.description||'','Planner Milestone ID':row.id||'','Sequence':Number(row.display_order||index+1),'Milestone':row.milestone_action||'','Owner Mode':row.owner_mode||'FIXED','Owner Rule':row.owner_rule||'','Owner Fixed Value':row.owner_fixed_value||'','Dependency Mode':row.dependency_mode||'FIXED','Dependency Rule':row.dependency_rule||'','Dependency Fixed Value':row.dependency_fixed_value||'','Days':row.days??'','Schedule':row.schedule_mode||'sequential','Reference Milestone ID':row.reference_milestone_id||'','Reference Sequence':row.reference_display_order||'','Planner Type ID':row.planner_type_id||''}));}
+  function plannerAppliedMilestoneExportRows(rows){const byId=new Map(rows.map(row=>[String(row.id),row]));return rows.map(row=>{const initiative=projects.find(item=>Number(item.id)===Number(row.initiative_id)),track=(initiative?.tracks||[]).find(item=>Number(item.id)===Number(row.track_id)),reference=byId.get(String(row.reference_milestone_id));return{'Milestone ID':Number(row.id),'Initiative ID':Number(row.initiative_id),'Initiative':initiative?.name||row.initiative_name||'','Track ID':row.track_id||'','Track':track?.name||'','Sequence':Number(row.sequence_no||0),'Action / Deliverable':row.actions||row.milestone_title||'','Owner':row.owner||'','Dependency':row.dependency||'','Days':row.days??'','Start Date':row.start_date||'','End Date':row.end_date||'','Deadline':row.deadline||'','Completion Date':row.completion_date||'','Status':row.status||'','Schedule':row.schedule_mode||'sequential','Reference Milestone ID':row.reference_milestone_id||'','Reference Milestone':reference?.actions||reference?.milestone_title||'','Planner Type ID':row.planner_type_id||'','Reference Date Type':row.reference_date_type||'start_date','Reference Offset (Working Days)':Number(row.reference_offset_days)||0};});}
   function writePlannerWorkbook(template,ruleRows,appliedRows,fileSuffix){const workbook=XLSX.utils.book_new();const metadata=XLSX.utils.aoa_to_sheet(plannerMetadataRow(template));const rules=XLSX.utils.json_to_sheet(ruleRows,{header:plannerRuleHeaders});const milestones=XLSX.utils.json_to_sheet(appliedRows,{header:plannerAppliedMilestoneHeaders});XLSX.utils.book_append_sheet(workbook,rules,'Planner Fields');XLSX.utils.book_append_sheet(workbook,milestones,'Applied Milestones');XLSX.utils.book_append_sheet(workbook,metadata,plannerWorkbookMetaSheet);metadata['!state']='hidden';XLSX.writeFile(workbook,`${String(template.template_name||'Project_Planner').replace(/[^A-Za-z0-9_-]+/g,'_')}_${fileSuffix}_${new Date().toISOString().slice(0,10)}.xlsx`);}
   function selectedPlannerRecord(){return plannerTemplates.find(template=>String(template.id)===String(activePlannerId))||null;}
   function downloadSelectedPlannerTemplate(){const template=selectedPlannerRecord();if(!template)return showToast('Select a Project Planner before downloading its template.','error');writePlannerWorkbook(template,[],[],'Import_Template');}
@@ -17339,7 +17505,7 @@
   function finishPlannerImport(summary,details=[]){setImportModalProcessing(false);updateSelectedPlannerIoButtons();const status=document.getElementById('import-modal-status');if(!status)return;status.classList.remove('hidden');const rows=[['Successful',summary.successful],['Updated',summary.updated],['Skipped',summary.skipped],['Failed',summary.failed]];status.innerHTML=`<div class="space-y-5"><div><h3 class="text-lg font-bold text-slate-800">Project Planner Import Complete</h3><p class="mt-1 text-sm text-slate-500">Results apply only to Planner ${escapeHtml(String(activePlannerId||''))}.</p></div><div class="divide-y divide-slate-100 rounded-lg border border-slate-200 text-sm">${rows.map(([label,count])=>`<div class="flex justify-between p-3"><span>${label}</span><strong>${Number(count)||0}</strong></div>`).join('')}</div>${details.length?`<details class="rounded-lg border border-rose-200 bg-rose-50 p-3"><summary class="cursor-pointer text-sm font-semibold text-rose-800">${details.length} row issue(s)</summary><ul class="mt-2 max-h-40 list-disc space-y-1 overflow-auto pl-5 text-xs text-rose-800">${details.slice(0,20).map(detail=>`<li>${escapeHtml(detail)}</li>`).join('')}</ul></details>`:''}<button type="button" onclick="closePlannerImportCenter()" class="w-full rounded-lg bg-slate-800 px-4 py-3 font-semibold text-white">Close</button></div>`;}
   function plannerWorkbookRowIsBlank(row){return Object.values(row||{}).every(value=>String(value??'').trim()==='');}
   function plannerWorkbookRequiredHeaders(sheetName){return sheetName==='Planner Fields'?plannerRuleHeaders:plannerAppliedMilestoneHeaders;}
-  function plannerWorkbookMissingHeaders(sheet,headers){const actual=(XLSX.utils.sheet_to_json(sheet,{header:1,defval:''})[0]||[]).map(value=>String(value||'').trim());return headers.filter(header=>!actual.includes(header));}
+  function plannerWorkbookMissingHeaders(sheet,headers){const actual=(XLSX.utils.sheet_to_json(sheet,{header:1,defval:''})[0]||[]).map(value=>String(value||'').trim()),optional=new Set(['Reference Milestone ID','Reference Sequence','Reference Date Type','Reference Offset (Working Days)']);return headers.filter(header=>!actual.includes(header)&&!optional.has(header));}
   function plannerCanonicalUser(value){const key=String(value??'').trim().toLocaleLowerCase();return userMaster.find(user=>String(user.name||'').trim().toLocaleLowerCase()===key)?.name||'';}
   async function importSelectedPlannerFile(event){
     const file=event.target.files?.[0];event.target.value='';
@@ -17386,9 +17552,10 @@
           const idValue=String(row['Planner Milestone ID']||'').trim(),existing=idValue?existingPlannerRows.get(idValue):null;
           if(idValue&&(!existing||plannerIds.has(idValue)))throw new Error('Planner Milestone ID is duplicated or does not belong to the selected Planner.');
           const plannerTypeId=String(row['Planner Type ID']||'').trim()||null;
+          const referenceMilestoneId=String(row['Reference Milestone ID']||'').trim()||null;
           const referenceDisplayOrder=scheduleMode==='parallel'?Number(row['Reference Sequence'])||null:null;
           plannerOrders.add(sequence);plannerActions.add(actionKey);if(idValue)plannerIds.add(idValue);
-          importedPlannerRows.push({id:existing?.id,display_order:sequence,milestone_action:milestoneAction,owner_mode:ownerMode,owner_rule:ownerMode==='DYNAMIC'?ownerRule:null,owner_fixed_value:ownerMode==='FIXED'?ownerFixed:null,dependency_mode:dependencyMode,dependency_rule:dependencyMode==='DYNAMIC'?dependencyRule:null,dependency_fixed_value:dependencyMode==='FIXED'?dependencyFixed:null,days,schedule_mode:scheduleMode,reference_display_order:referenceDisplayOrder,planner_type_id:plannerTypeId,_originalPlannerTypeId:existing?.planner_type_id||null});
+          importedPlannerRows.push({id:existing?.id,_draftReferenceKey:existing?undefined:`import:${selectedId}:${sequence}`,display_order:sequence,milestone_action:milestoneAction,owner_mode:ownerMode,owner_rule:ownerMode==='DYNAMIC'?ownerRule:null,owner_fixed_value:ownerMode==='FIXED'?ownerFixed:null,dependency_mode:dependencyMode,dependency_rule:dependencyMode==='DYNAMIC'?dependencyRule:null,dependency_fixed_value:dependencyMode==='FIXED'?dependencyFixed:null,days,schedule_mode:scheduleMode,reference_milestone_id:referenceMilestoneId,reference_display_order:referenceDisplayOrder,planner_type_id:plannerTypeId,_originalPlannerTypeId:existing?.planner_type_id||null});
         }catch(error){plannerErrors.push(`Planner Fields row ${rowNumber}: ${error.message}`);}
         updateImportProgress(++processed,total,'Validating Planner Fields');
       });
@@ -17448,18 +17615,18 @@
             const scheduleValue=String(row.Schedule||'sequential').trim().toLowerCase(),scheduleMode=scheduleValue==='parallel'?'parallel':scheduleValue==='sequential'?'sequential':'';
             if(!scheduleMode)throw new Error('Schedule must be Sequential or In Parallel.');
             const referenceId=String(row['Reference Milestone ID']||'').trim()?Number(row['Reference Milestone ID']):null;
-            if(scheduleMode==='parallel'&&!referenceId)throw new Error('Parallel Milestones require a Reference Milestone ID.');
+            const referenceDateType=String(row['Reference Date Type']||'start_date').trim(),referenceOffsetRaw=String(row['Reference Offset (Working Days)']??'0').trim(),referenceOffsetDays=Number(referenceOffsetRaw||0);
+            if(scheduleMode==='parallel'&&(!referenceId||!['start_date','end_date','deadline','completion_date'].includes(referenceDateType)||!Number.isInteger(referenceOffsetDays)))throw new Error('Parallel Milestones require a valid Reference Milestone ID, Reference Date Type, and whole-day offset.');
             if(scheduleMode==='sequential'&&referenceId)throw new Error('Sequential Milestones cannot have a Reference Milestone ID.');
-            importedMilestones.push({id:Number(existing.id),existing,initiativeId,trackId,sequence,action,owner,dependency:String(row.Dependency||'').trim()||null,days,startDate,endDate:calculatedEnd,deadline:calculatedEnd,completionDate,status,scheduleMode,referenceId,plannerTypeId:String(row['Planner Type ID']||'').trim()||null});
+            const reference=referenceId?(parent?.milestones||[]).find(item=>Number(item.id)===referenceId):null;
+            if(scheduleMode==='parallel'&&(!reference||['deleted','archived'].includes(String(reference.recordStatus||'').toLowerCase())||milestoneReferenceCycle(parent,existing.id,referenceId)))throw new Error('Reference Milestone must be active, belong to the same Initiative, and not create a cycle.');
+            importedMilestones.push({id:Number(existing.id),existing,initiativeId,trackId,sequence,action,owner,dependency:String(row.Dependency||'').trim()||null,days,startDate,endDate:calculatedEnd,deadline:calculatedEnd,completionDate,status,scheduleMode,referenceId,referenceDateType,referenceOffsetDays,plannerTypeId:String(row['Planner Type ID']||'').trim()||null});
           }catch(error){actualErrors.push(`Applied Milestones row ${rowNumber}: ${error.message}`);}
         });
-        const candidateById=new Map(importedMilestones.map(item=>[String(item.id),item]));
         importedMilestones=importedMilestones.filter(item=>{
           if(item.scheduleMode!=='parallel')return true;
-          const reference=candidateById.get(String(item.referenceId))||existingById.get(String(item.referenceId));
-          const referenceSequence=Number(reference?.sequence??reference?.sequence_no??0);
-          const referenceStart=reference?.startDate??reference?.start_date??'';
-          if(!reference||Number(reference.initiativeId??reference.initiative_id)!==item.initiativeId||Number(reference.trackId??reference.track_id??0)!==Number(item.trackId||0)||referenceSequence>=item.sequence||referenceStart!==item.startDate){actualErrors.push(`Milestone ${item.id}: parallel reference must be an earlier Milestone in the same Initiative and Track with the same Start Date.`);return false;}
+          const parent=projects.find(project=>Number(project.id)===item.initiativeId),reference=(parent?.milestones||[]).find(row=>Number(row.id)===Number(item.referenceId));
+          if(!reference||['deleted','archived'].includes(String(reference.recordStatus||'').toLowerCase())||milestoneReferenceCycle(parent,item.id,item.referenceId)){actualErrors.push(`Milestone ${item.id}: Reference Milestone must be active, belong to the same Initiative, and not create a cycle.`);return false;}
           const referenceName=String(milestoneInput.find(row=>String(row['Milestone ID'])===String(item.id))?.['Reference Milestone']||'').trim();
           if(referenceName&&referenceName!==String(reference.actions||reference.milestone_title||reference.action||'')){actualErrors.push(`Milestone ${item.id}: Reference Milestone name does not match its ID.`);return false;}
           return true;
@@ -17489,7 +17656,7 @@
         if(actualErrors.length){summary.failed+=actualErrors.length;details.push(...actualErrors);}
         if(importedMilestones.length){
           for(const [index,item] of importedMilestones.entries()){
-            const databaseRecord={actions:item.action,milestone_title:item.action,owner:item.owner,dependency:item.dependency,days:item.days,start_date:item.startDate||null,end_date:item.endDate||null,deadline:item.deadline||null,completion_date:item.completionDate||null,status:item.status,deviation_days:calculateDeviation(item.deadline,item.startDate,item.completionDate)||null,sequence_no:item.sequence,schedule_mode:item.scheduleMode,...(item.scheduleMode==='parallel'?{reference_milestone_id:item.referenceId}:{}),planner_type_id:item.plannerTypeId};
+            const databaseRecord={actions:item.action,milestone_title:item.action,owner:item.owner,dependency:item.dependency,days:item.days,start_date:item.startDate||null,end_date:item.endDate||null,deadline:item.deadline||null,completion_date:item.completionDate||null,status:item.status,deviation_days:calculateDeviation(item.deadline,item.startDate,item.completionDate)||null,sequence_no:item.sequence,schedule_mode:item.scheduleMode,reference_milestone_id:item.referenceId,reference_date_type:item.scheduleMode==='parallel'?item.referenceDateType:'start_date',reference_offset_days:item.scheduleMode==='parallel'?item.referenceOffsetDays:0,planner_type_id:item.plannerTypeId};
             const result=await supabaseClient.from('milestones').update(databaseRecord).eq('id',item.id).eq('template_id',activePlannerId).select('id').single();
             if(result.error){summary.failed++;details.push(`Milestone ${item.id}: ${result.error.message}`);}else summary.updated++;
             updateImportProgress(Math.min(total,plannerInput.length+index+1),total,'Updating selected Planner milestones');
@@ -17498,7 +17665,7 @@
         }
       }
       if(!plannerErrors.length&&importedPlannerRows.length&&summary.successful+summary.updated===0)summary.skipped+=importedPlannerRows.length;
-      await loadPlanners(true);await selectPlanner(activePlannerId);if(milestoneInput.length&&importedMilestones.length)await loadInitiativesFromSupabase();
+      await loadPlanners(true);await selectPlanner(activePlannerId);if(milestoneInput.length&&importedMilestones.length){await loadInitiativesFromSupabase();const rootsByInitiative=new Map();importedMilestones.filter(item=>item.scheduleMode==='parallel').forEach(item=>{const key=String(item.initiativeId);if(!rootsByInitiative.has(key))rootsByInitiative.set(key,[]);rootsByInitiative.get(key).push(item.referenceId);});for(const [initiativeId,rootIds] of rootsByInitiative){const project=projects.find(item=>Number(item.id)===Number(initiativeId));if(project)await cascadeReferencedMilestoneSchedule(project,rootIds);}}
       updateImportProgress(total,total,'Project Planner import complete');
     }catch(error){summary.failed++;details.push(error?.message||String(error));if(!progressStarted){startPlannerImportProgress(1);progressStarted=true;}updateImportProgress(1,1,'Import failed');}
     finally{plannerWorkbookBusy=false;updateSelectedPlannerIoButtons();finishPlannerImport(summary,details);}
@@ -17506,28 +17673,46 @@
   async function savePlanner(e){e.preventDefault();const id=document.getElementById('planner-id').value,payload={template_name:document.getElementById('planner-name').value.trim(),description:document.getElementById('planner-desc').value.trim()||null,is_active:true,updated_at:new Date().toISOString(),...deliveryPlannerGroupFields()};const r=id?await supabaseClient.from('project_planner_templates').update(payload).eq('id',id).select().single():await supabaseClient.from('project_planner_templates').insert({...payload,created_by:currentUser?.email||null}).select().single();if(r.error)return showToast(r.error.message,'error');activePlannerId=r.data.id;await loadPlanners(true);await selectPlanner(r.data.id);showToast('Planner saved.','success');}
   function addPlannerRow(){plannerRows.push({display_order:plannerRows.length+1,milestone_action:'',owner_mode:'DYNAMIC',owner_rule:'INITIATIVE_BUSINESS_OWNER',owner_fixed_value:'',dependency_mode:'DYNAMIC',dependency_rule:'INITIATIVE_BUSINESS_OWNER',dependency_fixed_value:'',days:1,schedule_mode:'sequential',reference_display_order:null});renderPlannerRows();}
   function setPR(i,k,v){plannerRows[i][k]=v;}
-  function ruleEditor(i,r,k){const mode=r[k+'_mode']||'FIXED',val=r[k+'_fixed_value']||'',rules=k==='owner'?plannerDynamicRules.filter(rule=>plannerOwnerRules.has(rule[0])):plannerDynamicRules;return `<div class="grid grid-cols-[100px_minmax(0,1fr)] gap-1"><select onchange="setPR(${i},'${k}_mode',this.value);renderPlannerRows()" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white"><option ${mode==='FIXED'?'selected':''}>FIXED</option><option ${mode==='DYNAMIC'?'selected':''}>DYNAMIC</option></select>${mode==='DYNAMIC'?`<select onchange="setPR(${i},'${k}_rule',this.value)" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white"><option value="">Select rule</option>${rules.map(x=>`<option value="${x[0]}" ${(r[k+'_rule']||'')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select>`:`<input value="${escapeHtml(val)}" oninput="setPR(${i},'${k}_fixed_value',this.value)" list="planner-users" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white" placeholder="Fixed value">`}</div>`;}
+  function plannerRowKey(row){return String(row?._draftReferenceKey||row?.id||'');}
+  function plannerReferenceRow(row,rows=plannerRows){const referenceId=String(row?.reference_milestone_id||'');if(referenceId)return rows.find(candidate=>plannerRowKey(candidate)===referenceId)||null;const legacyOrder=Number(row?.reference_display_order)||null;return legacyOrder?rows.find(candidate=>Number(candidate.display_order)===legacyOrder)||null:null;}
+  function plannerReferenceWouldCycle(rows,current,candidate){const currentKey=plannerRowKey(current),ordered=rows.slice().sort((left,right)=>Number(left.display_order||0)-Number(right.display_order||0));let row=candidate;const visited=new Set();while(row){const key=plannerRowKey(row);if(key===currentKey||visited.has(key))return true;visited.add(key);if(row.schedule_mode==='parallel')row=plannerReferenceRow(row,ordered);else{const index=ordered.findIndex(item=>plannerRowKey(item)===key);row=index>0?ordered[index-1]:null;}}return false;}
+  function setPlannerReference(index,referenceKey){const reference=plannerRows.find(row=>plannerRowKey(row)===String(referenceKey));plannerRows[index].reference_milestone_id=reference?plannerRowKey(reference):null;plannerRows[index].reference_display_order=reference?Number(reference.display_order)||null:null;}
+  function ruleEditor(i,r,k){const mode=r[k+'_mode']||'FIXED',val=r[k+'_fixed_value']||'',rules=k==='owner'?plannerDynamicRules.filter(rule=>plannerOwnerRules.has(rule[0])):plannerDynamicRules,invalidOwnerRule=k==='owner'&&mode==='DYNAMIC'&&r[k+'_rule']&&!plannerOwnerRules.has(r[k+'_rule'])?`<option value="${escapeHtml(r[k+'_rule'])}" selected disabled>Invalid saved rule: ${escapeHtml(r[k+'_rule'])} (choose a valid owner mapping)</option>`:'';return `<div class="grid grid-cols-[100px_minmax(0,1fr)] gap-1"><select onchange="setPR(${i},'${k}_mode',this.value);renderPlannerRows()" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white"><option ${mode==='FIXED'?'selected':''}>FIXED</option><option ${mode==='DYNAMIC'?'selected':''}>DYNAMIC</option></select>${mode==='DYNAMIC'?`<select onchange="setPR(${i},'${k}_rule',this.value)" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white"><option value="">Select rule</option>${invalidOwnerRule}${rules.map(x=>`<option value="${x[0]}" ${(r[k+'_rule']||'')===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select>`:`<input value="${escapeHtml(val)}" oninput="setPR(${i},'${k}_fixed_value',this.value)" list="planner-users" class="w-full min-w-0 border rounded-lg px-2 py-2 bg-white" placeholder="Fixed value">`}</div>`;}
+  /*
   function renderPlannerRows(){
     const container=document.getElementById('planner-rows');
     if(!container)return;
     const orderedRows=plannerRows.slice().sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0));
     container.innerHTML=plannerRows.length?plannerRows.map((r,i)=>{
       const rowOrder=Number(r.display_order||i+1);
-      const references=orderedRows.filter(candidate=>Number(candidate.display_order||0)<rowOrder);
+      const references=orderedRows.filter(candidate=>plannerRowKey(candidate)!==plannerRowKey(r)&&!plannerReferenceWouldCycle(plannerRows,r,candidate));
       const scheduleMode=r.schedule_mode==='parallel'?'parallel':'sequential';
+      const selectedReference=plannerReferenceRow(r,plannerRows);
+        return `<div class="rounded-xl border border-slate-200 bg-slate-50 p-3"><div class="grid grid-cols-1 xl:grid-cols-[70px_minmax(180px,1.35fr)_minmax(200px,1fr)_minmax(200px,1fr)_76px_minmax(130px,.8fr)_minmax(180px,1fr)_auto] gap-3 items-start"><label>Order<input type="number" min="1" value="${rowOrder}" onchange="setPR(${i},'display_order',+this.value);renderPlannerRows()" class="mt-1 w-full border bg-white px-2 py-2"></label><label>Project Default Milestone<textarea oninput="setPR(${i},'milestone_action',this.value)" rows="2" class="mt-1 w-full border bg-white px-2 py-2 font-normal">${escapeHtml(r.milestone_action||'')}</textarea></label><div><label class="block mb-1">Milestoner Owner</label>${ruleEditor(i,r,'owner')}</div><div><label class="block mb-1">Dependency</label>${ruleEditor(i,r,'dependency')}</div><label>Days<input type="number" min="1" value="${r.days||1}" oninput="setPR(${i},'days',+this.value)" class="mt-1 w-full border bg-white px-2 py-2"></label><label>Schedule<select onchange="setPR(${i},'schedule_mode',this.value);if(this.value!=='parallel'){setPR(${i},'reference_display_order',null);setPR(${i},'reference_milestone_id',null);}renderPlannerRows()" class="mt-1 w-full border bg-white px-2 py-2"><option value="sequential" ${scheduleMode==='sequential'?'selected':''}>Sequential</option><option value="parallel" ${scheduleMode==='parallel'?'selected':''}>In Parallel</option></select></label><label class="${scheduleMode==='parallel'?'':'hidden'}">Reference Milestone<select ${scheduleMode==='parallel'?'required':''} onchange="setPlannerReference(${i},this.value)" class="mt-1 w-full border bg-white px-2 py-2"><option value="">Select milestone</option>${references.map(candidate=>`<option value="${escapeHtml(plannerRowKey(candidate))}" ${selectedReference&&plannerRowKey(selectedReference)===plannerRowKey(candidate)?'selected':''}>${Number(candidate.display_order)}. ${escapeHtml(candidate.milestone_action||'Milestone')}</option>`).join('')}</select></label><button type="button" o
       return `<div class="rounded-xl border border-slate-200 bg-slate-50 p-3"><div class="grid grid-cols-1 xl:grid-cols-[70px_minmax(180px,1.35fr)_minmax(200px,1fr)_minmax(200px,1fr)_76px_minmax(130px,.8fr)_minmax(180px,1fr)_auto] gap-3 items-start"><label>Order<input type="number" min="1" value="${rowOrder}" onchange="setPR(${i},'display_order',+this.value);renderPlannerRows()" class="mt-1 w-full border bg-white px-2 py-2"></label><label>Project Default Milestone<textarea oninput="setPR(${i},'milestone_action',this.value)" rows="2" class="mt-1 w-full border bg-white px-2 py-2 font-normal">${escapeHtml(r.milestone_action||'')}</textarea></label><div><label class="block mb-1">Milestoner Owner</label>${ruleEditor(i,r,'owner')}</div><div><label class="block mb-1">Dependency</label>${ruleEditor(i,r,'dependency')}</div><label>Days<input type="number" min="1" value="${r.days||1}" oninput="setPR(${i},'days',+this.value)" class="mt-1 w-full border bg-white px-2 py-2"></label><label>Schedule<select onchange="setPR(${i},'schedule_mode',this.value);if(this.value!=='parallel')setPR(${i},'reference_display_order','');renderPlannerRows()" class="mt-1 w-full border bg-white px-2 py-2"><option value="sequential" ${scheduleMode==='sequential'?'selected':''}>Sequential</option><option value="parallel" ${scheduleMode==='parallel'?'selected':''}>In Parallel</option></select></label><label class="${scheduleMode==='parallel'?'':'hidden'}">Reference Milestone<select ${scheduleMode==='parallel'?'required':''} onchange="setPR(${i},'reference_display_order',this.value?+this.value:null)" class="mt-1 w-full border bg-white px-2 py-2"><option value="">Select earlier milestone</option>${references.map(candidate=>`<option value="${Number(candidate.display_order)}" ${Number(r.reference_display_order)===Number(candidate.display_order)?'selected':''}>${Number(candidate.display_order)}. ${escapeHtml(candidate.milestone_action||'Milestone')}</option>`).join('')}</select></label><button type="button" onclick="plannerRows.splice(${i},1);renderPlannerRows()" class="xl:mt-5 px-3 py-2 font-semibold text-rose-700 border border-rose-200 bg-white hover:bg-rose-50">Remove</button></div></div>`;
     }).join('')+'<datalist id="planner-users">'+userMaster.map(u=>`<option value="${escapeHtml(u.name)}">`).join('')+'</datalist>':'<div class="p-8 text-center text-xs text-slate-400 border border-dashed rounded-xl">No milestone rules. Select + Add Milestone.</div>';
   }
-  async function savePlannerRows(){if(!activePlannerId)return showToast('Save the Planner first.','error');if(!plannerRows.length||plannerRows.some(r=>!r.milestone_action?.trim()||!r.days))return showToast('Milestone and Days are required.','error');try{validatePlannerScheduleRows(plannerRows);await persistDeliveryPlannerRows(activePlannerId,plannerRows);await selectPlanner(activePlannerId);showToast('Milestone rules saved.','success');}catch(error){showToast(error.message,'error');}}
+  */
+  function renderPlannerRows(){
+    const container=document.getElementById('planner-rows');
+    if(!container)return;
+    plannerRows.forEach(row=>{if(!row.id&&!row._draftReferenceKey)row._draftReferenceKey=`draft-${Date.now()}-${Math.random().toString(16).slice(2)}`;});
+    const orderedRows=plannerRows.slice().sort((left,right)=>Number(left.display_order||0)-Number(right.display_order||0));
+    container.innerHTML=plannerRows.length?plannerRows.map((row,index)=>{
+      const rowOrder=Number(row.display_order||index+1),scheduleMode=row.schedule_mode==='parallel'?'parallel':'sequential',selectedReference=plannerReferenceRow(row,plannerRows);
+      const references=orderedRows.filter(candidate=>plannerRowKey(candidate)!==plannerRowKey(row)&&!plannerReferenceWouldCycle(plannerRows,row,candidate));
+      return `<div class="rounded-xl border border-slate-200 bg-slate-50 p-3"><div class="grid grid-cols-1 xl:grid-cols-[70px_minmax(180px,1.35fr)_minmax(200px,1fr)_minmax(200px,1fr)_76px_minmax(130px,.8fr)_minmax(180px,1fr)_auto] gap-3 items-start"><label>Order<input type="number" min="1" value="${rowOrder}" onchange="setPR(${index},'display_order',+this.value);renderPlannerRows()" class="mt-1 w-full border bg-white px-2 py-2"></label><label>Project Default Milestone<textarea oninput="setPR(${index},'milestone_action',this.value)" rows="2" class="mt-1 w-full border bg-white px-2 py-2 font-normal">${escapeHtml(row.milestone_action||'')}</textarea></label><div><label class="block mb-1">Milestoner Owner</label>${ruleEditor(index,row,'owner')}</div><div><label class="block mb-1">Dependency</label>${ruleEditor(index,row,'dependency')}</div><label>Days<input type="number" min="1" value="${row.days||1}" oninput="setPR(${index},'days',+this.value)" class="mt-1 w-full border bg-white px-2 py-2"></label><label>Schedule<select onchange="setPR(${index},'schedule_mode',this.value);if(this.value!=='parallel'){setPR(${index},'reference_display_order',null);setPR(${index},'reference_milestone_id',null);}renderPlannerRows()" class="mt-1 w-full border bg-white px-2 py-2"><option value="sequential" ${scheduleMode==='sequential'?'selected':''}>Sequential</option><option value="parallel" ${scheduleMode==='parallel'?'selected':''}>In Parallel</option></select></label><label class="${scheduleMode==='parallel'?'':'hidden'}">Reference Milestone<select ${scheduleMode==='parallel'?'required':''} onchange="setPlannerReference(${index},this.value)" class="mt-1 w-full border bg-white px-2 py-2"><option value="">${references.length?'Select milestone':'No other acyclic milestone is available'}</option>${references.map(candidate=>`<option value="${escapeHtml(plannerRowKey(candidate))}" ${selectedReference&&plannerRowKey(selectedReference)===plannerRowKey(candidate)?'selected':''}>${Number(candidate.display_order)}. ${escapeHtml(candidate.milestone_action||'Milestone')}</option>`).join('')}</select></label><button type="button" onclick="plannerRows.splice(${index},1);renderPlannerRows()" class="xl:mt-5 px-3 py-2 font-semibold text-rose-700 border border-rose-200 bg-white hover:bg-rose-50">Remove</button></div></div>`;
+    }).join('')+`<datalist id="planner-users">${userMaster.map(user=>`<option value="${escapeHtml(user.name)}">`).join('')}</datalist>`:'<div class="p-8 text-center text-xs text-slate-400 border border-dashed rounded-xl">No milestone rules. Select + Add Milestone.</div>';
+  }
+  async function savePlannerRows(){if(!activePlannerId)return showToast('Save the Planner first.','error');if(!plannerRows.length||plannerRows.some(r=>!r.milestone_action?.trim()||!r.days))return showToast('Milestone and Days are required.','error');try{validatePlannerOwnerRules(plannerRows);validatePlannerScheduleRows(plannerRows);await persistDeliveryPlannerRows(activePlannerId,plannerRows);await selectPlanner(activePlannerId);showToast('Milestone rules saved.','success');}catch(error){showToast(error.message,'error');}}
   function validatePlannerScheduleRows(sourceRows){
     const ordered=sourceRows.slice().sort((left,right)=>Number(left.display_order||0)-Number(right.display_order||0));
     const orders=ordered.map(row=>Number(row.display_order||0));
     if(orders.some((order,index)=>!Number.isInteger(order)||order<1||(index>0&&order===orders[index-1])))throw new Error('Each Planner milestone must have a unique positive Order.');
-    ordered.forEach((row,index)=>{
-      if(row.schedule_mode!=='parallel')return;
-      const referenceIndex=ordered.findIndex(candidate=>Number(candidate.display_order)===Number(row.reference_display_order));
-      if(referenceIndex<0||referenceIndex>=index)throw new Error(`Milestone ${index+1} must reference an earlier milestone when scheduled in parallel.`);
-    });
+    for(const [index,row] of ordered.entries())if(row.schedule_mode==='parallel'&&!plannerReferenceRow(row,ordered))throw new Error(`Milestone ${index+1} must reference another valid milestone when scheduled in parallel.`);
+    const visiting=new Set(),visited=new Set();
+    function visit(row){const key=plannerRowKey(row);if(visiting.has(key))throw new Error('Planner milestone references cannot contain a cycle.');if(visited.has(key))return;visiting.add(key);if(row.schedule_mode==='parallel'){const reference=plannerReferenceRow(row,ordered);if(!reference)throw new Error('Parallel milestones require a selected Reference Milestone.');visit(reference);}else{const index=ordered.findIndex(item=>plannerRowKey(item)===key);if(index>0)visit(ordered[index-1]);}visiting.delete(key);visited.add(key);}
+    ordered.forEach(visit);
   }
   async function savePlannerTemplateAll(event){
     event.preventDefault();
@@ -17535,7 +17720,7 @@
     const name=document.getElementById('planner-name').value.trim();
     if(!name)return showToast('Planner Name is required.','error');
     if(!plannerRows.length||plannerRows.some(row=>!row.milestone_action?.trim()||!Number(row.days)))return showToast('Add at least one Milestone and enter valid Days for every row.','error');
-    try{validatePlannerScheduleRows(plannerRows);}catch(error){return showToast(error.message,'error');}
+    try{validatePlannerOwnerRules(plannerRows);validatePlannerScheduleRows(plannerRows);}catch(error){return showToast(error.message,'error');}
     button.disabled=true;
     try{
       const id=document.getElementById('planner-id').value;
@@ -17578,22 +17763,9 @@
     return user.full_name||user.name||'';
   }
   function calculatePlannerTemplateSchedules(templateItems,initialStartDate){
-    let sequentialStart=initialStartDate||'';
-    const schedulesByOrder=new Map();
-    return templateItems.map((item,index)=>{
-      const scheduleMode=item.schedule_mode==='parallel'?'parallel':'sequential';
-      const referenceDisplayOrder=Number(item.reference_display_order)||null;
-      let startDate=sequentialStart;
-      if(scheduleMode==='parallel'){
-        const referenceIndex=templateItems.findIndex(row=>Number(row.display_order)===referenceDisplayOrder);
-        if(!referenceDisplayOrder||referenceIndex<0||referenceIndex>=index)throw new Error(`Template milestone ${index+1} must reference an earlier milestone.`);
-        startDate=schedulesByOrder.get(referenceDisplayOrder)?.startDate||'';
-      }
-      const endDate=startDate?calculateMilestoneEndDate(Number(item.days),startDate):'';
-      schedulesByOrder.set(Number(item.display_order||index+1),{startDate,endDate});
-      sequentialStart=endDate?getNextWorkingDay(endDate):'';
-      return {scheduleMode,referenceDisplayOrder,startDate,endDate};
-    });
+    const ordered=templateItems.slice().sort((left,right)=>Number(left.display_order||0)-Number(right.display_order||0)),schedules=new Map(),visiting=new Set();
+    function scheduleFor(item){const key=plannerRowKey(item)||`order:${Number(item.display_order||0)}`;if(schedules.has(key))return schedules.get(key);if(visiting.has(key))throw new Error('Planner milestone references cannot contain a cycle.');visiting.add(key);const index=ordered.indexOf(item),scheduleMode=item.schedule_mode==='parallel'?'parallel':'sequential',reference= scheduleMode==='parallel'?plannerReferenceRow(item,ordered):null;let startDate='';if(scheduleMode==='parallel'){if(!reference)throw new Error('Select a valid Reference Milestone for every parallel milestone.');startDate=scheduleFor(reference).startDate;}else if(index===0)startDate=initialStartDate||'';else{const previous=scheduleFor(ordered[index-1]);startDate=previous.endDate?getNextWorkingDay(previous.endDate):'';}const endDate=startDate?calculateMilestoneEndDate(Number(item.days),startDate):'',result={scheduleMode,referenceMilestoneId:reference?plannerRowKey(reference):null,referenceDisplayOrder:reference?Number(reference.display_order)||null:null,startDate,endDate};schedules.set(key,result);visiting.delete(key);return result;}
+    return templateItems.map(item=>scheduleFor(item));
   }
   async function applyPlanner(id,iid,tid){
     if(!id)return;
@@ -17612,6 +17784,7 @@
       if(rr.error||!rr.data?.length)return showToast(rr.error?.message||'Planner has no milestones.','error');
       if(!await loadUsersFromSupabase())return showToast('Unable to verify Milestone Owners against User Master. No milestones were added. Please retry.','error');
       const templateItems=rr.data.slice().sort((a,b)=>Number(a.display_order||0)-Number(b.display_order||0));
+      try{validatePlannerOwnerRules(templateItems);}catch(error){return showToast(error.message,'error');}
       const p=programs.find(x=>+x.id===+i.programId);
 
       // Drafts (negative ids) are unsaved and must not anchor the batch.
@@ -17631,11 +17804,11 @@
       const plannedSchedules=calculatePlannerTemplateSchedules(templateItems,start);
       const rows=templateItems.map((x,n)=>{
         const days=+x.days;
-        const {scheduleMode,referenceDisplayOrder,startDate:rowStart,endDate:end}=plannedSchedules[n];
+        const {scheduleMode,startDate:rowStart,endDate:end}=plannedSchedules[n];
         const owner=resolvePlannerRule(x.owner_mode,x.owner_rule,x.owner_fixed_value,i,p,true);
         const dependency=resolvePlannerRule(x.dependency_mode,x.dependency_rule,x.dependency_fixed_value,i,p);
-        const row={initiative_id:i.id,initiative_name:i.name,track_id:track,sequence_no:seq+n,milestone_title:x.milestone_action,actions:x.milestone_action,owner,dependency:dependency||null,days,schedule_mode:scheduleMode,status:evaluateMilestoneStatus(x.milestone_action,days,rowStart,end,end,''),start_date:rowStart||null,end_date:end||null,deadline:end||null,completion_date:null,deviation_days:null,record_status:'active',...(reportProvenanceAvailable?{template_id:id,template_milestone_id:x.id}:{}),...(plannerTypeReferenceAvailable?{planner_type_id:x.planner_type_id||null}:{})};
-        row.reference_display_order=referenceDisplayOrder;
+        const deadline=getMilestoneDeadline(rowStart,end);
+        const row={initiative_id:i.id,initiative_name:i.name,track_id:track,sequence_no:seq+n,milestone_title:x.milestone_action,actions:x.milestone_action,owner,dependency:dependency||null,days,schedule_mode:scheduleMode,status:evaluateMilestoneStatus(x.milestone_action,days,rowStart,end,deadline,''),start_date:rowStart||null,end_date:end||null,deadline:deadline||null,completion_date:null,deviation_days:null,record_status:'active',...(reportProvenanceAvailable?{template_id:id,template_milestone_id:x.id}:{}),...(plannerTypeReferenceAvailable?{planner_type_id:x.planner_type_id||null}:{})};
         return row;
       });
       await milestoneTypeIntegrity.validate(rows);
@@ -17653,9 +17826,9 @@
       }
       const insertedBySequence=new Map((ins.data||[]).map(row=>[Number(row.sequence_no),Number(row.id)]));
       for(let index=0;index<rows.length;index++){
-        const referenceOrder=Number(templateItems[index].reference_display_order)||null;
         if(rows[index].schedule_mode!=='parallel')continue;
-        const referenceIndex=templateItems.findIndex(item=>Number(item.display_order)===referenceOrder);
+        const referenceKey=String(plannedSchedules[index].referenceMilestoneId||'');
+        const referenceIndex=templateItems.findIndex(item=>plannerRowKey(item)===referenceKey);
         const referenceId=referenceIndex>=0?insertedBySequence.get(seq+referenceIndex):null;
         const milestoneId=insertedBySequence.get(seq+index);
         if(!referenceId||!milestoneId){
@@ -21425,6 +21598,7 @@
     if(state.busy)return;
     const box=document.getElementById('daily-action-change-editor'),action=box.dataset.action,value=document.getElementById('daily-action-change-value')?.value;
     if(!value)return showToast('Select or enter a value.','error');
+    if(action==='change-start'&&state.rows.some(row=>row.milestone.scheduleMode==='parallel'))return showToast('Bulk Start Date cannot override a dynamically referenced Milestone. Switch it to Sequential in the Milestone editor first.','error');
     const impactBelow=action==='change-start'&&document.getElementById('daily-action-impact-below')?.checked===true;
     if(state.multi&&action==='change-start'&&!confirm(`Apply this Start Date to ${state.rows.length} selected Milestones? Impact Below Dates? ${impactBelow?'Yes':'No'}.`))return;
     state.busy=true;const save=box.querySelector('[data-change-save]');save.disabled=true;save.textContent='Saving...';let updated=0;
@@ -21439,6 +21613,7 @@
         updated++;
       }
       await applyMilestoneScheduleImpact(state.rows,impactBelow);
+      if(action==='change-start'){const byProject=new Map();state.rows.forEach(row=>{const key=String(row.project.id);if(!byProject.has(key))byProject.set(key,{project:row.project,ids:[]});byProject.get(key).ids.push(row.milestone.id);});for(const {project,ids} of byProject.values())if(!await cascadeReferencedMilestoneSchedule(project,ids))throw new Error('Some referenced Milestone dates could not be propagated.');}
       await loadInitiativesFromSupabase();if(state.multi||action==='change-planner-type'&&typeof dailyMultiSelectEnabled!=='undefined'&&dailyMultiSelectEnabled&&state.rows.every(row=>dailySelectedMilestones.has(Number(row.milestone.id)))){resetDailyMultiSelectAfterSuccess();}
       document.getElementById('daily-milestone-action-modal').classList.add('hidden');
       restoreDeliveryViewState(state.viewState);renderActiveDeliveryWorkspace();restoreDeliveryViewState(state.viewState);
@@ -21474,7 +21649,8 @@
       ?rebuildDeviationSchedule(milestone,history)
       :{start:values.newStart,days:normalizedDays,end:newEnd,total:history.revisions.filter(item=>!item?.deleted).reduce((sum,item)=>sum+(Number(item?.deviationDays)||0),0),active:history.revisions.filter(item=>!item?.deleted)};
     const status=(milestone.completionDate||milestone.completion_date||getEffectiveMilestoneStatus(milestone)==='Done')?'Done':'Deviated';
-    const payload={start_date:rebuilt.start||values.newStart,end_date:rebuilt.end||newEnd,deadline:rebuilt.end||newEnd,days:normalizeMilestoneDays(rebuilt.days||normalizedDays),dependency:values.dependency||null,status,deviation_days:Number(rebuilt.total)||0,remarks:JSON.stringify(history)};
+    const revisedStart=rebuilt.start||values.newStart,revisedEnd=rebuilt.end||newEnd;
+    const payload={start_date:revisedStart,end_date:revisedEnd,deadline:getMilestoneDeadline(revisedStart,revisedEnd)||null,days:normalizeMilestoneDays(rebuilt.days||normalizedDays),dependency:values.dependency||null,status,deviation_days:Number(rebuilt.total)||0,remarks:JSON.stringify(history)};
     const {data,error}=await supabaseClient.from('milestones').update(payload).eq('id',Number(milestone.id)).select('*').single();
     if(error)throw error;
     Object.assign(milestone,{startDate:payload.start_date||'',endDate:payload.end_date||'',deadline:payload.deadline||'',days:payload.days,dependency:payload.dependency||'',status:payload.status,deviationDays:payload.deviation_days,remarks:payload.remarks});
@@ -21635,7 +21811,7 @@
       const startDate=changes.startDate!==undefined?changes.startDate:milestone.startDate||'';
       const days=changes.days!==undefined?changes.days:milestone.days||'';
       const endDate=calculateMilestoneEndDate(days,startDate);
-      return {startDate,days,endDate,deadline:endDate,hasHistory:false};
+      return {startDate,days,endDate,deadline:getMilestoneDeadline(startDate,endDate),hasHistory:false};
     }
     let rebuilt=rebuildDeviationSchedule(milestone,history);
     const original={...rebuilt.original};
@@ -21653,7 +21829,7 @@
     original.end=calculateMilestoneEndDate(original.days,original.start);
     history.originalSchedule=original;
     rebuilt=rebuildDeviationSchedule(milestone,history);
-    return {startDate:rebuilt.start,days:rebuilt.days,endDate:rebuilt.end,deadline:rebuilt.end,deviationDays:rebuilt.total,remarks:JSON.stringify(history),hasHistory:true};
+    return {startDate:rebuilt.start,days:rebuilt.days,endDate:rebuilt.end,deadline:getMilestoneDeadline(rebuilt.start,rebuilt.end),deviationDays:rebuilt.total,remarks:JSON.stringify(history),hasHistory:true};
   }
 
   function normalizeMilestoneDeviationSchedule(milestone){
@@ -21711,7 +21887,7 @@
   async function persistRebuiltDeviationHistory(project,milestone,history,successMessage,impactBelow=false){
     const rebuilt=rebuildDeviationSchedule(milestone,history);
     const status=getDeviationPreservedStatus({...milestone,remarks:JSON.stringify(history)});
-    const payload={start_date:rebuilt.start||null,end_date:rebuilt.end||null,deadline:rebuilt.end||null,days:normalizeMilestoneDays(rebuilt.days),dependency:rebuilt.active.length?(rebuilt.active[rebuilt.active.length-1].dependency||null):(milestone.dependency||null),status,deviation_days:rebuilt.total,remarks:JSON.stringify(history)};
+    const payload={start_date:rebuilt.start||null,end_date:rebuilt.end||null,deadline:getMilestoneDeadline(rebuilt.start,rebuilt.end)||null,days:normalizeMilestoneDays(rebuilt.days),dependency:rebuilt.active.length?(rebuilt.active[rebuilt.active.length-1].dependency||null):(milestone.dependency||null),status,deviation_days:rebuilt.total,remarks:JSON.stringify(history)};
     const result=await supabaseClient.from('milestones').update(payload).eq('id',milestone.id);
     if(result.error)throw result.error;
     Object.assign(milestone,{startDate:payload.start_date||'',endDate:payload.end_date||'',deadline:payload.deadline||'',days:payload.days,dependency:payload.dependency||'',status:payload.status,deviationDays:payload.deviation_days,remarks:payload.remarks});
@@ -21836,7 +22012,8 @@
 
       const rebuilt=typeof rebuildDeviationSchedule==='function'?rebuildDeviationSchedule(milestone,history):{start:values.newStart,days:normalizedDays,end:newEnd,total:history.revisions.filter(item=>!item?.deleted).reduce((sum,item)=>sum+(Number(item?.deviationDays)||0),0)};
       const status=(milestone.completionDate||milestone.completion_date||getEffectiveMilestoneStatus(milestone)==='Done')?'Done':'Deviated';
-      const payload={start_date:rebuilt.start||values.newStart,end_date:rebuilt.end||newEnd,deadline:rebuilt.end||newEnd,days:normalizeMilestoneDays(rebuilt.days||normalizedDays),dependency:values.dependency||null,status,deviation_days:Number(rebuilt.total)||0,remarks:JSON.stringify(history)};
+      const revisedStart=rebuilt.start||values.newStart,revisedEnd=rebuilt.end||newEnd;
+      const payload={start_date:revisedStart,end_date:revisedEnd,deadline:getMilestoneDeadline(revisedStart,revisedEnd)||null,days:normalizeMilestoneDays(rebuilt.days||normalizedDays),dependency:values.dependency||null,status,deviation_days:Number(rebuilt.total)||0,remarks:JSON.stringify(history)};
       const {data,error}=await supabaseClient.from('milestones').update(payload).eq('id',Number(milestone.id)).select('*').single();
       if(error)throw error;
       Object.assign(milestone,{startDate:payload.start_date||'',endDate:payload.end_date||'',deadline:payload.deadline||'',days:payload.days,dependency:payload.dependency||'',status:payload.status,deviationDays:payload.deviation_days,remarks:payload.remarks});
@@ -21919,7 +22096,10 @@
     function calculateSchedule(m,patch){
       const schedule=calculateMilestoneSchedule(m,patch.remarks!==undefined?{remarks:patch.remarks}:patch);
       if(!Object.hasOwn(patch,'endDate'))patch.endDate=schedule.endDate||null;
-      if(!Object.hasOwn(patch,'deadline'))patch.deadline=schedule.deadline||null;
+      patch.deadline=getMilestoneDeadline(
+        patch.startDate!==undefined?patch.startDate:(schedule.startDate||m.startDate),
+        patch.endDate!==undefined?patch.endDate:(schedule.endDate||m.endDate)
+      )||null;
       if(schedule.hasHistory){
         if(!Object.hasOwn(patch,'startDate'))patch.startDate=schedule.startDate||null;
         if(!Object.hasOwn(patch,'days'))patch.days=normalizeMilestoneDays(schedule.days);
@@ -21998,7 +22178,8 @@
     window.saveMilestone=async function unifiedSaveMilestone(event){
       event?.preventDefault?.();const id=Number(document.getElementById('m-id')?.value||0);if(!id)return originalSave?.apply(this,arguments);
       const row=findMilestone(id);if(!row)return window.showToast?.('Milestone was not found.','error');
-      const fields={title:document.getElementById('m-title')?.value?.trim(),actions:document.getElementById('m-actions')?.value?.trim(),owner:document.getElementById('m-owner')?.value,dependency:document.getElementById('m-dependency')?.value?.trim()||null,days:Number(document.getElementById('m-days')?.value),startDate:document.getElementById('m-start-date')?.value||null,endDate:document.getElementById('m-end-date')?.value||null,deadline:document.getElementById('m-deadline')?.value||null,completionDate:document.getElementById('m-completion-date')?.value||null,milestoneRemarks:document.getElementById('m-remarks')?.value??row.milestone.milestoneRemarks??'',trackId:document.getElementById('m-track-id')?.value?Number(document.getElementById('m-track-id').value):null,status:document.getElementById('m-status')?.value};
+      const startDate=document.getElementById('m-start-date')?.value||null,endDate=document.getElementById('m-end-date')?.value||null;
+      const fields={title:document.getElementById('m-title')?.value?.trim(),actions:document.getElementById('m-actions')?.value?.trim(),owner:document.getElementById('m-owner')?.value,dependency:document.getElementById('m-dependency')?.value?.trim()||null,days:Number(document.getElementById('m-days')?.value),startDate,endDate,deadline:getMilestoneDeadline(startDate,endDate)||null,completionDate:document.getElementById('m-completion-date')?.value||null,milestoneRemarks:document.getElementById('m-remarks')?.value??row.milestone.milestoneRemarks??'',trackId:document.getElementById('m-track-id')?.value?Number(document.getElementById('m-track-id').value):null,status:document.getElementById('m-status')?.value};
       const changes={};for(const[k,v]of Object.entries(fields)){const old=row.milestone[k]??null;if(String(v??'')!==String(old??''))changes[k]=v;}
       const plannerTypeControl=document.getElementById('m-planner-type');if(plannerTypeControl&&String(plannerTypeControl.value||'')!==String(row.milestone.plannerTypeId||''))changes.plannerTypeId=plannerTypeControl.value||null;
       const typeOnly=Object.entries(changes).filter(([,value])=>value!==undefined).every(([field])=>field==='plannerTypeId');
@@ -22854,6 +23035,18 @@
   let deliveryReportProvenanceCheck=null;
   async function persistDeliveryPlannerRows(templateId,sourceRows){
     await deliveryValidatePlannerTypes(sourceRows);
+    const [scheduleColumn,referenceColumn,referenceIdColumn]=await Promise.all([
+      supabaseClient.from('project_planner_milestones').select('schedule_mode').limit(0),
+      supabaseClient.from('project_planner_milestones').select('reference_display_order').limit(0),
+      supabaseClient.from('project_planner_milestones').select('reference_milestone_id').limit(0)
+    ]);
+    const isMissingColumnError=(result,column)=>result.error&&new RegExp(`${column}.*schema cache|column .*${column}.*does not exist`,'i').test(result.error.message||'');
+    const scheduleColumnMissing=isMissingColumnError(scheduleColumn,'schedule_mode'),referenceColumnMissing=isMissingColumnError(referenceColumn,'reference_display_order'),referenceIdColumnMissing=isMissingColumnError(referenceIdColumn,'reference_milestone_id');
+    if(scheduleColumn.error&&!scheduleColumnMissing)throw scheduleColumn.error;
+    if(referenceColumn.error&&!referenceColumnMissing)throw referenceColumn.error;
+    if(referenceIdColumn.error&&!referenceIdColumnMissing)throw referenceIdColumn.error;
+    const supportsScheduleMode=!scheduleColumn.error,supportsReferenceDisplayOrder=!referenceColumn.error,supportsReferenceId=!referenceIdColumn.error,hasParallelRows=sourceRows.some(row=>row.schedule_mode==='parallel');
+    if(hasParallelRows&&(!supportsScheduleMode||!supportsReferenceDisplayOrder||!supportsReferenceId))throw new Error('Parallel Planner schedules require schedule_mode, reference_display_order, and reference_milestone_id. Run the updated milestone-planner-types-supabase-sql migration, then retry.');
     const existing=await supabaseClient.from('project_planner_milestones').select('*').eq('template_id',templateId);
     if(existing.error)throw existing.error;
     const existingIds=new Set((existing.data||[]).map(row=>String(row.id)));
@@ -22863,10 +23056,10 @@
     if(displayOrders.some((order,index)=>!Number.isInteger(order)||order<1||(index>0&&order===displayOrders[index-1])))throw new Error('Each Planner milestone must have a unique positive Order.');
     const payload=ordered.map((row,index)=>{
       const scheduleMode=row.schedule_mode==='parallel'?'parallel':'sequential';
-      const referenceRow=ordered.find(candidate=>Number(candidate.display_order)===Number(row.reference_display_order));
+      const referenceRow=plannerReferenceRow(row,ordered);
       const referenceIndex=referenceRow?ordered.indexOf(referenceRow):-1;
-      if(scheduleMode==='parallel'&&(referenceIndex<0||referenceIndex>=index))throw new Error(`Milestone ${index+1} must reference an earlier milestone when scheduled in parallel.`);
-      const result={template_id:templateId,display_order:index+1,milestone_action:row.milestone_action.trim(),owner_mode:row.owner_mode,owner_rule:row.owner_mode==='DYNAMIC'?row.owner_rule:null,owner_fixed_value:row.owner_mode==='FIXED'?row.owner_fixed_value:null,dependency_mode:row.dependency_mode,dependency_rule:row.dependency_mode==='DYNAMIC'?row.dependency_rule:null,dependency_fixed_value:row.dependency_mode==='FIXED'?row.dependency_fixed_value:null,days:Number(row.days),schedule_mode:scheduleMode,reference_display_order:scheduleMode==='parallel'?referenceIndex+1:null,is_active:true};
+      if(scheduleMode==='parallel'&&referenceIndex<0)throw new Error(`Milestone ${index+1} must select a valid Reference Milestone.`);
+      const result={template_id:templateId,display_order:index+1,milestone_action:row.milestone_action.trim(),owner_mode:row.owner_mode,owner_rule:row.owner_mode==='DYNAMIC'?row.owner_rule:null,owner_fixed_value:row.owner_mode==='FIXED'?row.owner_fixed_value:null,dependency_mode:row.dependency_mode,dependency_rule:row.dependency_mode==='DYNAMIC'?row.dependency_rule:null,dependency_fixed_value:row.dependency_mode==='FIXED'?row.dependency_fixed_value:null,days:Number(row.days),...(supportsScheduleMode?{schedule_mode:scheduleMode}:{}),...(supportsReferenceDisplayOrder?{reference_display_order:scheduleMode==='parallel'?referenceIndex+1:null}:{}),...(supportsReferenceId?{reference_milestone_id:null}:{}),is_active:true};
       if(milestonePlannerTypes.state.ready)result.planner_type_id=row.planner_type_id||null;
       if(existingIds.has(String(row.id))){result.id=row.id;retained.add(String(row.id));}
       return result;
@@ -22885,10 +23078,11 @@
     if(removed.length){const result=await supabaseClient.from('project_planner_milestones').update({is_active:false}).eq('template_id',templateId).in('id',removed);if(result.error)throw result.error;}
     if(updates.length){const result=await supabaseClient.from('project_planner_milestones').upsert(updates);if(result.error)throw result.error;}
     if(inserts.length){const result=await supabaseClient.from('project_planner_milestones').insert(inserts).select('id,display_order');if(result.error)throw result.error;for(const inserted of result.data||[]){const source=ordered[Number(inserted.display_order)-1];if(source)source.id=inserted.id;}}
-    const verified=await supabaseClient.from('project_planner_milestones').select('id,display_order,is_active,schedule_mode,reference_display_order'+(milestonePlannerTypes.state.ready?',planner_type_id':'')).eq('template_id',templateId);
+    if(supportsReferenceId){const referenceUpdates=ordered.filter(row=>row.schedule_mode==='parallel').map(row=>{const reference=plannerReferenceRow(row,ordered);if(!row.id||!reference?.id)throw new Error('Save the referenced template milestone before its parallel milestone.');return supabaseClient.from('project_planner_milestones').update({reference_milestone_id:String(reference.id)}).eq('template_id',templateId).eq('id',row.id);});const results=await Promise.all(referenceUpdates);const failed=results.find(result=>result.error);if(failed)throw failed.error;}
+    const verified=await supabaseClient.from('project_planner_milestones').select('id,display_order,is_active'+(supportsScheduleMode?',schedule_mode':'')+(supportsReferenceDisplayOrder?',reference_display_order':'')+(supportsReferenceId?',reference_milestone_id':'')+(milestonePlannerTypes.state.ready?',planner_type_id':'')).eq('template_id',templateId);
     if(verified.error)throw verified.error;
     const savedRows=new Map((verified.data||[]).map(row=>[String(row.id),row]));
-    if(ordered.some((row,index)=>{const saved=savedRows.get(String(row.id));const scheduleMode=row.schedule_mode==='parallel'?'parallel':'sequential';const referenceRow=ordered.find(candidate=>Number(candidate.display_order)===Number(row.reference_display_order));const referenceOrder=scheduleMode==='parallel'&&referenceRow?ordered.indexOf(referenceRow)+1:null;return !saved||saved.is_active===false||Number(saved.display_order)!==index+1||saved.schedule_mode!==scheduleMode||Number(saved.reference_display_order||0)!==Number(referenceOrder||0)||milestonePlannerTypes.state.ready&&String(saved.planner_type_id||'')!==String(row.planner_type_id||'');}))throw new Error('The saved Planner schedule and mappings could not be verified. Your selections are retained. Check database permissions and retry Save Template.');
+    if(ordered.some((row,index)=>{const saved=savedRows.get(String(row.id));const scheduleMode=row.schedule_mode==='parallel'?'parallel':'sequential',referenceRow=plannerReferenceRow(row,ordered),referenceOrder=scheduleMode==='parallel'&&referenceRow?ordered.indexOf(referenceRow)+1:null;return !saved||saved.is_active===false||Number(saved.display_order)!==index+1||supportsScheduleMode&&saved.schedule_mode!==scheduleMode||supportsReferenceDisplayOrder&&Number(saved.reference_display_order||0)!==Number(referenceOrder||0)||supportsReferenceId&&String(saved.reference_milestone_id||'')!==String(scheduleMode==='parallel'?referenceRow?.id||'':'')||milestonePlannerTypes.state.ready&&String(saved.planner_type_id||'')!==String(row.planner_type_id||'');}))throw new Error('The saved Planner schedule and mappings could not be verified. Your selections are retained. Check database permissions and retry Save Template.');
   }
   async function deliveryReportProvenanceReady(){
     if(!deliveryReportProvenanceCheck){
@@ -23468,7 +23662,14 @@
   create index if not exists planner_type_values_active_idx on public.planner_type_values(group_id,is_active);
   alter table public.project_planner_templates add column if not exists planner_type_group_id uuid references public.planner_type_groups(id) on delete restrict;
   alter table public.project_planner_templates add column if not exists planner_type_mapping_required boolean not null default false;
+  alter table public.project_planner_milestones add column if not exists schedule_mode text not null default 'sequential';
+  alter table public.project_planner_milestones add column if not exists reference_display_order integer;
+  alter table public.project_planner_milestones add column if not exists reference_milestone_id text;
   alter table public.project_planner_milestones add column if not exists planner_type_id uuid references public.planner_type_values(id) on delete restrict;
+  alter table public.milestones add column if not exists schedule_mode text not null default 'sequential';
+  alter table public.milestones add column if not exists reference_milestone_id bigint;
+  alter table public.milestones add column if not exists reference_date_type text not null default 'start_date';
+  alter table public.milestones add column if not exists reference_offset_days integer not null default 0;
   alter table public.milestones add column if not exists planner_type_id uuid references public.planner_type_values(id) on delete restrict;
   alter table public.report_definitions add column if not exists planner_type_group_id uuid references public.planner_type_groups(id) on delete restrict;
   create index if not exists planner_rules_type_idx on public.project_planner_milestones(planner_type_id,template_id);
@@ -23558,11 +23759,12 @@
   end;
   $seed$;
   commit;
+  notify pgrst, 'reload schema';
   </script>
   <script id="delivery-report-deployment-notes" type="text/plain">
   Run the delivery-report-supabase-sql block in the Supabase SQL Editor, then refresh this page.
   If milestone provenance columns have not yet been added, run the earlier migration in delivery-report-provenance-sql as well.
-  Then run milestone-planner-types-supabase-sql for the two-level master, stable references, indexes, audits, permissions, and one-time ordered Change Request seed. The migration requires valid existing template IDs and fails rather than discarding invalid references.
+  Then run milestone-planner-types-supabase-sql for the two-level master, stable Planner-row and actual-Milestone reference IDs, schedule/date/offset columns, indexes, audits, permissions, and one-time ordered Change Request seed. The migration requires valid existing template IDs and fails rather than discarding invalid references; it reloads the PostgREST schema cache after commit.
   The existing Project Planner is the Change Request Template source (project_planner_templates and project_planner_milestones).
   Old milestones were inserted without provenance. Backfill template_id and template_milestone_id only from verified historical records; milestone titles alone are not sufficient evidence.
   After migration, applying a template writes both IDs automatically. Existing manually created milestones remain excluded unless explicitly selected by ID.
@@ -25799,10 +26001,12 @@
       if (Number(source?.id) !== Number(initiativeId)) return showToast('Track was not found in this Initiative.', 'error');
       return mutate('duplicate', { tracks: [Number(id)] }, false);
     };
-    window.duplicateMilestone = (initiativeId, id) => {
+    window.duplicateMilestone = async (initiativeId, id) => {
       const source = sourceFor('milestones', id);
       if (Number(source?.id) !== Number(initiativeId)) return showToast('Milestone was not found in this Initiative.', 'error');
-      return mutate('duplicate', { milestones: [Number(id)] }, false);
+      const project=projects.find(item=>(item.milestones||[]).some(milestone=>Number(milestone.id)===Number(id))),milestone=project?.milestones?.find(item=>Number(item.id)===Number(id));
+      if(!project||!milestone||!canEditInitiative(project))return showToast('You do not have permission to duplicate this Milestone.','error');
+      try{const sequence_no=await getNextMilestoneSequence(project.id,milestone.trackId||null),endDate=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate),scheduleMode=milestone.scheduleMode==='parallel'?'parallel':'sequential';const result=await supabaseClient.from('milestones').insert({initiative_id:project.id,initiative_name:project.name,sequence_no,track_id:milestone.trackId||null,milestone_title:milestone.title||milestone.actions||'Milestone',actions:`${milestone.actions||milestone.title||'Milestone'} Copy`,owner:milestone.owner||null,dependency:milestone.dependency||null,days:normalizeMilestoneDays(milestone.days),start_date:milestone.startDate||null,end_date:endDate||null,deadline:milestone.deadline||endDate||null,completion_date:null,status:evaluateMilestoneStatus(milestone.title,milestone.days,milestone.startDate,endDate,endDate,''),deviation_days:null,record_status:'active',schedule_mode:scheduleMode,reference_milestone_id:scheduleMode==='parallel'?milestone.referenceMilestoneId||null:null,reference_date_type:scheduleMode==='parallel'?milestone.referenceDateType||'start_date':'start_date',reference_offset_days:scheduleMode==='parallel'?Number(milestone.referenceOffsetDays)||0:0});if(result.error)throw result.error;await loadInitiativesFromSupabase();showToast('Milestone duplicated successfully.','success');}catch(error){showToast(`Unable to duplicate Milestone: ${error.message}`,'error');}
     };
     window.bulkDuplicateSelected = () => mutate('duplicate', selection(), true);
     window.bulkDeleteSelected = () => mutate('archive', selection(), true);
@@ -25872,6 +26076,252 @@
   </script>
   <script src="support-ticket-tracker.js"></script>
   <script src="support-connectors-ui.js"></script>
+  <script id="support-ticket-shared-import">
+  (()=>{
+    const previousOpenImport=window.openPageImportModal;
+    const previousImport=window.importCurrentWorkspacePage;
+    const batchSize=250;
+    const ticketColumnMap={
+      'RequestID':'request_id','Request Type':'request_type','Subject':'subject','Request Status':'request_status','Location':'location','Department':'department','Service Category':'service_category','Request Mode':'request_mode','Category':'category','Sub Category':'sub_category','Type of issue':'type_of_issue','Priority':'priority','Template':'template','Group':'ticket_group','Status':'status','Technician':'technician','Created Time':'created_time','Last Updated Time':'last_updated_time','Resolution':'resolution','Requester':'requester','Approval Status':'approval_status','Assigned Time':'assigned_time','Completed Time':'completed_time','Created By':'ticket_created_by','Due By Time':'due_by_time','Item':'item','Last Updated By':'last_updated_by','Overdue Status':'overdue_status','Requester Email':'requester_email','Resolved By':'resolved_by','Resolved Time':'resolved_time','Site':'site','Site Code':'site_code','Type':'ticket_type','Time Elapsed':'time_elapsed','Solution':'solution','Responded Date':'responded_date','Response Due By Time':'response_due_by_time','Resolve Mode':'resolve_mode','Region':'region'
+    };
+    const ticketSchemaColumns=['request_id','normalized_request_id','fields','source_cells','source_import_id','source_sheet','source_row','source_filename','source_file_index','version',...Object.values(ticketColumnMap).filter(column=>column!=='request_id')];
+    let supportImportBusy=false;
+    let supportRefreshCounts=null;
+    const supportTrackerState=window.supportTickets?.state;
+    if(supportTrackerState){
+      let supportFilterOptions=supportTrackerState.options||{};
+      Object.defineProperty(supportTrackerState,'options',{configurable:true,enumerable:true,get:()=>supportFilterOptions,set:value=>{supportFilterOptions=value||{};}});
+    }
+
+    function supportImportMetrics(total,processed,success,updated,skipped,failed,label){
+      const safeTotal=Math.max(1,Number(total)||1),safeProcessed=Math.min(safeTotal,Math.max(0,Number(processed)||0)),percent=Math.round(safeProcessed/safeTotal*100),status=document.getElementById('import-modal-status');
+      if(!status)return;
+      status.classList.remove('hidden');
+      status.innerHTML=`<div class="space-y-4" aria-live="polite"><div><h3 class="text-lg font-bold text-slate-800">Support Ticket Import</h3><p class="text-sm text-slate-500 mt-1">${escapeHtml(label||'Processing tickets')}</p></div><div class="import-progress-track" role="progressbar" aria-label="Support Ticket import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><div class="import-progress-bar" style="width:${percent}%"></div></div><div class="flex items-center justify-between"><span class="text-sm font-medium text-slate-700">Processed ${safeProcessed} of ${Number(total)||0}</span><span class="text-lg font-bold text-indigo-600">${percent}%</span></div><div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs"><div class="rounded-lg border p-3"><span class="text-slate-500">Total</span><strong class="block text-base text-slate-800">${Number(total)||0}</strong></div><div class="rounded-lg border p-3"><span class="text-slate-500">Success</span><strong class="block text-base text-emerald-700">${success}</strong></div><div class="rounded-lg border p-3"><span class="text-slate-500">Update</span><strong class="block text-base text-blue-700">${updated}</strong></div><div class="rounded-lg border p-3"><span class="text-slate-500">Skip</span><strong class="block text-base text-slate-700">${skipped}</strong></div><div class="rounded-lg border p-3"><span class="text-slate-500">Failure</span><strong class="block text-base text-rose-700">${failed}</strong></div></div></div>`;
+    }
+
+    function supportImportError(error){
+      const message=String(error?.message||error||'Unknown import error.');
+      if(['42703','PGRST204'].includes(error?.code)&&!/normalized_request_id|source_filename|source_file_index/i.test(message))return `${message}\n\nThe Support Ticket table exists but its tabular columns are missing. Apply only supabase-migration-support-ticket-tabular.sql in Supabase, then retry.`;
+      if(['42P01','42703','PGRST202','PGRST204','PGRST205'].includes(error?.code)||/support_tickets|schema cache|normalized_request_id/i.test(message))return `${message}\n\nSupport Ticket database setup is missing or outdated. Apply supabase-migration-support-ticket-tracker.sql followed by supabase-migration-support-ticket-tabular.sql in Supabase, then retry.`;
+      return message;
+    }
+
+    function showSupportImportFailure(error,total=0,counts={}){
+      setImportModalProcessing(false);
+      const status=document.getElementById('import-modal-status');
+      if(!status)return;
+      const processed=counts.processed??0,success=counts.success??0,updated=counts.updated??0,skipped=counts.skipped??0,failed=counts.failed??(total?Math.max(1,total-processed):1),percent=total?Math.round(Math.min(total,Math.max(0,processed))/total*100):0;
+      status.classList.remove('hidden');
+      status.innerHTML=`<div class="space-y-4"><div class="text-center"><div class="mx-auto w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-3xl">!</div><h3 class="text-xl font-bold text-slate-800 mt-3">Support Ticket Import Failed</h3></div><div class="rounded-xl bg-red-50 border border-red-200 p-4"><p class="text-xs font-semibold text-red-700">Reason</p><p class="text-sm text-red-800 mt-1 break-words whitespace-pre-wrap">${escapeHtml(supportImportError(error))}</p></div><div class="import-progress-track" role="progressbar" aria-label="Support Ticket import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><div class="import-progress-bar" style="width:${percent}%"></div></div><div class="flex justify-between text-xs text-slate-600"><span>Processed ${processed} of ${total}</span><strong>${percent}%</strong></div><div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs"><div class="rounded-lg border p-3">Total<strong class="block">${total}</strong></div><div class="rounded-lg border p-3">Processed<strong class="block">${processed} of ${total}</strong></div><div class="rounded-lg border p-3">Success<strong class="block">${success}</strong></div><div class="rounded-lg border p-3">Update<strong class="block">${updated}</strong></div><div class="rounded-lg border p-3">Skip<strong class="block">${skipped}</strong></div><div class="rounded-lg border p-3">Failure<strong class="block">${failed}</strong></div></div><button type="button" onclick="closeImportModal()" class="w-full px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold">Close</button></div>`;
+    }
+
+    function showSupportImportRefreshWarning(error,total,counts){
+      setImportModalProcessing(false);
+      const status=document.getElementById('import-modal-status'),percent=total?Math.round(Math.min(total,Math.max(0,counts.processed))/total*100):0;
+      if(!status)return;
+      status.classList.remove('hidden');
+      status.innerHTML=`<div class="space-y-4"><div class="text-center"><div class="mx-auto w-14 h-14 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-3xl">!</div><h3 class="text-xl font-bold text-slate-800 mt-3">Tickets Saved; Tracker Refresh Incomplete</h3></div><div class="rounded-xl bg-amber-50 border border-amber-200 p-4"><p class="text-sm text-amber-900">All ticket writes completed in Supabase, but the Support Ticket page refresh timed out. The page's summary RPC scans and calculates metrics across the ticket table; this does not roll back saved tickets.</p><p class="mt-2 text-sm text-amber-900 break-words">${escapeHtml(error?.message||error)}</p></div><div class="import-progress-track" role="progressbar" aria-label="Support Ticket import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"><div class="import-progress-bar" style="width:${percent}%"></div></div><div class="flex justify-between text-xs text-slate-600"><span>Processed ${counts.processed} of ${total}</span><strong>${percent}%</strong></div><div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs"><div class="rounded-lg border p-3">Total<strong class="block">${total}</strong></div><div class="rounded-lg border p-3">Processed<strong class="block">${counts.processed} of ${total}</strong></div><div class="rounded-lg border p-3">Success<strong class="block">${counts.success}</strong></div><div class="rounded-lg border p-3">Update<strong class="block">${counts.updated}</strong></div><div class="rounded-lg border p-3">Skip<strong class="block">${counts.skipped}</strong></div><div class="rounded-lg border p-3">Failure<strong class="block">${counts.failed}</strong></div></div><div class="flex gap-2"><button type="button" onclick="retrySupportTicketRefresh()" class="flex-1 px-4 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">Retry Tracker Refresh</button><button type="button" onclick="closeImportModal()" class="px-4 py-3 rounded-xl border border-slate-300 text-slate-700 font-semibold">Close</button></div></div>`;
+    }
+
+    async function retrySupportTicketRefresh(){
+      if(!supportRefreshCounts)return;
+      const {total,counts}=supportRefreshCounts;
+      setImportModalProcessing(true);
+      supportImportMetrics(total,total,counts.success,counts.updated,counts.skipped,counts.failed,'Retrying Support Ticket Tracker refresh');
+      await window.supportTickets.load(true);
+      if(window.supportTickets.state.error){showSupportImportRefreshWarning(new Error(window.supportTickets.state.error),total,counts);return showToast('Tickets remain saved; the Support Ticket page refresh timed out again.','error');}
+      supportRefreshCounts=null;
+      setImportModalProcessing(false);
+      supportImportMetrics(total,total,counts.success,counts.updated,counts.skipped,counts.failed,'Import completed; Support Ticket Tracker reloaded from Supabase.');
+      document.getElementById('import-modal-status')?.insertAdjacentHTML('beforeend','<button type="button" onclick="closeImportModal()" class="w-full px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">Close</button>');
+      showToast('Support Ticket Tracker refreshed from Supabase.','success');
+    }
+    window.retrySupportTicketRefresh=retrySupportTicketRefresh;
+
+    function ticketImportRecord(row,file){
+      const headers=window.supportTickets.headers,fields={};
+      headers.forEach(header=>{fields[header]=String(row.fields?.[header]??'');});
+      const requestId=String(fields.RequestID||'').trim();
+      fields.RequestID=requestId;
+      const record={request_id:requestId,fields,source_cells:row.source_cells||{},source_sheet:row.source_sheet||null,source_row:row.source_row||null,source_filename:file.name,source_file_index:0};
+      Object.entries(ticketColumnMap).forEach(([header,column])=>{if(column!=='request_id')record[column]=fields[header];});
+      return record;
+    }
+
+    function downloadSupportTicketTemplate(){
+      if(typeof XLSX==='undefined')return showToast('Excel library is not available.','error');
+      const headers=window.supportTickets.headers,sample={
+        RequestID:'SAMPLE-REPLACE-ME','Request Type':'Service Request',Subject:'SAMPLE - Replace with a real ticket subject','Request Status':'Open',Location:'Sample Location',Department:'Sample Department','Service Category':'Sample Service','Request Mode':'Portal',Category:'Sample Category','Sub Category':'Sample Subcategory','Type of issue':'Sample issue',Priority:'Medium',Template:'Default',Group:'Sample Group',Status:'Open',Technician:'Not Assigned','Created Time':'2026-10-24 09:00','Last Updated Time':'2026-10-24 09:00',Resolution:'',Requester:'Sample Requester','Approval Status':'Not Required','Assigned Time':'','Completed Time':'','Created By':'Sample Import','Due By Time':'','Item':'Sample item','Last Updated By':'Sample Import','Overdue Status':'No','Requester Email':'sample@example.com','Resolved By':'','Resolved Time':'',Site:'Sample Site','Site Code':'SAMPLE','Type':'Sample','Time Elapsed':'0',Solution:'','Responded Date':'','Response Due By Time':'','Resolve Mode':'','Region':'Sample Region'
+      };
+      const worksheet=XLSX.utils.aoa_to_sheet([['All_Tickets_-_Open sample import. Replace or remove the SAMPLE row before importing.'],headers,headers.map(header=>sample[header]??'')]);
+      worksheet['!cols']=headers.map(header=>({wch:header==='Subject'?48:24}));
+      const workbook=XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook,worksheet,'All_Tickets_-_Open');
+      XLSX.writeFile(workbook,`Support_Tickets_Import_Template_${new Date().toISOString().slice(0,10)}.xlsx`);
+    }
+    window.downloadSupportTicketTemplate=downloadSupportTicketTemplate;
+
+    async function runSupportTicketImport(event){
+      const input=event.target,file=input.files?.[0];
+      if(!file)return;
+      input.value='';
+      if(supportImportBusy)return;
+      if(!window.supportTickets||!['Admin','Level 1'].includes(currentUser?.role))return showToast('You do not have permission to import Support Tickets.','error');
+      supportImportBusy=true;
+      supportRefreshCounts=null;
+      let rows=[],counts={processed:0,success:0,updated:0,skipped:0,failed:0};
+      let importPhase='Preparing import',importCommitted=false;
+      try{
+        if(!/\.xlsx?$/i.test(file.name))throw new Error('Only .xls and .xlsx workbooks are supported.');
+        importPhase='Reading workbook';
+        showImportProgress(1,'Reading Support Ticket workbook');
+        supportImportMetrics(0,0,0,0,0,0,'Reading workbook and locating the RequestID header');
+        const workbook=XLSX.read(await file.arrayBuffer(),{type:'array',cellNF:true,cellStyles:true,cellFormula:true,cellText:true,cellDates:false});
+        rows=window.supportTickets.parseWorkbook(workbook,file.name,0);
+        importPhase='Validating ticket rows';
+        const headers=window.supportTickets.headers,errors=[],seen=new Map(),failedRows=new Set(),records=[];
+        for(let index=0;index<rows.length;index++){
+          const row=rows[index],requestId=String(row.fields?.RequestID??'').trim(),rowErrors=[...(row.row_errors||[])];
+          if(!String(row.fields?.Subject??'').trim())rowErrors.push('Subject is required.');
+          const key=requestId.toLocaleLowerCase('en-US');
+          if(key&&seen.has(key)){const firstIndex=seen.get(key);failedRows.add(firstIndex);failedRows.add(index);rowErrors.push(`RequestID duplicates row ${rows[firstIndex].source_row}.`);errors.push(`Rows ${rows[firstIndex].source_row} and ${row.source_row}: RequestID is duplicated.`);}
+          else if(key)seen.set(key,index);
+          if(rowErrors.length){failedRows.add(index);errors.push(`Row ${row.source_row}: ${rowErrors.join(' ')}`);}
+          records.push(ticketImportRecord(row,file));
+          if(index%250===249){supportImportMetrics(rows.length,index+1,0,0,0,errors.length,'Validating ticket rows');await yieldImportUi();}
+        }
+        if(errors.length){counts={processed:rows.length,success:0,updated:0,skipped:Math.max(0,rows.length-failedRows.size),failed:failedRows.size};showSupportImportFailure(new Error(`Import validation failed. No rows were saved.\n${errors.slice(0,20).join('\n')}`),rows.length,counts);return;}
+        importPhase='Checking Support Ticket table columns';
+        const schemaCheck=await supabaseClient.from('support_tickets').select(ticketSchemaColumns.join(',')).limit(0);
+        if(schemaCheck.error)throw schemaCheck.error;
+        const existingByKey=new Map();
+        importPhase='Checking existing RequestIDs';
+        for(let start=0;start<records.length;start+=batchSize){
+          const keys=records.slice(start,start+batchSize).map(record=>record.request_id.toLocaleLowerCase('en-US'));
+          const result=await supabaseClient.from('support_tickets').select('normalized_request_id,fields').in('normalized_request_id',keys);
+          if(result.error)throw result.error;
+          (result.data||[]).forEach(record=>existingByKey.set(String(record.normalized_request_id),record));
+          if(start&&start%1000===0){supportImportMetrics(records.length,start,0,0,0,0,'Checking existing RequestIDs');await yieldImportUi();}
+        }
+        const inserts=[],updates=[];
+        records.forEach(record=>{
+          const key=record.request_id.toLocaleLowerCase('en-US'),existing=existingByKey.get(key);
+          if(!existing){inserts.push(record);return;}
+          const changed=headers.some(header=>header==='RequestID'?String(existing.fields?.[header]??'').trim().toLocaleLowerCase('en-US')!==key:String(existing.fields?.[header]??'')!==String(record.fields[header]??''));
+          if(changed)updates.push(record);else counts.skipped++;
+        });
+        counts.processed=counts.skipped;
+        supportImportMetrics(records.length,counts.processed,counts.success,counts.updated,counts.skipped,counts.failed,'Preparing batched Supabase upserts');
+        const work=[...inserts.map(record=>({record,kind:'success'})),...updates.map(record=>({record,kind:'updated'}))];
+        for(let start=0;start<work.length;start+=batchSize){
+          importPhase=`Saving ticket batch ${Math.floor(start/batchSize)+1}`;
+          const batch=work.slice(start,start+batchSize),result=await supabaseClient.from('support_tickets').upsert(batch.map(item=>item.record),{onConflict:'normalized_request_id',defaultToNull:false});
+          if(result.error){counts.failed+=work.length-start;counts.processed+=work.length-start;throw result.error;}
+          batch.forEach(item=>{counts[item.kind]++;counts.processed++;});
+          supportImportMetrics(records.length,counts.processed,counts.success,counts.updated,counts.skipped,counts.failed,`Saving ticket batch ${Math.floor(start/batchSize)+1}`);
+          await yieldImportUi();
+        }
+        counts.processed=records.length;
+        importCommitted=true;
+        importPhase='Refreshing Support Ticket Tracker';
+        supportImportMetrics(records.length,counts.processed,counts.success,counts.updated,counts.skipped,counts.failed,'Reloading Support Ticket Tracker from Supabase');
+        await window.supportTickets.load(true);
+        if(window.supportTickets.state.error)throw new Error(window.supportTickets.state.error);
+        setImportModalProcessing(false);
+        supportImportMetrics(records.length,records.length,counts.success,counts.updated,counts.skipped,counts.failed,'Import completed; Support Ticket Tracker reloaded from Supabase.');
+        const status=document.getElementById('import-modal-status');
+        status.insertAdjacentHTML('beforeend','<button type="button" onclick="closeImportModal()" class="w-full px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">Close</button>');
+        showToast(`Support Ticket import completed: ${counts.success} inserted, ${counts.updated} updated, ${counts.skipped} skipped.`,'success');
+      }catch(error){
+        if(importCommitted&&importPhase==='Refreshing Support Ticket Tracker')console.warn('Support Ticket rows were saved, but tracker refresh failed:',error);
+        else console.error('Support Ticket import failed:',error);
+        const total=rows.length,remaining=Math.max(0,total-counts.processed-counts.failed);
+        counts.failed+=remaining;counts.processed=Math.min(total,counts.processed+remaining);
+        if(importCommitted&&importPhase==='Refreshing Support Ticket Tracker'){
+          supportRefreshCounts={total,counts:{...counts}};
+          showSupportImportRefreshWarning(error,total,counts);
+          showToast('Tickets were saved, but the Support Ticket Tracker refresh timed out.','error');
+        }else showSupportImportFailure(Object.assign(new Error(`${importPhase}: ${error?.message||error}`),{code:error?.code}),total,counts);
+      }finally{supportImportBusy=false;setImportModalProcessing(false);input.value='';}
+    }
+
+    window.openPageImportModal=function(){
+      if(currentWorkspaceView!=='support'){const input=document.getElementById('import-file');if(input)input.accept='.xlsx';return previousOpenImport.apply(this,arguments);}
+      if(!window.supportTickets||!['Admin','Level 1'].includes(currentUser?.role))return showToast('You do not have permission to import Support Tickets.','error');
+      currentImportView='support';
+      const title=document.getElementById('import-modal-title'),description=title?.parentElement?.querySelector('p'),content=document.getElementById('import-modal-default'),input=document.getElementById('import-file');
+      if(title)title.textContent='Support Ticket Import Center';
+      if(description)description.textContent='Import the All_Tickets_-_Open workbook directly. The header row is detected by RequestID.';
+      if(input){input.accept='.xls,.xlsx';input.value='';}
+      if(content)content.innerHTML='<p class="text-sm text-slate-600">Select an .xls or .xlsx workbook. Report information above the RequestID header is ignored.</p><div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button type="button" onclick="downloadSupportTicketTemplate()" class="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold">Download Template</button><button type="button" onclick="document.getElementById(\'import-file\').click()" class="w-full px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-semibold">Import Support Tickets</button></div><p class="text-xs text-slate-500">The template includes one valid sample ticket. Replace or remove the SAMPLE row before importing, or it will be saved as a real ticket. RequestID is the unique business key; existing tickets are updated and unchanged rows are skipped.</p>';
+      openImportModal();
+    };
+    window.importCurrentWorkspacePage=async function(event){if(currentWorkspaceView==='support')return runSupportTicketImport(event);return previousImport.apply(this,arguments);};
+  })();
+  </script>
+  <style id="bulk-range-selection-style">
+  body.milestone-range-selecting #projects-container,body.milestone-range-selecting #workspace-flat-page{user-select:none!important;-webkit-user-select:none!important}
+  </style>
+  <script id="bulk-range-selection">
+  (function installBulkRangeSelection(){
+    if(window.bulkRangeSelectionInstalled)return;
+    window.bulkRangeSelectionInstalled=true;
+    let anchor=null;
+    const entityNames=new Set(['programs','initiatives','tracks','milestones']);
+    const viewName=()=>currentWorkspaceView;
+    const inputFor=target=>target?.closest?.('input[type="checkbox"].bulk-row-checkbox,input[type="checkbox"].overview-bulk-checkbox,input[type="checkbox"][data-daily-select-entity]')||target?.closest?.('label')?.querySelector?.('input[type="checkbox"].bulk-row-checkbox,input[type="checkbox"].overview-bulk-checkbox,input[type="checkbox"][data-daily-select-entity]')||null;
+    function modeActive(view){if(view==='overview')return overviewMultiSelectEnabled===true;if(view==='daily')return dailyMultiSelectEnabled===true;return ['programs','initiatives','tracks','milestones'].includes(view);}
+    function rootFor(view){return view==='overview'?document.getElementById('projects-container'):['programs','initiatives','tracks','milestones','daily'].includes(view)?document.getElementById('workspace-flat-page'):null;}
+    function isVisible(box){if(!box?.isConnected||box.disabled||box.getAttribute('aria-disabled')==='true'||box.closest('[hidden],[aria-hidden="true"],.hidden'))return false;const style=getComputedStyle(box);return style.display!=='none'&&style.visibility!=='hidden'&&box.getClientRects().length>0;}
+    function recordIndex(entity){const records=new Map();if(entity==='programs'){for(const program of programs||[])records.set(Number(program.id),{record:program,project:null});return records;}for(const project of projects||[]){const source=entity==='initiatives'?[project]:entity==='tracks'?(project.tracks||[]):entity==='milestones'?(project.milestones||[]):[];for(const record of source)records.set(Number(record.id),{record,project});}return records;}
+    function authorized(entity,id,recordInfo){if(entity==='programs')return canCreateInitiative();return Boolean(recordInfo?.project&&canEditInitiative(recordInfo.project));}
+    function metadata(box,index){const entity=box.dataset.dailySelectEntity||box.dataset.entity,id=Number(box.dataset.id);if(!entityNames.has(entity)||!Number.isSafeInteger(id)||id<=0)return null;const info=index.get(id);return{box,entity,id,projectId:info?.project?Number(info.project.id):null,trackId:entity==='milestones'?info?.record?.trackId??null:null,project:info?.project||null};}
+    function visibleRows(view,entity){const root=rootFor(view);if(!root)return[];const index=recordIndex(entity);return[...root.querySelectorAll('input[type="checkbox"]')].filter(box=>box.matches('.bulk-row-checkbox,.overview-bulk-checkbox,[data-daily-select-entity]')&&(box.dataset.dailySelectEntity||box.dataset.entity)===entity&&isVisible(box)).map(box=>metadata(box,index)).filter(Boolean);}
+    function allVisibleMilestonesForProject(view,projectId,visible){const visibleIds=new Set(visible.filter(item=>item.projectId===projectId).map(item=>item.id)),project=projects.find(item=>Number(item.id)===Number(projectId));return Boolean(project)&&(project.milestones||[]).filter(milestone=>!['deleted','archived'].includes(String(milestone.recordStatus||'').toLowerCase())).every(milestone=>visibleIds.has(Number(milestone.id)));}
+    function syncOnce(view){if(view==='daily'){if(window.dailyTrackerControls?.syncSelection)window.dailyTrackerControls.syncSelection();else window.updateDailyMultiSelectBanner?.();return;}window.syncBulkSelectionUI?.();}
+    function clearAnchor(){anchor=null;document.body.classList.remove('milestone-range-selecting');}
+    document.addEventListener('pointerdown',event=>{if(event.shiftKey&&inputFor(event.target))document.body.classList.add('milestone-range-selecting');},true);
+    document.addEventListener('pointerup',()=>document.body.classList.remove('milestone-range-selecting'),true);
+    window.addEventListener('blur',()=>document.body.classList.remove('milestone-range-selecting'));
+    document.addEventListener('click',event=>{
+      const box=inputFor(event.target);if(!box)return;
+      const view=viewName(),target=metadata(box,recordIndex(box.dataset.dailySelectEntity||box.dataset.entity));if(!target||!modeActive(view)||!isVisible(box)){if(target)anchor=null;return;}
+      if(!authorized(target.entity,target.id,{project:target.project})){event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();box.checked=false;anchor=null;return;}
+      const currentAnchor=anchor;
+      const milestoneProjectId=target.entity==='milestones'?target.projectId:null;
+      if(!event.shiftKey){anchor={view,entity:target.entity,id:target.id,projectId:milestoneProjectId};return;}
+      if(!currentAnchor||currentAnchor.view!==view||currentAnchor.entity!==target.entity||currentAnchor.projectId!==milestoneProjectId){anchor={view,entity:target.entity,id:target.id,projectId:milestoneProjectId};return;}
+      const rows=visibleRows(view,target.entity),from=rows.findIndex(item=>item.id===currentAnchor.id),to=rows.findIndex(item=>item.id===target.id);
+      if(from<0||to<0){anchor={view,entity:target.entity,id:target.id,projectId:target.projectId};return;}
+      if(target.entity==='milestones'&&rows[from].trackId!==rows[to].trackId&&!allVisibleMilestonesForProject(view,target.projectId,rows)){anchor={view,entity:target.entity,id:target.id,projectId:milestoneProjectId};return;}
+      event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
+      const start=Math.min(from,to),end=Math.max(from,to),selection=bulkWorkspaceSelection[target.entity];
+      for(let index=start;index<=end;index++){const item=rows[index];if(authorized(item.entity,item.id,{project:item.project}))selection.add(item.id);}
+      anchor=currentAnchor;syncOnce(view);
+    },true);
+    for(const name of ['renderProjects','renderFlatWorkspacePage','renderDailyTrackerPage']){const previous=window[name];if(typeof previous==='function')window[name]=function(...args){clearAnchor();return previous.apply(this,args);};}
+    for(const name of ['showWorkspaceView','setOverviewMultiSelect','setDailyMultiSelect','clearBulkSelection']){const previous=window[name];if(typeof previous==='function')window[name]=function(...args){clearAnchor();return previous.apply(this,args);};}
+    window.bulkRangeSelection={clearAnchor,visibleRows,allVisibleMilestonesForProject};
+  })();
+  </script>
+  <script id="multi-select-keyboard-shortcut">
+  (function installMultiSelectKeyboardShortcut(){
+    if(window.multiSelectKeyboardShortcutInstalled)return;
+    window.multiSelectKeyboardShortcutInstalled=true;
+    document.addEventListener('keydown',event=>{
+      if(!(event.ctrlKey||event.metaKey)||event.altKey||event.shiftKey||event.repeat||event.isComposing||String(event.key||'').toLowerCase()!=='m')return;
+      if(event.target?.closest?.('input,textarea,select,[contenteditable="true"],[role="textbox"]'))return;
+      if(currentWorkspaceView==='overview'){
+        event.preventDefault();
+        toggleOverviewMultiSelect();
+      }else if(currentWorkspaceView==='daily'){
+        event.preventDefault();
+        setDailyMultiSelect(!dailyMultiSelectEnabled);
+      }
+    },true);
+  })();
+  </script>
   </body>
   </html>
   
