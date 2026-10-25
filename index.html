@@ -23136,6 +23136,17 @@
   .report-toolbar{display:flex;flex-wrap:wrap;align-items:end;gap:.6rem;margin:.8rem 0}
   #delivery-reports label{display:flex;flex-direction:column;gap:.25rem;font-weight:600}
   .report-layout{display:grid;grid-template-columns:minmax(180px,1fr) minmax(0,3fr);gap:1rem}
+  .report-relationship-panel{border:1px solid #cbd5e1;border-radius:8px;background:#fff;padding:.8rem;margin:.8rem 0}
+  .report-relationship-toolbar{display:flex;align-items:end;gap:.6rem;flex-wrap:wrap;margin-bottom:.65rem}.report-relationship-toolbar label{min-width:190px}
+  .report-relationship-canvas{position:relative;min-height:112px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background-color:#f8fafc;background-image:radial-gradient(#cbd5e1 .7px,transparent .7px);background-size:14px 14px;padding:1rem}
+  .report-relationship-nodes{position:relative;z-index:2;display:flex;align-items:center;gap:1rem;flex-wrap:wrap;min-height:72px}
+  .report-source-node{display:flex;align-items:center;gap:.45rem;min-width:150px;max-width:240px;padding:.55rem .7rem;border:1px solid #94a3b8;border-radius:6px;background:white;box-shadow:0 2px 5px rgba(15,23,42,.08);cursor:grab}
+  .report-source-node:active{cursor:grabbing}.report-source-node[data-primary="true"]{border-color:#0891b2;background:#ecfeff}.report-source-node.report-node-over{outline:2px solid #0891b2;outline-offset:2px}.report-source-node span{min-width:0;overflow-wrap:anywhere;font-size:.75rem;font-weight:700}.report-source-node button{margin-left:auto}
+  .report-relationship-lines{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;overflow:visible}.report-relationship-line{stroke:#0891b2;stroke-width:2}.report-relationship-label{fill:#0f766e;font-size:11px;font-weight:700}
+  .report-relationship-edge{display:grid;grid-template-columns:minmax(140px,1.2fr) minmax(120px,1fr) minmax(120px,1fr) 90px 90px 36px;gap:.45rem;align-items:end;padding:.55rem 0;border-top:1px solid #e2e8f0}
+  .report-relationship-edge label{min-width:0;font-size:.68rem}.report-relationship-edge select{width:100%}.report-relationship-validation{min-height:1.2rem;margin:.4rem 0;font-size:.75rem;color:#475569}.report-relationship-validation[data-error="true"]{color:#be123c}
+  .report-field-source{border-top:1px solid #e2e8f0;margin-top:.5rem;padding-top:.4rem}.report-field-source-toggle{display:flex;width:100%;justify-content:space-between;font-weight:700!important;color:#334155}
+  .report-field-source-content[hidden]{display:none!important}.report-field-search{width:100%;margin:.5rem 0}
   .report-zones{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem}
   .report-zone{border:1px dashed #94a3b8;border-radius:6px;padding:.65rem;min-height:95px}
   .report-zone h4{font-weight:700;margin-bottom:.45rem}
@@ -23151,9 +23162,12 @@
   .report-preview table{border-collapse:collapse;min-width:100%;font-size:.75rem}
   .report-preview th,.report-preview td{padding:.6rem;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;white-space:pre-line;min-width:130px;max-width:280px;overflow-wrap:anywhere;vertical-align:top}
   .report-preview th{position:sticky;top:0;background:#f0fdfa;text-align:left;z-index:1}
+  #report-template-label[hidden]{display:none!important}
+  .report-preview-pager{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.6rem .75rem;background:#f8fafc;border-top:1px solid #cbd5e1;font-size:.72rem;color:#475569}
+  .report-preview-pager>div{display:flex;align-items:center;gap:.5rem}.report-preview-pager button{padding:.3rem .55rem!important}.report-preview-pager button:disabled{opacity:.45;cursor:not-allowed}
   #report-message{white-space:pre-line;margin:.5rem 0;color:#475569}
   #report-message[data-error=true]{color:#be123c}
-  @media(max-width:700px){.report-layout{grid-template-columns:1fr}.report-zones{grid-template-columns:1fr}.report-toolbar label{width:100%}.report-toolbar select,.report-toolbar input{width:100%}}
+  @media(max-width:700px){.report-layout{grid-template-columns:1fr}.report-zones{grid-template-columns:1fr}.report-toolbar label{width:100%}.report-toolbar select,.report-toolbar input{width:100%}.report-relationship-edge{grid-template-columns:1fr 1fr}.report-relationship-edge>label:first-child{grid-column:1/-1}}
   </style>
   <script id="delivery-report-builder">
   (()=>{
@@ -23167,34 +23181,150 @@
     const valueFields={...dateFields,status:'Status',owner:'Owner',deviation_days:'Deviation Days',...milestoneFields};
     const milestoneDimensions=Object.fromEntries(Object.entries(milestoneFields).map(([field,label])=>['milestone.'+field,label]));
     const aggregations={earliest:'Earliest Date',latest:'Latest Date',first_sequence:'First by Milestone Sequence',last_sequence:'Last by Milestone Sequence',all:'Show All',count:'Count'};
-    const allowedFields=()=>({rows:[...Object.keys(rowFields),...Object.keys(milestoneDimensions)],columns:['plannerTypes','templateMilestones','manualMilestones',...Object.keys(milestoneDimensions)],values:Object.keys(valueFields),filters:[...Object.keys(filterFields),...Object.keys(milestoneDimensions)]});
+    const entityAggregations={sum:'Sum',average:'Average',minimum:'Minimum',maximum:'Maximum',earliest:'Earliest',latest:'Latest',first_sequence:'First by Sequence',last_sequence:'Last by Sequence',all:'Show All',count:'Count'};
+    const allowedFields=(config=state.config)=>{
+      const source=typeof config==='string'?config:config?.dataSource||'template',reportConfig=typeof config==='object'&&config?config:source===state.config?.dataSource?state.config:{dataSource:source,primarySource:source,joinedSources:[],relationships:[]};
+      if(source==='template')return {rows:[...Object.keys(rowFields),...Object.keys(milestoneDimensions)],columns:['plannerTypes','templateMilestones','manualMilestones',...Object.keys(milestoneDimensions)],values:Object.keys(valueFields),filters:[...Object.keys(filterFields),...Object.keys(milestoneDimensions)]};
+      const fields=reportFieldCatalog(reportConfig).map(field=>field.id);return {rows:fields,columns:fields,values:fields,filters:[...(source==='support_ticket'?[]:['scope']),...fields]};
+    };
     const defaultAggregation=field=>isDateValueField(field)?'latest':'last_sequence';
+    const entityDefaultAggregation=definition=>definition?.type==='numeric'?'sum':definition?.type==='date'?'latest':'all';
     const filterFields={program:'Program',initiative:'Initiative',template:'Template',vertical:'Vertical',owner:'Owner',status:'Initiative Status',milestoneStatus:'Milestone Status',dateRange:'Date Range',scope:'Active/Archived Scope',functional_engineer_id:'Initiative Functional Engineer',technical_engineer_id:'Initiative Technical Engineer',program_functional_engineer_id:'Program Functional Engineer',program_technical_engineer_id:'Program Technical Engineer'};
-    const state={config:null,saved:[],selected:null,editing:true,templates:[],templateRows:new Map(),metadataPromise:null,metadataVersion:0,data:null,result:null,busy:false,drag:null,user:null,request:0,openRequest:0,channel:null,refreshTimer:null,view:'report_builder',pages:{report_builder:null,custom_reports:null},scrolls:{},catalog:{search:'',template:'',dateField:''},catalogError:''};
+    const entityTableFields={
+      programs:[['id','Program ID','numeric'],['sequence_no','Sequence No','numeric'],['program_name','Program Name'],['purpose','Purpose'],['vertical','Vertical','enum'],['program_owner','Program Owner','user'],['assigned_to','Assigned To','user'],['functional_engineer_id','Functional Engineer','user'],['technical_engineer_id','Technical Engineer','user'],['start_date','Start Date','date'],['target_end_date','Target End Date','date'],['revised_start_date','Revised Start Date','date'],['revised_end_date','Revised End Date','date'],['actual_end_date','Actual End Date','date'],['impact_category','Impact Category','enum'],['measurable_impact','Measurable Impact'],['business_benefit','Business Benefit'],['program_status','Program Status','status'],['program_age','Program Age','numeric'],['is_active','Active','boolean'],['created_by','Created By','user'],['created_by_name','Created By Name','user'],['created_at','Created Time','date'],['modified_by','Modified By','user'],['modified_by_name','Modified By Name','user'],['modified_at','Modified Time','date'],['updated_at','Updated Time','date'],['archived_by','Archived By','user'],['archived_by_name','Archived By Name','user'],['archived_at','Archived Time','date']],
+      initiatives:[['id','Initiative ID','numeric'],['sequence_no','Sequence No','numeric'],['program_id','Program ID','numeric'],['title','Initiative Name'],['description','Description'],['initiative_type','Initiative Type','enum'],['cr_no','CR Number'],['vertical','Vertical','enum'],['delivery_method','Delivery Method','enum'],['business_owner','Business Owner','user'],['assigned_to','Assigned To','user'],['functional_engineer_id','Functional Engineer','user'],['functional_engineer_name','Functional Engineer Name','user'],['technical_engineer_id','Technical Engineer','user'],['technical_engineer_name','Technical Engineer Name','user'],['start_date','Start Date','date'],['target_end_date','Target End Date','date'],['revised_start_date','Revised Start Date','date'],['revised_end_date','Revised End Date','date'],['actual_end_date','Actual End Date','date'],['impact_category','Impact Category','enum'],['measurable_impact','Measurable Impact'],['business_benefit','Business Benefit'],['initiative_status','Initiative Status','status'],['record_status','Record Status','status'],['created_by','Created By','user'],['created_by_name','Created By Name','user'],['created_at','Created Time','date'],['modified_by','Modified By','user'],['modified_by_name','Modified By Name','user'],['modified_at','Modified Time','date'],['updated_at','Updated Time','date'],['archived_by','Archived By','user'],['archived_by_name','Archived By Name','user'],['archived_at','Archived Time','date']],
+      milestone_tracks:[['id','Track ID','numeric'],['initiative_id','Initiative ID','numeric'],['sequence_no','Sequence No','numeric'],['display_order','Display Order','numeric'],['track_name','Track Name'],['record_status','Record Status','status'],['created_by_name','Created By Name','user'],['created_by','Created By','user'],['created_at','Created Time','date'],['modified_by_name','Modified By Name','user'],['modified_by','Modified By','user'],['updated_at','Updated Time','date'],['archived_by_name','Archived By Name','user'],['archived_by','Archived By','user'],['archived_at','Archived Time','date']],
+      milestones:[['id','Milestone ID','numeric'],['initiative_id','Initiative ID','numeric'],['initiative_name','Initiative Name'],['track_id','Track ID','numeric'],['sequence_no','Milestone Sequence','numeric'],['milestone_title','Milestone Title'],['actions','Action / Deliverable'],['owner','Owner','user'],['dependency','Dependency','user'],['days','Days','numeric'],['start_date','Start Date','date'],['end_date','End Date','date'],['revised_start_date','Revised Start Date','date'],['revised_end_date','Revised End Date','date'],['deadline','Deadline','date'],['completion_date','Completion Date','date'],['status','Status','status'],['bucket','Bucket','enum'],['deviation_days','Deviation Days','numeric'],['kpi','KPI'],['remarks','Remarks'],['record_status','Record Status','status'],['schedule_mode','Schedule Mode','enum'],['reference_milestone_id','Reference Milestone ID','numeric'],['reference_date_type','Reference Date Type','enum'],['reference_offset_days','Reference Offset (Working Days)','numeric'],['planner_type_id','Planner Type ID','enum'],['template_id','Planner Template ID','enum'],['template_milestone_id','Planner Milestone ID','enum'],['created_by','Created By','user'],['created_by_name','Created By Name','user'],['created_at','Created Time','date'],['modified_by','Modified By','user'],['modified_by_name','Modified By Name','user'],['updated_at','Updated Time','date'],['archived_by','Archived By','user'],['archived_by_name','Archived By Name','user'],['archived_at','Archived Time','date']],
+      project_planner_templates:[['id','Template ID','enum'],['template_name','Template Name'],['description','Description'],['planner_type_group_id','Planner Type Group','enum'],['planner_type_mapping_required','Require Planner Type Mapping','boolean'],['planner_type_allow_repeated','Allow Repeated Planner Types','boolean'],['is_active','Active','boolean'],['created_by','Created By','user'],['created_at','Created Time','date'],['updated_at','Updated Time','date']]
+    };
+    const entitySourceTables={program:[['programs','program']],initiative:[['initiatives','initiative'],['programs','program']],track:[['milestone_tracks','track'],['initiatives','initiative'],['programs','program']],milestone:[['milestones','milestone'],['milestone_tracks','track'],['initiatives','initiative'],['programs','program']],planner_template:[['project_planner_templates','planner_template']]};
+    const sourceAlias={program:'program',initiative:'initiative',track:'track',milestone:'milestone',support_ticket:'ticket',planner_template:'planner_template'};
+    const dataSourceOptions=[['template','Template / Roadmap'],['program','Program'],['initiative','Initiative'],['track','Track'],['milestone','Milestone'],['support_ticket','Support Ticket']];
+    const joinableSourceOptions=[...dataSourceOptions.filter(([source])=>source!=='template'),['planner_template','Template']];
+    const dataSourceLabel=source=>source==='planner_template'?'Template':dataSourceOptions.find(([value])=>value===source)?.[1]||dataSourceOptions[0][1];
+    function relationshipHasCompatibleKeys(relation){
+      const left=sourceFieldCatalog(relation.source).find(field=>field.id===relation.sourceField),right=sourceFieldCatalog(relation.target).find(field=>field.id===relation.targetField);if(!left||!right||left.computed||right.computed||fieldTypeFamily(left)!==fieldTypeFamily(right))return false;
+      const stable=stableRelationship(relation.source,relation.target),isStable=stable&&stable.sourceField===relation.sourceField&&stable.targetField===relation.targetField;
+      return Boolean(isStable||relation.custom===true&&(relation.source==='support_ticket'||relation.target==='support_ticket'));
+    }
+    function connectedSourceIds(config){const connected=new Set([config.primarySource||config.dataSource]),queue=[...connected];for(let index=0;index<queue.length;index++){const source=queue[index];for(const relation of config.relationships||[]){if(!relationshipHasCompatibleKeys(relation))continue;const neighbor=relation.source===source?relation.target:relation.target===source?relation.source:null;if(neighbor&&!connected.has(neighbor)){connected.add(neighbor);queue.push(neighbor);}}}return connected;}
+    function reportFieldCatalog(config){
+      const connected=connectedSourceIds(config),sources=[config.primarySource||config.dataSource,...(config.joinedSources||[])].filter(source=>connected.has(source)),seen=new Set();
+      return sources.flatMap(source=>sourceFieldCatalog(source).filter(field=>{if(seen.has(field.id))return false;seen.add(field.id);return true;}).map(field=>({...field,source,groupLabel:`[${dataSourceLabel(source)}] ${field.label}`})));
+    }
+    function reportFieldLabel(config,field){return reportFieldCatalog(normalizeConfig({...config})).find(item=>item.id===field)?.groupLabel||field;}
+    const stableRelationships=[
+      {source:'program',target:'initiative',sourceField:'program.id',targetField:'initiative.program_id',cardinality:'1:N'},
+      {source:'initiative',target:'track',sourceField:'initiative.id',targetField:'track.initiative_id',cardinality:'1:N'},
+      {source:'track',target:'milestone',sourceField:'track.id',targetField:'milestone.track_id',cardinality:'1:N'},
+      {source:'initiative',target:'milestone',sourceField:'initiative.id',targetField:'milestone.initiative_id',cardinality:'1:N'},
+      {source:'milestone',target:'planner_template',sourceField:'milestone.template_id',targetField:'planner_template.id',cardinality:'N:1'}
+    ];
+    function sourceFieldCatalog(source){const alias=sourceAlias[source];return alias?entityFieldCatalog(source).filter(field=>field.alias===alias):[];}
+    function sourceForField(field){return Object.entries(sourceAlias).find(([,alias])=>alias===String(field).split('.')[0])?.[0]||'';}
+    function invertCardinality(cardinality){return cardinality==='1:N'?'N:1':cardinality==='N:1'?'1:N':'1:1';}
+    function stableRelationship(source,target){
+      const relation=stableRelationships.find(item=>item.source===source&&item.target===target||item.source===target&&item.target===source);if(!relation)return null;
+      return relation.source===source?{...relation,joinType:'left',custom:false}:{source,target,sourceField:relation.targetField,targetField:relation.sourceField,cardinality:invertCardinality(relation.cardinality),joinType:'left',custom:false};
+    }
+    function stablePath(source,target){
+      const queue=[[source,[]]],visited=new Set([source]);
+      while(queue.length){const [current,path]=queue.shift();if(current===target)return path;for(const relation of stableRelationships){const next=relation.source===current?relation.target:relation.target===current?relation.source:null;if(!next||visited.has(next))continue;visited.add(next);queue.push([next,[...path,stableRelationship(current,next)]]);}}
+      return null;
+    }
+    function normalizeConfig(config){
+      config.dataSource=config.dataSource||'template';config.primarySource=config.primarySource||config.dataSource;config.dataSource=config.primarySource;
+      config.joinedSources=Array.isArray(config.joinedSources)?config.joinedSources:[];config.relationships=Array.isArray(config.relationships)?config.relationships:[];
+      if(config.dataSource==='template'){config.joinedSources=[];config.relationships=[];}
+      else if(config.fieldOrder&&config.dataSource!=='template')for(const zone of ['rows','columns','values','filters'])if(Array.isArray(config.fieldOrder[zone]))config[zone]=config.fieldOrder[zone].slice();
+      if(config.dataSource!=='template'){
+        const sources=new Set([config.primarySource,...config.joinedSources]),selectedFields=['rows','columns','values','filters'].flatMap(zone=>config[zone]||[]);
+        for(const field of selectedFields){const required=sourceForField(field);if(!required||sources.has(required))continue;const path=stablePath(config.primarySource,required);if(!path)continue;for(const relationship of path){for(const source of [relationship.source,relationship.target])if(source!==config.primarySource&&!sources.has(source)){sources.add(source);config.joinedSources.push(source);}if(!config.relationships.some(item=>item.source===relationship.source&&item.target===relationship.target||item.source===relationship.target&&item.target===relationship.source))config.relationships.push(relationship);}}
+      }
+      return config;
+    }
+    function entityFieldCatalog(source){
+      if(source==='support_ticket')return (window.supportTickets?.headers||[]).map(field=>({id:'ticket.'+field,label:field,type:['Created Time','Last Updated Time','Assigned Time','Completed Time','Due By Time','Resolved Time','Responded Date','Response Due By Time'].includes(field)?'date':['Request Status','Status','Priority','Approval Status','Overdue Status'].includes(field)?'status':['Technician','Requester','Created By','Last Updated By','Resolved By'].includes(field)?'user':['Department','Location','Service Category','Request Type','Request Mode','Category','Sub Category','Type of issue','Group','Site','Site Code','Type','Resolve Mode','Region','Template'].includes(field)?'enum':'text',table:'support_tickets',alias:'ticket',column:field}));
+      const fields=(entitySourceTables[source]||[]).flatMap(([table,alias])=>(entityTableFields[table]||[]).map(([column,label,type='text'])=>({id:alias+'.'+column,label:(alias==='program'&&source!=='program'?'Program - ':alias==='initiative'&&source!=='initiative'?'Initiative - ':alias==='track'&&source!=='track'?'Track - ':'')+label,type,table,alias,column})));
+      if(source==='milestone')fields.push({id:'milestone.planner_type_group_id',label:'Planner Type Group',type:'enum',table:'milestones',alias:'milestone',column:null,computed:true},{id:'milestone.is_critical',label:'Critical Flag',type:'boolean',table:'milestones',alias:'milestone',column:null,computed:true},{id:'milestone.overall_deviation',label:'Total Overall Deviation',type:'numeric',table:'milestones',alias:'milestone',column:null,computed:true},{id:'milestone.review_state',label:'Review Status',type:'status',table:'milestones',alias:'milestone',column:null,computed:true},{id:'milestone.owner_department',label:'Owner Department',type:'enum',table:'milestones',alias:'milestone',column:null,computed:true},{id:'milestone.dependency_department',label:'Dependency Department',type:'enum',table:'milestones',alias:'milestone',column:null,computed:true},{id:'milestone.remark_text',label:'Remarks',type:'text',table:'milestones',alias:'milestone',column:null,computed:true});
+      return fields;
+    }
+    function defaultEntityConfig(source){
+      const fields=entityFieldCatalog(source),primary={program:'program.program_name',initiative:'initiative.title',track:'track.track_name',milestone:'milestone.actions',support_ticket:'ticket.RequestID'}[source],idField={program:'program.id',initiative:'initiative.id',track:'track.id',milestone:'milestone.id',support_ticket:'ticket.RequestID'}[source];
+      return {version:4,reportType,dataSource:source,primarySource:source,joinedSources:[],relationships:[],groupId:'',rows:fields.some(field=>field.id===primary)?[primary]:[],columns:[],values:fields.some(field=>field.id===idField)?[idField]:[],stageValue:'',dateField:'',aggregationRules:{[idField]:'count'},filters:source==='support_ticket'?[]:['scope'],filterValues:{scope:'active',search:''},templateId:'',manualMilestoneIds:[],fieldOrder:{rows:fields.some(field=>field.id===primary)?[primary]:[],columns:[],values:fields.some(field=>field.id===idField)?[idField]:[],filters:source==='support_ticket'?[]:['scope']}};
+    }
+    function normalizeConfig(config){config.dataSource=config.dataSource||'template';if(config.fieldOrder&&config.dataSource!=='template')for(const zone of ['rows','columns','values','filters'])if(Array.isArray(config.fieldOrder[zone]))config[zone]=config.fieldOrder[zone].slice();return config;}
+    const state={config:null,saved:[],selected:null,editing:true,templates:[],templateRows:new Map(),templateCatalogPromise:null,metadataPromise:null,metadataVersion:0,data:null,result:null,busy:false,drag:null,relationshipDrag:null,fieldSearch:'',collapsedFieldSources:new Set(),collapseAllFields:false,relationshipResizeInstalled:false,user:null,request:0,openRequest:0,channel:null,refreshTimer:null,filterTimer:0,view:'report_builder',pages:{report_builder:null,custom_reports:null},scrolls:{},catalog:{search:'',template:'',dateField:''},catalogError:''};
     const clone=value=>JSON.parse(JSON.stringify(value));
     const key=value=>value==null?'':String(value);
     const html=value=>escapeHtml(key(value));
     const admin=()=>currentUser?.role==='Admin';
     const editable=()=>admin()&&state.view==='report_builder'&&state.editing&&!state.busy;
-    const defaults=()=>({version:3,reportType,groupId:'',rows:Object.keys(rowFields),columns:['plannerTypes'],values:['deadline'],stageValue:'deadline',dateField:'deadline',aggregationRules:{deadline:'latest'},selectedMilestoneFields:[],sorting:{program:'asc',initiative:'asc',date:'asc',missingDates:'last',initiativeId:'asc',milestoneId:'asc'},filters:Object.keys(filterFields),templateId:'',filterValues:{scope:'active',search:''},manualMilestoneIds:[]});
+    const defaults=(source='template')=>source==='template'?({version:3,reportType,dataSource:'template',primarySource:'template',joinedSources:[],relationships:[],groupId:'',rows:Object.keys(rowFields),columns:['plannerTypes'],values:['deadline'],stageValue:'deadline',dateField:'deadline',aggregationRules:{deadline:'latest'},selectedMilestoneFields:[],sorting:{program:'asc',initiative:'asc',date:'asc',missingDates:'last',initiativeId:'asc',milestoneId:'asc'},filters:Object.keys(filterFields),templateId:'',filterValues:{scope:'active',search:''},manualMilestoneIds:[],fieldOrder:{rows:Object.keys(rowFields),columns:['plannerTypes'],values:['deadline'],filters:Object.keys(filterFields)}}):defaultEntityConfig(source);
     const root=()=>document.getElementById('delivery-reports');
     function message(text,error=false){const element=document.getElementById('report-message');if(element){element.textContent=text;element.dataset.error=key(error);}}
-    function checkConfig(config){
-      if(!config.templateId)throw new Error('Select a Change Request Template.');
-      if(!Array.isArray(config.rows)||!config.rows.includes('initiative'))throw new Error('Rows must include Initiative.');
-      if(!config.columns?.some(field=>['plannerTypes','templateMilestones'].includes(field)))throw new Error('Columns must include Template Planner Types or Legacy Template Milestones.');
-      if(config.columns.includes('plannerTypes')&&config.columns.includes('templateMilestones'))throw new Error('Select one template-column mode, not both.');
-      if(!config.values?.length||config.values.some(field=>!valueFields[field]))throw new Error('Select at least one supported milestone value.');
-      for(const [zone,allowed] of Object.entries(allowedFields())){
-        if(!Array.isArray(config[zone])||config[zone].some(field=>!allowed.includes(field))||new Set(config[zone]).size!==config[zone].length)throw new Error('Invalid or duplicate '+zone+' fields.');
+    function fieldTypeFamily(definition){return ['enum','status','user'].includes(definition?.type)?'text':definition?.type||'';}
+    function validateJoinPlan(config){
+      const primary=config.primarySource||config.dataSource,joined=config.joinedSources||[],sources=[primary,...joined];
+      if(primary==='template'){if(joined.length||config.relationships?.length)throw new Error('Template / Roadmap must be the only Data Source.');return [];}
+      if(!sourceAlias[primary]||sources.some(source=>!sourceAlias[source]||source==='template'))throw new Error('Choose supported Data Sources; Template / Roadmap cannot be joined.');
+      if(new Set(sources).size!==sources.length)throw new Error('A Data Source can only be added once.');
+      const relationships=config.relationships||[];
+      if(relationships.length<sources.length-1)throw new Error('Connect every Data Source to the relationship canvas before running the report.');
+      if(relationships.length>sources.length-1)throw new Error('The relationship canvas contains a cycle. Remove a relationship so every source has one unambiguous path to the Primary Data Source.');
+      const adjacency=new Map(sources.map(source=>[source,[]])),pairs=new Set(),sourceFields=new Map(sources.map(source=>[source,new Map(sourceFieldCatalog(source).map(field=>[field.id,field]))]));
+      for(const relationship of relationships){
+        const {source,target,sourceField,targetField,cardinality,joinType}=relationship;
+        if(!sourceFields.has(source)||!sourceFields.has(target)||source===target)throw new Error('Every relationship must connect two selected, different Data Sources.');
+        const pair=[source,target].sort().join('|');if(pairs.has(pair))throw new Error(`Duplicate relationship between ${dataSourceLabel(source)} and ${dataSourceLabel(target)}.`);pairs.add(pair);
+        if(!['1:1','1:N','N:1'].includes(cardinality)||!['inner','left'].includes(joinType))throw new Error('Choose a valid relationship cardinality and join type.');
+        const left=sourceFields.get(source).get(sourceField),right=sourceFields.get(target).get(targetField);
+        if(!left||!right||left.computed||right.computed)throw new Error('Choose existing, stored fields for both relationship keys.');
+        if(fieldTypeFamily(left)!==fieldTypeFamily(right))throw new Error(`Join key types do not match: ${left.label} (${left.type}) and ${right.label} (${right.type}).`);
+        const stable=stableRelationship(source,target),isStable=stable&&stable.sourceField===sourceField&&stable.targetField===targetField;
+        if(!isStable&&!(relationship.custom===true&&(source==='support_ticket'||target==='support_ticket')))throw new Error(`No supported foreign-key relationship exists between ${dataSourceLabel(source)} and ${dataSourceLabel(target)}. Configure an explicit compatible Support Ticket key or use a supported hierarchy join.`);
+        adjacency.get(source).push({neighbor:target,relationship});adjacency.get(target).push({neighbor:source,relationship});
       }
-      for(const [field,mode] of Object.entries(config.aggregationRules||{})){if(!valueFields[field]||!aggregations[mode]||!isDateValueField(field)&&['earliest','latest'].includes(mode))throw new Error('Invalid aggregation for '+(valueFields[field]||field)+'.');}
+      const seen=new Set(),queue=[primary];seen.add(primary);
+      for(let index=0;index<queue.length;index++){
+        const current=queue[index],many=[];
+        for(const {neighbor,relationship} of adjacency.get(current)){
+          if(seen.has(neighbor))continue;
+          seen.add(neighbor);queue.push(neighbor);
+          const expandsMany=current===relationship.source?relationship.cardinality==='1:N':relationship.cardinality==='N:1';if(expandsMany)many.push(neighbor);
+        }
+        if(many.length>1)throw new Error(`${dataSourceLabel(current)} has multiple one-to-many branches that could multiply report rows. Connect those sources in a chain.`);
+      }
+      if(seen.size!==sources.length)throw new Error('Every joined Data Source must connect back to the Primary Data Source.');
+      return relationships;
+    }
+    function checkConfig(config){
+      normalizeConfig(config);
+      if(!dataSourceOptions.some(([source])=>source===config.dataSource))throw new Error('Choose a valid Data Source.');
+      validateJoinPlan(config);
+      if(config.dataSource==='template'){
+        if(!config.templateId)throw new Error('Select a Change Request Template.');
+        if(!Array.isArray(config.rows)||!config.rows.includes('initiative'))throw new Error('Rows must include Initiative.');
+        if(!config.columns?.some(field=>['plannerTypes','templateMilestones'].includes(field)))throw new Error('Columns must include Template Planner Types or Legacy Template Milestones.');
+        if(config.columns.includes('plannerTypes')&&config.columns.includes('templateMilestones'))throw new Error('Select one template-column mode, not both.');
+        if(!config.values?.length||config.values.some(field=>!valueFields[field]))throw new Error('Select at least one supported milestone value.');
+      }else if(!Array.isArray(config.rows)||!Array.isArray(config.columns)||!Array.isArray(config.values)||!config.values.length||(!config.rows.length&&!config.columns.length))throw new Error('Select at least one report field in Rows or Columns and one field in Values.');
+      for(const [zone,allowed] of Object.entries(allowedFields(config))){
+        if(!Array.isArray(config[zone])||config[zone].some(field=>!allowed.includes(field))||new Set(config[zone]).size!==config[zone].length)throw new Error('Invalid or duplicate '+zone+' fields for '+dataSourceLabel(config.dataSource)+'.');
+      }
+      const entityFields=new Map(reportFieldCatalog(config).map(field=>[field.id,field]));
+      for(const [field,mode] of Object.entries(config.aggregationRules||{})){
+        const definition=config.dataSource==='template'?{label:valueFields[field],type:isDateValueField(field)?'date':'text'}:entityFields.get(field),validModes=config.dataSource==='template'?Object.keys(aggregations):definition?.type==='numeric'?['sum','average','minimum','maximum','first_sequence','last_sequence','all','count']:definition?.type==='date'?['earliest','latest','first_sequence','last_sequence','all','count']:['first_sequence','last_sequence','all','count'];
+        if(!definition||!validModes.includes(mode))throw new Error('Invalid aggregation for '+(definition?.label||field)+'.');
+      }
       if(config.filterValues?.from&&config.filterValues?.to&&config.filterValues.from>config.filterValues.to)throw new Error('Date range start must not be after its end.');
+      if(config.dataSource!=='template')for(const field of config.filters){const definition=entityFields.get(field),range=config.filterValues?.[field];if(!definition||!range||typeof range!=='object')continue;if(definition.type==='date'&&range.from&&range.to&&range.from>range.to)throw new Error(definition.label+' start date must not be after its end date.');if(definition.type==='numeric'&&range.min!==''&&range.max!==''&&range.min!=null&&range.max!=null&&Number(range.min)>Number(range.max))throw new Error(definition.label+' minimum must not exceed its maximum.');}
       if(config.columns.includes('manualMilestones')&&!config.manualMilestoneIds?.length)throw new Error('Select the manual milestones to include.');
     }
     function inScope(row,scope){const archived=['deleted','archived'].includes(key(row.record_status||'active').toLowerCase())||row.is_active===false;return scope==='all'||(scope==='archived'?archived:!archived);}
     function normalizeInitiative(row){return {...row,name:row.title||row.name||'',programId:row.program_id??row.programId,type:row.initiative_type||row.type||'',businessOwner:row.business_owner||row.businessOwner||'',assignedTo:row.assigned_to||row.assignedTo||'',startDate:row.start_date||row.startDate||'',revisedStartDate:row.revised_start_date||row.revisedStartDate||'',targetEndDate:row.target_end_date||row.targetEndDate||'',revisedEndDate:row.revised_end_date||row.revisedEndDate||'',actualEndDate:row.actual_end_date||row.actualEndDate||''};}
     function build(config,data,allowedVertical=()=>true){
+      normalizeConfig(config);if(config.dataSource!=='template')return buildEntityReport(config,data,allowedVertical);
       checkConfig(config);
       const templateId=key(config.templateId),templateRows=(data.templateRows||[]).filter(row=>key(row.template_id)===templateId&&row.is_active!==false).slice().sort((left,right)=>Number(left.display_order||0)-Number(right.display_order||0)||key(left.id).localeCompare(key(right.id),undefined,{numeric:true}));
       const templateMilestones=new Map(templateRows.map(row=>[key(row.id),row])),typeMap=new Map((data.plannerTypes||[]).map(row=>[key(row.id),row])),groupMap=new Map((data.plannerTypeGroups||[]).map(row=>[key(row.id),row]));
@@ -23284,22 +23414,226 @@
       const compareText=(left,right)=>key(left).localeCompare(key(right),undefined,{sensitivity:'base',numeric:true});reportRows.sort((left,right)=>compareText(left.program,right.program)||compareText(left.initiative,right.initiative)||(left.date===right.date?0:left.date-right.date)||compareText(left.initiativeId,right.initiativeId)||compareText(left.milestoneId,right.milestoneId));const rows=reportRows.map(row=>row.values);
       return {headers,rows,dateField:config.values[0],templateId,plannerTypeIds:plannerTypes.map(type=>key(type.id)),valueFields:config.values,filterOptions:Object.fromEntries([...filterOptions].map(([field,options])=>[field,[...options.entries()]]))};
     }
+    function buildEntityReport(config,data,allowedVertical=()=>true){
+      checkConfig(config);
+      const catalog=new Map(reportFieldCatalog(config).map(field=>[field.id,field])),filters=config.filterValues||{},dimensions=[...config.rows,...config.columns],definitions=[...new Set([...dimensions,...config.values,...config.filters].filter(field=>field!=='scope'))].map(field=>catalog.get(field)).filter(Boolean),search=key(filters.search).trim().toLocaleLowerCase(),scope=config.filters.includes('scope')?(filters.scope||'active'):'active';
+      const valueOf=(record,field)=>record.values?.[field]??null;
+      const matchesFilter=(record,field)=>{
+        if(field==='scope')return inScope(record.__scope||{},scope);
+        const definition=catalog.get(field),selected=filters[field],value=valueOf(record,field);
+        if(!selected||!definition)return true;
+        if(definition.type==='numeric'){const range=typeof selected==='object'?selected:{};if(value==null||value==='')return !range.min&&!range.max;const number=Number(value);return Number.isFinite(number)&&(!range.min||number>=Number(range.min))&&(!range.max||number<=Number(range.max));}
+        if(definition.type==='date'){const range=typeof selected==='object'?selected:{},date=key(value).slice(0,10);return !range.from&&!range.to||Boolean(date)&&(!range.from||date>=range.from)&&(!range.to||date<=range.to);}
+        if(definition.type==='boolean'){const wanted=key(selected).toLowerCase();return !wanted||wanted==='all'||(Boolean(value)?'true':'false')===wanted;}
+        const selectedValues=Array.isArray(selected)?selected:[selected];
+        return !selectedValues.length||selectedValues.some(item=>key(item)===key(value));
+      };
+      const sourceRows=(data.entityRows||[]).filter(record=>{
+        const verticals=record.__verticals?.length?record.__verticals.filter(Boolean):[record.__vertical||''].filter(Boolean),hasVerticals=verticals.length>0;if(hasVerticals&&verticals.some(vertical=>!allowedVertical(vertical))||config.dataSource!=='support_ticket'&&!hasVerticals&&!allowedVertical(''))return false;
+        if(!inScope(record.__scope||{},scope))return false;
+        if(search&&!definitions.some(definition=>key(valueOf(record,definition.id)).toLocaleLowerCase().includes(search)))return false;
+        return config.filters.every(field=>matchesFilter(record,field));
+      });
+      const format=(value,definition)=>{
+        if(value==null||value==='')return '-';
+        if(definition.type==='date')return String(value).slice(0,10);
+        if(definition.type==='boolean')return value===true||key(value).toLowerCase()==='true'?'Yes':'No';
+        return key(value);
+      };
+      const aggregate=(records,field)=>{
+        const definition=catalog.get(field),owner=sourceForField(field),seenSourceIds=new Set(),measureRecords=records.filter(record=>{const id=record.sourceIds?.[owner];if(!id)return true;if(seenSourceIds.has(id))return false;seenSourceIds.add(id);return true;}),values=measureRecords.map(record=>valueOf(record,field)).filter(value=>value!=null&&value!=='');
+        if((config.aggregationRules?.[field]||'count')==='count')return String(values.length);
+        if(!values.length)return '-';
+        const mode=config.aggregationRules?.[field]||(['numeric'].includes(definition.type)?'sum':definition.type==='date'?'latest':'all');
+        if(['sum','average','minimum','maximum'].includes(mode)){
+          const numbers=values.map(Number).filter(Number.isFinite);if(!numbers.length)return '-';
+          const result=mode==='sum'?numbers.reduce((sum,value)=>sum+value,0):mode==='average'?numbers.reduce((sum,value)=>sum+value,0)/numbers.length:mode==='minimum'?Math.min(...numbers):Math.max(...numbers);
+          return String(Number(result.toFixed(4)));
+        }
+        const ordered=measureRecords.slice().sort((left,right)=>Number(left.__sequence||0)-Number(right.__sequence||0)||key(left.sourceIds?.[owner]||left.__id).localeCompare(key(right.sourceIds?.[owner]||right.__id),undefined,{numeric:true}));
+        if(mode==='first_sequence'||mode==='last_sequence')return format(valueOf(ordered[mode==='first_sequence'?0:ordered.length-1],field),definition);
+        const sorted=values.slice().sort((left,right)=>key(left).localeCompare(key(right),undefined,{numeric:true,sensitivity:'base'}));
+        if(mode==='earliest'||mode==='latest')return format(sorted[mode==='earliest'?0:sorted.length-1],definition);
+        return [...new Set(values.map(value=>format(value,definition)))].join('\n');
+      };
+      const fieldLabels=new Map(reportFieldCatalog(config).map(field=>[field.id,field.groupLabel])),rowFields=config.rows,columnFields=config.columns,columnKey=record=>JSON.stringify(columnFields.map(field=>valueOf(record,field))),columnGroups=new Map(),rowGroups=new Map();
+      if(!columnFields.length)columnGroups.set('[]',{key:'[]',values:[],label:''});
+      for(const record of sourceRows){
+        const currentColumnKey=columnKey(record),columnValues=columnFields.map(field=>valueOf(record,field));
+        if(!columnGroups.has(currentColumnKey))columnGroups.set(currentColumnKey,{key:currentColumnKey,values:columnValues,label:columnFields.map((field,index)=>`${fieldLabels.get(field)||field}: ${format(columnValues[index],catalog.get(field))}`).join(' | ')});
+        const rowValues=rowFields.map(field=>valueOf(record,field)),rowKey=JSON.stringify(rowValues);
+        if(!rowGroups.has(rowKey))rowGroups.set(rowKey,{values:rowValues,columns:new Map()});
+        const group=rowGroups.get(rowKey);if(!group.columns.has(currentColumnKey))group.columns.set(currentColumnKey,[]);group.columns.get(currentColumnKey).push(record);
+      }
+      const orderedColumns=[...columnGroups.values()].sort((left,right)=>left.label.localeCompare(right.label,undefined,{numeric:true,sensitivity:'base'}));
+      if(orderedColumns.length>200)throw new Error('Columns produce more than 200 distinct combinations. Move a high-cardinality field to Rows or Filters.');
+      const headers=[...rowFields.map(field=>fieldLabels.get(field)||field),...orderedColumns.flatMap(column=>config.values.map(field=>column.label?`${column.label} - ${fieldLabels.get(field)||field}`:fieldLabels.get(field)||field))];
+      const rows=[...rowGroups.values()].map(group=>[...group.values.map((value,index)=>format(value,catalog.get(rowFields[index]))),...orderedColumns.flatMap(column=>config.values.map(field=>aggregate(group.columns.get(column.key)||[],field)))]);
+      rows.sort((left,right)=>left.slice(0,rowFields.length).join('\u0000').localeCompare(right.slice(0,rowFields.length).join('\u0000'),undefined,{numeric:true,sensitivity:'base'}));
+      const filterOptions={};
+      for(const field of config.filters){const definition=catalog.get(field);if(!definition||!['enum','status','user'].includes(definition.type))continue;filterOptions[field]=[...new Set((data.entityRows||[]).map(record=>valueOf(record,field)).filter(value=>value!=null&&value!=='').map(String))].sort((left,right)=>left.localeCompare(right,undefined,{numeric:true})).slice(0,200).map(value=>[value,value]);}
+      return {headers,rows,valueFields:config.values,filterOptions,dataSource:config.primarySource||config.dataSource,joinDiagnostics:data.joinDiagnostics||[]};
+    }
     async function allRows(table){const result=await fetchAllSupabaseRows(table);if(result.error)throw result.error;return result.data||[];}
+    async function rowsByIds(table,columns,ids){
+      const unique=[...new Set(ids.map(key).filter(Boolean))],result=[];
+      for(let offset=0;offset<unique.length;offset+=500){const response=await supabaseClient.from(table).select(columns.join(',')).in('id',unique.slice(offset,offset+500));if(response.error)throw response.error;result.push(...(response.data||[]));}
+      return result;
+    }
+    async function rowsByValues(table,column,columns,values,orderColumn='id'){
+      const unique=[...new Map(values.filter(value=>value!=null&&value!=='').map(value=>[key(value),value])).values()],result=[],valueBatchSize=500,pageSize=1000;
+      for(let offset=0;offset<unique.length;offset+=valueBatchSize){const batch=unique.slice(offset,offset+valueBatchSize);let batchRows=[],total=null;for(let from=0;;from=batchRows.length){let query=supabaseClient.from(table).select(columns.join(','),from===0?{count:'exact'}:{}).in(column,batch).order(orderColumn,{ascending:true});if(orderColumn!=='id'&&table!=='support_tickets')query=query.order('id',{ascending:true});const response=await query.range(from,from+pageSize-1);if(response.error)throw response.error;batchRows.push(...(response.data||[]));if(from===0&&Number.isFinite(response.count))total=response.count;if(!response.data?.length||total!==null&&batchRows.length>=total){result.push(...batchRows);break;}}}
+      return result;
+    }
+    async function readSupportTicketRows(headers=window.supportTickets?.headers||[],joinField=null,joinValues=[]){
+      const mapping=window.deliverySupportTicketColumnMap;if(!mapping)throw new Error('Support Ticket report field mapping is unavailable.');
+      const columns=[...new Set(['request_id',...headers.map(header=>mapping[header]).filter(Boolean)])],raw=joinField?await rowsByValues('support_tickets',mapping[joinField],columns,joinValues,'request_id'):null,rows=[];
+      if(raw)rows.push(...raw);else{const pageSize=1000;let total=null;for(let from=0;;from=rows.length){const query=supabaseClient.from('support_tickets').select(columns.join(','),from===0?{count:'exact'}:{}).order('request_id',{ascending:true}).range(from,from+pageSize-1),result=await query;if(result.error)throw result.error;rows.push(...(result.data||[]));if(from===0&&Number.isFinite(result.count))total=result.count;if(!result.data?.length||total!==null&&rows.length>=total)break;}}
+      return rows.map(row=>({...row,fields:Object.fromEntries(headers.map(header=>[header,row[mapping[header]]??null]))}));
+    }
+    function sourceRowValue(source,row,fieldId,field=sourceFieldCatalog(source).find(item=>item.id===fieldId)){
+      if(!row||!field)return null;
+      return source==='support_ticket'?row.fields?.[field.column]??(field.column==='RequestID'?row.request_id:null):row[field.column]??null;
+    }
+    function reportScope(config){return config.filters?.includes('scope')?(config.filterValues?.scope||'active'):'active';}
+    async function loadJoinedEntityData(config){
+      validateJoinPlan(config);
+      const fields=reportFieldCatalog(config),selectedIds=new Set([...config.rows,...config.columns,...config.values,...config.filters].filter(field=>field!=='scope'));
+      const joinFieldIds=new Map();for(const relationship of config.relationships)for(const [source,field] of [[relationship.source,relationship.sourceField],[relationship.target,relationship.targetField]]){if(!joinFieldIds.has(source))joinFieldIds.set(source,new Set());joinFieldIds.get(source).add(field);}
+      const selectedBySource=new Map([config.primarySource,...config.joinedSources].map(source=>[source,fields.filter(field=>field.source===source&&(selectedIds.has(field.id)||joinFieldIds.get(source)?.has(field.id)))]));
+      const scope=reportScope(config),sourceRows=new Map(),workflow=typeof getMilestoneWorkflowReportState==='function'?getMilestoneWorkflowReportState():null;
+      const needsPlanner=[...selectedBySource.values()].flat().some(field=>field.computed&&['milestone.planner_type_id','milestone.planner_type_group_id'].includes(field.id));
+      if(needsPlanner&&window.milestonePlannerTypes&&!await window.milestonePlannerTypes.load())throw new Error(window.milestonePlannerTypes.state.error||'Milestone Planner Type metadata could not be loaded.');
+      const plannerTypes=new Map((window.milestonePlannerTypes?.state.values||[]).map(row=>[key(row.id),row])),plannerGroups=new Map((window.milestonePlannerTypes?.state.groups||[]).map(row=>[key(row.id),row])),users=new Map((userMaster||[]).flatMap(user=>[user.name,user.full_name,user.email,user.id].filter(Boolean).map(name=>[key(name).trim().toLowerCase(),user])));
+      const extras={program:['sequence_no','vertical','is_active'],initiative:['sequence_no','vertical','program_id','record_status'],track:['sequence_no','display_order','initiative_id','record_status'],milestone:['sequence_no','initiative_id','track_id','record_status'],planner_template:['is_active']};
+      function sourceColumns(source){
+        const sourceFields=selectedBySource.get(source)||[],columns=[...new Set(['id',...sourceFields.filter(field=>field.column&&!field.computed).map(field=>field.column),...(extras[source]||[])])];
+        if(source==='milestone'&&sourceFields.some(field=>field.computed&&['milestone.overall_deviation','milestone.owner_department','milestone.dependency_department','milestone.remark_text'].includes(field.id)))for(const field of ['remarks','deviation_days','start_date','end_date','owner','dependency'])if(!columns.includes(field))columns.push(field);
+        return columns;
+      }
+      async function readSourceRows(source,joinField=null,joinValues=[]){
+        if(source==='support_ticket'){const headers=(selectedBySource.get(source)||[]).map(field=>field.column);return (await readSupportTicketRows(headers,joinField?.column,joinValues)).filter(row=>inScope({record_status:'active'},scope));}
+        const table=entitySourceTables[source]?.[0]?.[0];if(!table)throw new Error(`Unsupported Data Source: ${dataSourceLabel(source)}.`);
+        const order=source==='track'?'display_order':source==='milestone'||source==='initiative'?'sequence_no':'id',columns=sourceColumns(source);
+        const rows=joinField?await rowsByValues(table,joinField.column,columns,joinValues,order):await allRowsSelected(table,order,columns);
+        return rows.filter(row=>inScope(row,scope));
+      }
+      async function allRowsSelected(table,order,columns){const result=await fetchAllSupabaseRows(table,order,false,{columns:columns.join(',')});if(result.error)throw result.error;return result.data||[];}
+      const rootSource=config.primarySource;sourceRows.set(rootSource,await readSourceRows(rootSource));
+      const adjacency=new Map([rootSource,...config.joinedSources].map(source=>[source,[]]));
+      for(const relationship of config.relationships){adjacency.get(relationship.source).push({neighbor:relationship.target,relationship});adjacency.get(relationship.target).push({neighbor:relationship.source,relationship});}
+      const visitedSources=new Set([rootSource]),sourceQueue=[rootSource];
+      for(let cursor=0;cursor<sourceQueue.length;cursor++){
+        const current=sourceQueue[cursor];
+        for(const {neighbor,relationship} of adjacency.get(current)){
+          if(visitedSources.has(neighbor))continue;visitedSources.add(neighbor);sourceQueue.push(neighbor);
+          const currentFieldId=current===relationship.source?relationship.sourceField:relationship.targetField,neighborFieldId=current===relationship.source?relationship.targetField:relationship.sourceField,currentField=sourceFieldCatalog(current).find(field=>field.id===currentFieldId),neighborField=sourceFieldCatalog(neighbor).find(field=>field.id===neighborFieldId),joinValues=(sourceRows.get(current)||[]).map(row=>sourceRowValue(current,row,currentFieldId,currentField));
+          sourceRows.set(neighbor,await readSourceRows(neighbor,neighborField,joinValues));
+        }
+      }
+      const primaryRows=sourceRows.get(rootSource)||[],accessInitiatives=new Map();
+      if(['track','milestone'].includes(rootSource)&&!sourceRows.has('initiative')){
+        const rows=await rowsByIds('initiatives',['id','vertical'],primaryRows.map(row=>row.initiative_id).filter(Boolean));for(const row of rows)accessInitiatives.set(key(row.id),row);
+      }
+      function requireUniqueJoinKey(source,fieldId){const field=sourceFieldCatalog(source).find(item=>item.id===fieldId),counts=new Map();for(const row of sourceRows.get(source)||[]){const value=sourceRowValue(source,row,fieldId,field);if(value==null||value==='')continue;const token=key(value);counts.set(token,(counts.get(token)||0)+1);if(counts.get(token)>1)throw new Error(`${dataSourceLabel(source)} key ${field?.label||fieldId} is not unique for the declared relationship cardinality.`);}}
+      for(const relationship of config.relationships){if(relationship.cardinality!=='N:1')requireUniqueJoinKey(relationship.source,relationship.sourceField);if(relationship.cardinality!=='1:N')requireUniqueJoinKey(relationship.target,relationship.targetField);}
+      let partials=primaryRows.map(row=>({sourceRows:{[rootSource]:row},sourceIds:{[rootSource]:key(row.id??row.request_id)},__id:row.id??row.request_id,__sequence:Number(row.sequence_no||row.display_order||0),__scope:row}));
+      const visited=new Set([rootSource]),queue=[rootSource],diagnostics=[];
+      for(let cursor=0;cursor<queue.length;cursor++){
+        const current=queue[cursor];
+        for(const {neighbor,relationship} of adjacency.get(current)){
+          if(visited.has(neighbor))continue;visited.add(neighbor);queue.push(neighbor);
+          const currentField=current===relationship.source?relationship.sourceField:relationship.targetField,targetField=current===relationship.source?relationship.targetField:relationship.sourceField,currentDefinition=sourceFieldCatalog(current).find(field=>field.id===currentField),targetDefinition=sourceFieldCatalog(neighbor).find(field=>field.id===targetField),targetRows=sourceRows.get(neighbor)||[],targetIndex=new Map();
+          for(const row of targetRows){const value=sourceRowValue(neighbor,row,targetField,targetDefinition);if(value==null||value==='')continue;const token=key(value);if(!targetIndex.has(token))targetIndex.set(token,[]);targetIndex.get(token).push(row);}
+          const allowMany=current===relationship.source?relationship.cardinality==='1:N':relationship.cardinality==='N:1';let unmatched=0,next=[];
+          for(const partial of partials){const value=sourceRowValue(current,partial.sourceRows[current],currentField,currentDefinition),matches=value==null||value===''?[]:targetIndex.get(key(value))||[];if(!allowMany&&matches.length>1)throw new Error(`Relationship ${dataSourceLabel(current)} → ${dataSourceLabel(neighbor)} is ambiguous: one ${dataSourceLabel(current)} row matched ${matches.length} target rows.`);if(!matches.length){unmatched++;if(relationship.joinType==='left')next.push({...partial,sourceRows:{...partial.sourceRows,[neighbor]:null},sourceIds:{...partial.sourceIds,[neighbor]:''}});continue;}for(const match of matches)next.push({...partial,sourceRows:{...partial.sourceRows,[neighbor]:match},sourceIds:{...partial.sourceIds,[neighbor]:key(match.id??match.request_id)}});}
+          diagnostics.push({source:current,target:neighbor,joinType:relationship.joinType,unmatched});partials=next;
+        }
+      }
+      const entityRows=partials.map(partial=>{
+        const values={};
+        for(const field of fields){const row=partial.sourceRows[field.source];if(!row){values[field.id]=null;continue;}if(!field.computed){const raw=sourceRowValue(field.source,row,field.id,field);values[field.id]=field.id==='milestone.planner_type_id'?plannerTypes.get(key(raw))?.value_name||raw:field.type==='user'&&field.source!=='support_ticket'&&typeof engineerAssignments!=='undefined'?engineerAssignments.display(raw):raw;continue;}
+          if(field.id==='milestone.planner_type_group_id')values[field.id]=plannerGroups.get(key(plannerTypes.get(key(row.planner_type_id)?.group_id)?.id))?.group_name||null;
+          else if(field.id==='milestone.is_critical')values[field.id]=row.is_critical??row.critical??(key(row.status)==='Critical'?true:workflow?.criticalIds.has(Number(row.id))??false);
+          else if(field.id==='milestone.overall_deviation')values[field.id]=typeof getMilestoneTotalOverallDeviation==='function'?getMilestoneTotalOverallDeviation({...row,startDate:row.start_date,endDate:row.end_date,deviationDays:row.deviation_days}):row.deviation_days??null;
+          else if(field.id==='milestone.review_state')values[field.id]=row.review_state||row.review_status||(workflow?(workflow.reviewedIds.has('milestones:'+Number(row.id))||workflow.reviewedIds.has('initiatives:'+Number(row.initiative_id))?'Reviewed Today':'Pending for Review'):null);
+          else if(field.id==='milestone.remark_text'){try{const parsed=JSON.parse(row.remarks||'null');values[field.id]=typeof parsed==='string'?parsed:parsed?.legacyRemark||null;}catch{values[field.id]=row.remarks||null;}}
+          else if(field.id==='milestone.owner_department'||field.id==='milestone.dependency_department'){const property=field.id.endsWith('owner_department')?'owner':'dependency';values[field.id]=row[property+'_department']||[...new Set(key(row[property]).split(/[,;]/).map(name=>users.get(name.trim().toLowerCase())?.department).filter(Boolean))].join(', ')||null;}
+        }
+        const verticals=[...new Set(Object.values(partial.sourceRows).map(row=>row?.vertical).filter(Boolean))];const accessVertical=accessInitiatives.get(key(partial.sourceRows[rootSource]?.initiative_id))?.vertical;if(accessVertical&&!verticals.includes(accessVertical))verticals.push(accessVertical);
+        return {...partial,values,__vertical:verticals[0]||'',__verticals:verticals};
+      });
+      return {entityRows,joinDiagnostics:diagnostics,dataSource:rootSource,joinedSources:config.joinedSources.slice()};
+    }
+    async function loadEntityData(config){
+      const catalog=entityFieldCatalog(config.dataSource),selected=new Set([...config.rows,...config.columns,...config.values,...config.filters].filter(field=>field!=='scope'));
+      const selectedDefinitions=catalog.filter(field=>selected.has(field.id)),aliases=new Set(selectedDefinitions.map(field=>field.alias)),sourceTable=entitySourceTables[config.dataSource]?.[0];
+      if(config.dataSource==='support_ticket'){
+        const rows=await readSupportTicketRows(selectedDefinitions.map(field=>field.column));
+        return {entityRows:rows.map(row=>({values:Object.fromEntries(catalog.filter(field=>selected.has(field.id)).map(field=>[field.id,row.fields?.[field.column.replace(/^ticket\./,'')]??(field.column==='RequestID'?row.request_id:null)])),__id:row.request_id,__sequence:0,__scope:{record_status:'active'},__vertical:''}))};
+      }
+      if(!sourceTable)throw new Error('Choose a supported Data Source.');
+      const [rootTable,rootAlias]=sourceTable;
+      const columnsFor=(table,alias,extra=[])=>[...new Set(['id',...selectedDefinitions.filter(field=>field.table===table&&field.alias===alias&&field.column).map(field=>field.column),...extra])];
+      const rootExtra=[...(rootAlias==='program'?['sequence_no','vertical','is_active']:rootAlias==='initiative'?['sequence_no','vertical','program_id','record_status']:rootAlias==='track'?['sequence_no','display_order','initiative_id','record_status']:['sequence_no','initiative_id','track_id','record_status'])];
+      const rootColumns=columnsFor(rootTable,rootAlias,rootExtra),rootOrder=rootAlias==='track'?'display_order':rootAlias==='milestone'?'sequence_no':rootAlias==='initiative'?'sequence_no':'id';
+      const rootResult=await fetchAllSupabaseRows(rootTable,rootOrder,false,{columns:rootColumns.join(',')});if(rootResult.error)throw rootResult.error;
+      const rootRows=rootResult.data||[],initiativeRows=[],programRows=[],trackRows=[];
+      const selectedPlannerFields=config.dataSource==='milestone'&&selectedDefinitions.some(field=>['milestone.planner_type_id','milestone.planner_type_group_id'].includes(field.id));
+      if(selectedPlannerFields&&window.milestonePlannerTypes&&!await window.milestonePlannerTypes.load())throw new Error(window.milestonePlannerTypes.state.error||'Milestone Planner Type metadata could not be loaded.');
+      const initiativeIds=rootAlias==='initiative'?rootRows.map(row=>row.id):rootAlias==='track'||rootAlias==='milestone'?rootRows.map(row=>row.initiative_id):[];
+      if(rootAlias==='track'||rootAlias==='milestone'){
+        const needInitiativeFields=selectedDefinitions.some(field=>field.alias==='initiative'),initiativeExtra=['vertical',...(aliases.has('program')?['program_id']:[])];
+        initiativeRows.push(...await rowsByIds('initiatives',columnsFor('initiatives','initiative',[...initiativeExtra,...(needInitiativeFields?[]:[])]),initiativeIds));
+      }
+      if(rootAlias==='milestone'&&aliases.has('track'))trackRows.push(...await rowsByIds('milestone_tracks',columnsFor('milestone_tracks','track',['initiative_id','record_status']),rootRows.map(row=>row.track_id)));
+      const needPrograms=rootAlias==='program'||aliases.has('program');
+      if(needPrograms){
+        const programIds=rootAlias==='program'?rootRows.map(row=>row.id):rootAlias==='initiative'?rootRows.map(row=>row.program_id):initiativeRows.map(row=>row.program_id);
+        if(rootAlias==='program')programRows.push(...rootRows);
+        else programRows.push(...await rowsByIds('programs',columnsFor('programs','program',['vertical','is_active']),programIds));
+      }
+      if(rootAlias==='track'&&aliases.has('track'))trackRows.push(...rootRows);
+      const initiativesById=new Map(initiativeRows.map(row=>[key(row.id),row])),programsById=new Map(programRows.map(row=>[key(row.id),row])),tracksById=new Map(trackRows.map(row=>[key(row.id),row]));
+      const workflow=typeof getMilestoneWorkflowReportState==='function'?getMilestoneWorkflowReportState():null,plannerTypes=new Map((window.milestonePlannerTypes?.state.values||[]).map(row=>[key(row.id),row])),plannerGroups=new Map((window.milestonePlannerTypes?.state.groups||[]).map(row=>[key(row.id),row])),users=new Map((userMaster||[]).flatMap(user=>[user.name,user.full_name,user.email,user.id].filter(Boolean).map(name=>[key(name).trim().toLowerCase(),user])));
+      const entityRows=rootRows.map(row=>{
+        const initiative=rootAlias==='initiative'?row:initiativesById.get(key(row.initiative_id)),program=rootAlias==='program'?row:programsById.get(key(rootAlias==='initiative'?row.program_id:initiative?.program_id)),track=rootAlias==='track'?row:tracksById.get(key(row.track_id));
+        const related={program,initiative,track,milestone:rootAlias==='milestone'?row:null},values={};
+        for(const field of selectedDefinitions){if(field.alias==='ticket')continue;const record=related[field.alias];if(!record)continue;if(!field.computed){const raw=record[field.column]??null;values[field.id]=field.id==='milestone.planner_type_id'?plannerTypes.get(key(raw))?.value_name||raw:field.type==='user'&&typeof engineerAssignments!=='undefined'?engineerAssignments.display(raw):raw;continue;}
+          if(field.id==='milestone.planner_type_group_id')values[field.id]=plannerGroups.get(key(plannerTypes.get(key(row.planner_type_id)?.group_id)?.id))?.group_name||null;
+          else if(field.id==='milestone.is_critical')values[field.id]=row.is_critical??row.critical??(key(row.status)==='Critical'?true:workflow?.criticalIds.has(Number(row.id))??false);
+          else if(field.id==='milestone.overall_deviation')values[field.id]=typeof getMilestoneTotalOverallDeviation==='function'?getMilestoneTotalOverallDeviation({...row,startDate:row.start_date,endDate:row.end_date,deviationDays:row.deviation_days}):row.deviation_days??null;
+          else if(field.id==='milestone.review_state')values[field.id]=row.review_state||row.review_status||(workflow?(workflow.reviewedIds.has('milestones:'+Number(row.id))||workflow.reviewedIds.has('initiatives:'+Number(row.initiative_id))?'Reviewed Today':'Pending for Review'):null);
+          else if(field.id==='milestone.remark_text'){try{const parsed=JSON.parse(row.remarks||'null');values[field.id]=typeof parsed==='string'?parsed:parsed?.legacyRemark||null;}catch{values[field.id]=row.remarks||null;}}
+          else if(field.id==='milestone.owner_department'||field.id==='milestone.dependency_department'){const property=field.id.endsWith('owner_department')?'owner':'dependency';values[field.id]=row[property+'_department']||[...new Set(key(row[property]).split(/[,;]/).map(name=>users.get(name.trim().toLowerCase())?.department).filter(Boolean))].join(', ')||null;}
+        }
+        return {values,__id:row.id,__sequence:Number(row.sequence_no||row.display_order||0),__scope:row,__vertical:row.vertical||initiative?.vertical||program?.vertical||''};
+      });
+      return {entityRows};
+    }
+    async function loadTemplateCatalog(){
+      if(!state.templateCatalogPromise){const version=state.metadataVersion;state.templateCatalogPromise=allRows('project_planner_templates').then(templates=>{if(version!==state.metadataVersion)return loadTemplateCatalog();state.templates=templates;}).catch(error=>{if(version===state.metadataVersion)state.templateCatalogPromise=null;throw error;});}
+      return state.templateCatalogPromise;
+    }
     async function metadata(){
       if(!state.metadataPromise){
         const version=state.metadataVersion;
-        state.metadataPromise=Promise.all([allRows('project_planner_templates'),allRows('project_planner_milestones')]).then(([templates,milestones])=>{
+        state.metadataPromise=Promise.all([loadTemplateCatalog(),allRows('project_planner_milestones')]).then(async([,milestones])=>{
           if(version!==state.metadataVersion)return metadata();
-          state.templates=templates;state.templateRows=new Map();
-          for(const row of milestones){const id=key(row.template_id);if(!state.templateRows.has(id))state.templateRows.set(id,[]);state.templateRows.get(id).push(row);}
-        }).then(async()=>{await window.milestonePlannerTypes?.load();}).catch(error=>{if(version===state.metadataVersion)state.metadataPromise=null;throw error;});
+          state.templateRows=new Map();for(const row of milestones){const id=key(row.template_id);if(!state.templateRows.has(id))state.templateRows.set(id,[]);state.templateRows.get(id).push(row);}
+          await window.milestonePlannerTypes?.load();
+        }).catch(error=>{if(version===state.metadataVersion)state.metadataPromise=null;throw error;});
       }
       return state.metadataPromise;
     }
-    function invalidate(){state.metadataVersion++;state.metadataPromise=null;state.templateRows.clear();deliveryReportProvenanceCheck=null;state.result=null;if(root())document.getElementById('report-preview').replaceChildren();}
-    function label(zone,field){return milestoneDimensions[field]||(zone==='rows'?rowFields[field]:zone==='values'?valueFields[field]:zone==='filters'?filterFields[field]:({plannerTypes:'Template Planner Types',templateMilestones:'Legacy Template Milestones',manualMilestones:'Selected Manual Milestones'})[field]);}
+    function invalidate(){state.metadataVersion++;state.templateCatalogPromise=null;state.metadataPromise=null;state.templateRows.clear();deliveryReportProvenanceCheck=null;state.result=null;state.resultData=null;state.resultConfig=null;if(root())document.getElementById('report-preview').replaceChildren();}
+    function label(zone,field){if(state.config?.dataSource!=='template')return field==='scope'?filterFields.scope:reportFieldCatalog(state.config).find(item=>item.id===field)?.groupLabel||field;return milestoneDimensions[field]||(zone==='rows'?rowFields[field]:zone==='values'?valueFields[field]:zone==='filters'?filterFields[field]:({plannerTypes:'Template Planner Types',templateMilestones:'Legacy Template Milestones',manualMilestones:'Selected Manual Milestones'})[field]);}
     function renderSettings(){
       let settings=document.getElementById('report-value-settings');if(!settings){settings=document.createElement('div');settings.id='report-value-settings';settings.className='report-toolbar';settings.setAttribute('data-builder-only','');root().querySelector('.report-layout').before(settings);}
+      if(state.config.dataSource!=='template'){
+        const fields=new Map(reportFieldCatalog(state.config).map(field=>[field.id,field]));
+        settings.innerHTML=state.config.values.map(field=>{const definition=fields.get(field);if(!definition)return '';const modes=definition.type==='numeric'?['sum','average','minimum','maximum','first_sequence','last_sequence','count']:definition.type==='date'?['earliest','latest','first_sequence','last_sequence','all','count']:['first_sequence','last_sequence','all','count'];return `<label>${html(definition.groupLabel)} Aggregation<select data-aggregation-field="${html(field)}">${modes.map(mode=>`<option value="${mode}" ${mode===(state.config.aggregationRules?.[field]||'all')?'selected':''}>${html(entityAggregations[mode])}</option>`).join('')}</select></label>`;}).join('');settings.querySelectorAll('select').forEach(select=>select.disabled=!editable());return;
+      }
       state.config.aggregationRules||={};state.config.stageValue||=state.config.values[0]||'deadline';
       const fields=[...new Set([...state.config.values,...[...state.config.rows,...state.config.columns].filter(field=>field.startsWith('milestone.')).map(field=>field.slice(10))])];
       settings.innerHTML=`<label>Report Type<select id="report-type"><option value="${reportType}">Initiative-wise Milestone Roadmap</option></select></label><label>Planner Type Group<select id="report-type-group"><option value="">All Groups</option>${(window.milestonePlannerTypes?.state.groups||[]).map(group=>`<option value="${html(group.id)}" ${key(group.id)===key(state.config.groupId)?'selected':''}>${html(group.group_name)}${group.is_active===false?' (Inactive)':''}</option>`).join('')}</select></label><label>Primary Milestone Value<select id="report-stage-value">${Object.entries(valueFields).map(([field,title])=>`<option value="${field}" ${field===state.config.stageValue?'selected':''}>${title}</option>`).join('')}</select></label><label>Date Range Field<select id="report-range-field">${Object.entries(dateFields).map(([field,title])=>`<option value="${field}" ${field===(state.config.dateField||'deadline')?'selected':''}>${title}</option>`).join('')}</select></label>${fields.map(field=>`<label>${html(valueFields[field])} Aggregation<select data-aggregation-field="${field}">${Object.entries(aggregations).filter(([mode])=>isDateValueField(field)||!['earliest','latest'].includes(mode)).map(([mode,title])=>`<option value="${mode}" ${mode===(state.config.aggregationRules[field]||state.config.aggregation||defaultAggregation(field))?'selected':''}>${title}</option>`).join('')}</select></label>`).join('')}`;
@@ -23307,40 +23641,134 @@
       settings.querySelectorAll('select').forEach(select=>select.disabled=!editable());
     }
     function fieldMarkup(zone,field,available=false){return `<div class="report-field" draggable="${editable()}" data-field="${field}" data-zone="${available?'available':zone}" data-kind="${zone}"><i data-lucide="grip-vertical" aria-hidden="true"></i><span>${html(label(zone,field))}</span>${editable()?available?`<button type="button" data-add="${zone}" data-field="${field}" title="Add ${html(label(zone,field))}" aria-label="Add ${html(label(zone,field))}"><i data-lucide="plus"></i></button>`:`<button type="button" data-move="-1" data-zone="${zone}" data-field="${field}" title="Move up" aria-label="Move ${html(label(zone,field))} up"><i data-lucide="arrow-up"></i></button><button type="button" data-move="1" data-zone="${zone}" data-field="${field}" title="Move down" aria-label="Move ${html(label(zone,field))} down"><i data-lucide="arrow-down"></i></button><button type="button" data-remove="${zone}" data-field="${field}" title="Remove field" aria-label="Remove ${html(label(zone,field))}"><i data-lucide="x"></i></button>`:''}</div>`;}
+    function addRelationship(source,target){
+      if(source===target||!(state.config.joinedSources||[]).includes(source)&&source!==state.config.primarySource||!(state.config.joinedSources||[]).includes(target)&&target!==state.config.primarySource)return false;
+      if(state.config.relationships.some(item=>item.source===source&&item.target===target||item.source===target&&item.target===source))return false;
+      const pending=[source],seen=new Set([source]);for(let index=0;index<pending.length;index++)for(const relation of state.config.relationships){const neighbor=relation.source===pending[index]?relation.target:relation.target===pending[index]?relation.source:null;if(neighbor===target){message('That connection would create a circular relationship.',true);return false;}if(neighbor&&!seen.has(neighbor)){seen.add(neighbor);pending.push(neighbor);}}
+      const stable=stableRelationship(source,target);
+      if(stable){state.config.relationships.push(stable);return true;}
+      if(source==='support_ticket'||target==='support_ticket'){state.config.relationships.push({source,target,sourceField:'',targetField:'',cardinality:'1:N',joinType:'left',custom:true});return true;}
+      message(`No supported foreign-key relationship exists between ${dataSourceLabel(source)} and ${dataSourceLabel(target)}.`,true);return false;
+    }
+    function addDataSource(source){
+      if(!editable()||!source||source==='template'||source===state.config.primarySource||state.config.joinedSources.includes(source))return;
+      const existing=[state.config.primarySource,...state.config.joinedSources],depths=new Map([[state.config.primarySource,0]]),queue=[state.config.primarySource];
+      for(let index=0;index<queue.length;index++){const current=queue[index];for(const relation of state.config.relationships){const neighbor=relation.source===current?relation.target:relation.target===current?relation.source:null;if(neighbor&&!depths.has(neighbor)){depths.set(neighbor,depths.get(current)+1);queue.push(neighbor);}}}
+      const candidates=stableRelationships.filter(relation=>relation.source===source&&existing.includes(relation.target)||relation.target===source&&existing.includes(relation.source)).sort((left,right)=>{const leftSource=left.source===source?left.target:left.source,rightSource=right.source===source?right.target:right.source;return (depths.get(rightSource)||0)-(depths.get(leftSource)||0);});
+      state.config.joinedSources.push(source);const candidate=candidates[0];
+      if(candidate)state.config.relationships.push({...candidate,joinType:'left',custom:false});
+      state.data=null;state.result=null;state.resultData=null;state.resultConfig=null;syncFieldOrder();renderZones();renderFilters();document.getElementById('report-preview').replaceChildren();
+    }
+    function connectDataSources(source,target){if(!editable())return;const added=addRelationship(source,target);if(!added)return;state.data=null;state.result=null;state.resultData=null;state.resultConfig=null;renderZones();renderFilters();document.getElementById('report-preview').replaceChildren();}
+    function removeDataSource(source){
+      if(!editable()||source===state.config.primarySource)return;
+      state.config.joinedSources=state.config.joinedSources.filter(item=>item!==source);state.config.relationships=state.config.relationships.filter(item=>item.source!==source&&item.target!==source);
+      const alias=sourceAlias[source];for(const zone of ['rows','columns','values','filters'])state.config[zone]=state.config[zone].filter(field=>field==='scope'||!field.startsWith(alias+'.'));
+      for(const field of Object.keys(state.config.aggregationRules||{}))if(field.startsWith(alias+'.'))delete state.config.aggregationRules[field];
+      syncFieldOrder();state.data=null;state.result=null;state.resultData=null;state.resultConfig=null;renderZones();renderFilters();document.getElementById('report-preview').replaceChildren();
+    }
+    function removeRelationship(index){if(!editable())return;state.config.relationships.splice(index,1);state.data=null;state.result=null;state.resultData=null;state.resultConfig=null;renderZones();renderFilters();document.getElementById('report-preview').replaceChildren();}
+    function changeRelationship(index,property,value){
+      if(!editable())return;const relation=state.config.relationships[index];if(!relation)return;relation[property]=value;
+      if(['sourceField','targetField'].includes(property)&&(relation.source==='support_ticket'||relation.target==='support_ticket'))relation.custom=true;
+      state.data=null;state.result=null;state.resultData=null;state.resultConfig=null;renderZones();renderFilters();document.getElementById('report-preview').replaceChildren();
+    }
+    function renderRelationships(){
+      const panel=document.getElementById('report-relationship-panel');if(!panel)return;
+      panel.hidden=state.config.dataSource==='template';if(panel.hidden)return;
+      const selected=[state.config.primarySource,...state.config.joinedSources],addSelect=document.getElementById('report-add-source');
+      addSelect.innerHTML='<option value="">Choose Data Source</option>'+joinableSourceOptions.filter(([source])=>!selected.includes(source)).map(([source,label])=>`<option value="${source}">${html(label)}</option>`).join('');addSelect.disabled=!editable();
+      panel.querySelector('[data-action="add-source"]').disabled=!editable()||!addSelect.value;
+      const nodes=document.getElementById('report-relationship-nodes');
+      nodes.innerHTML=selected.map((source,index)=>`<div class="report-source-node" draggable="${editable()}" data-source-node="${source}" data-primary="${index===0}" title="Drag onto another source to connect"><i data-lucide="${source==='support_ticket'?'ticket':'database'}" aria-hidden="true"></i><span>${html(dataSourceLabel(source))}${index===0?' · Primary':''}</span>${index?`<button type="button" data-remove-source="${source}" title="Remove ${html(dataSourceLabel(source))}" aria-label="Remove ${html(dataSourceLabel(source))}" ${!editable()?'disabled':''}><i data-lucide="x"></i></button>`:''}</div>`).join('');
+      const edgeHost=document.getElementById('report-relationship-edges');
+      edgeHost.innerHTML=state.config.relationships.map((relation,index)=>{
+        const sourceFields=sourceFieldCatalog(relation.source).filter(field=>!field.computed),targetFields=sourceFieldCatalog(relation.target).filter(field=>!field.computed),fieldOptions=(fields,selected)=>'<option value="">Choose key field</option>'+fields.map(field=>`<option value="${html(field.id)}" ${field.id===selected?'selected':''}>${html(field.label)}</option>`).join('');
+        return `<div class="report-relationship-edge" data-relationship-index="${index}"><div class="text-xs font-semibold text-slate-700">${html(dataSourceLabel(relation.source))} → ${html(dataSourceLabel(relation.target))}<small class="block font-normal text-slate-500">${relation.custom?'Explicit key':'Verified FK'}</small></div><label>Source Field<select data-relationship-index="${index}" data-relationship-property="sourceField" ${!editable()?'disabled':''}>${fieldOptions(sourceFields,relation.sourceField)}</select></label><label>Target Field<select data-relationship-index="${index}" data-relationship-property="targetField" ${!editable()?'disabled':''}>${fieldOptions(targetFields,relation.targetField)}</select></label><label>Cardinality<select data-relationship-index="${index}" data-relationship-property="cardinality" ${!editable()?'disabled':''}>${['1:1','1:N','N:1'].map(value=>`<option ${relation.cardinality===value?'selected':''}>${value}</option>`).join('')}</select></label><label>Join Type<select data-relationship-index="${index}" data-relationship-property="joinType" ${!editable()?'disabled':''}>${['left','inner'].map(value=>`<option value="${value}" ${relation.joinType===value?'selected':''}>${value==='left'?'Left':'Inner'}</option>`).join('')}</select></label><button type="button" data-remove-relationship="${index}" title="Remove relationship" aria-label="Remove relationship" ${!editable()?'disabled':''}><i data-lucide="x"></i></button></div>`;
+      }).join('');
+      let validation='Primary Data Source is ready.';try{validateJoinPlan(state.config);if(selected.length>1)validation='Relationship plan is connected and valid.';}catch(error){validation=error.message;}
+      const validationElement=document.getElementById('report-relationship-validation');validationElement.textContent=validation;validationElement.dataset.error=String(selected.length>1&&validation!=='Relationship plan is connected and valid.');
+      if(!state.relationshipResizeInstalled){window.addEventListener('resize',()=>{if(root())renderRelationships();},{passive:true});state.relationshipResizeInstalled=true;}
+      const canvas=document.getElementById('report-relationship-canvas'),svg=canvas.querySelector('svg');
+      requestAnimationFrame(()=>{
+        const bounds=canvas.getBoundingClientRect(),width=Math.max(canvas.scrollWidth,canvas.clientWidth,1),height=Math.max(canvas.scrollHeight,canvas.clientHeight,1);svg.setAttribute('viewBox',`0 0 ${width} ${height}`);const lines=[];
+        for(const relation of state.config.relationships){const from=nodes.querySelector(`[data-source-node="${relation.source}"]`),to=nodes.querySelector(`[data-source-node="${relation.target}"]`);if(!from||!to)continue;const a=from.getBoundingClientRect(),b=to.getBoundingClientRect(),x1=a.left-bounds.left+canvas.scrollLeft+a.width/2,y1=a.top-bounds.top+canvas.scrollTop+a.height/2,x2=b.left-bounds.left+canvas.scrollLeft+b.width/2,y2=b.top-bounds.top+canvas.scrollTop+b.height/2,mx=(x1+x2)/2,my=(y1+y2)/2;lines.push(`<line class="report-relationship-line" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" marker-end="url(#report-relationship-arrow)"></line><text class="report-relationship-label" x="${mx}" y="${my-5}" text-anchor="middle">${html(relation.cardinality)} · ${html(relation.joinType)}</text>`);}
+        svg.innerHTML=`<defs><marker id="report-relationship-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#0891b2"></path></marker></defs>${lines.join('')}`;
+      });
+      lucide.createIcons();
+    }
+    function renderAvailableFields(){
+      const available=document.getElementById('report-available');if(!available)return;
+      available.hidden=state.collapseAllFields;if(available.hidden)return;
+      available.style.maxHeight='640px';available.style.overflow='auto';
+      if(state.config.dataSource==='template'){
+        const fields=allowedFields(state.config);available.innerHTML=Object.entries(fields).map(([zone,zoneFields])=>`<h4 class="font-semibold mt-3">${html(zone[0].toUpperCase()+zone.slice(1))}</h4>`+zoneFields.filter(field=>!state.config[zone].includes(field)&&(!state.fieldSearch||label(zone,field).toLowerCase().includes(state.fieldSearch.toLowerCase()))).map(field=>fieldMarkup(zone,field,true)).join('')).join('');return;
+      }
+      const catalog=reportFieldCatalog(state.config),search=state.fieldSearch.trim().toLowerCase(),sources=[state.config.primarySource,...state.config.joinedSources];
+      available.innerHTML=sources.map(source=>{
+        const fields=catalog.filter(field=>field.source===source),matching=fields.filter(field=>search&&!field.groupLabel.toLowerCase().includes(search)?false:true);if(!matching.length)return '';
+        const collapsed=state.collapseAllFields||state.collapsedFieldSources.has(source);
+        return `<section class="report-field-source"><button type="button" class="report-field-source-toggle" data-collapse-source="${source}" aria-expanded="${!collapsed}"><span>[${html(dataSourceLabel(source))}]</span><i data-lucide="chevron-${collapsed?'down':'up'}"></i></button><div class="report-field-source-content" ${collapsed?'hidden':''}>${['rows','columns','values','filters'].map(zone=>`<h4 class="font-semibold mt-3">${zone[0].toUpperCase()+zone.slice(1)}</h4>`+matching.filter(field=>!state.config[zone].includes(field.id)).map(field=>fieldMarkup(zone,field.id,true)).join('')).join('')}</div></section>`;
+      }).join('')||'<p class="text-xs text-slate-500">No fields match this search or connected sources.</p>';
+    }
     function renderZones(){
       if(!root())return;
-      const available=document.getElementById('report-available');
-      available.style.maxHeight='640px';available.style.overflow='auto';
-      available.innerHTML=Object.entries(allowedFields()).map(([zone,fields])=>`<h4 class="font-semibold mt-3">${html(zone[0].toUpperCase()+zone.slice(1))}</h4>`+fields.filter(field=>!state.config[zone].includes(field)).map(field=>fieldMarkup(zone,field,true)).join('')).join('');
+      renderRelationships();renderAvailableFields();
       for(const zone of ['rows','columns','values','filters'])document.getElementById('report-zone-'+zone).innerHTML=state.config[zone].map(field=>fieldMarkup(zone,field)).join('');
-      document.getElementById('report-template').disabled=!editable();
+      const dataSource=document.getElementById('report-data-source');if(dataSource)dataSource.value=state.config.primarySource||state.config.dataSource||'template';
+      if(dataSource)dataSource.disabled=!editable();
+      const templateLabel=document.getElementById('report-template-label');if(templateLabel)templateLabel.hidden=state.config.primarySource!=='template';
+      const templateSelect=document.getElementById('report-template');templateSelect.value=state.config.templateId||'';templateSelect.disabled=!editable();
       document.getElementById('report-name').disabled=!editable();
       document.getElementById('report-saved').disabled=state.busy;
       root().querySelectorAll('[data-filter],[data-action="run"],[data-action="reset"],[data-action="preview"],[data-action="export"]').forEach(control=>control.disabled=state.busy);
       root().querySelectorAll('[data-admin-action]').forEach(button=>{button.hidden=!admin();button.disabled=state.busy||(button.dataset.action==='edit'||button.dataset.action==='delete'?!state.selected:button.dataset.action==='save'?!editable():false);});
-      const manual=document.getElementById('report-manual');manual.hidden=!state.config.columns.includes('manualMilestones');
+      const manual=document.getElementById('report-manual');manual.hidden=state.config.primarySource!=='template'||!state.config.columns.includes('manualMilestones');
       const manualSelect=document.getElementById('report-manual-ids');manualSelect.disabled=!editable();
-      manualSelect.innerHTML=(state.data?.milestones||[]).filter(row=>!row.template_id).map(row=>`<option value="${html(row.id)}" ${state.config.manualMilestoneIds.map(key).includes(key(row.id))?'selected':''}>#${html(row.id)} - ${html(row.initiative_name||row.initiative_id)} - ${html(row.actions||row.milestone_title)}</option>`).join('');
+      manualSelect.innerHTML=(state.data?.milestones||[]).filter(row=>!row.template_id).map(row=>`<option value="${html(row.id)}" ${(state.config.manualMilestoneIds||[]).map(key).includes(key(row.id))?'selected':''}>#${html(row.id)} - ${html(row.initiative_name||row.initiative_id)} - ${html(row.actions||row.milestone_title)}</option>`).join('');
       renderSettings();
       lucide.createIcons();
     }
     function selectOptions(values,selected){return '<option value="">All</option>'+values.map(([value,text])=>`<option value="${html(value)}" ${key(selected)===key(value)?'selected':''}>${html(text)}</option>`).join('');}
     function renderFilters(){
       if(!root())return;
+      if(state.config.dataSource!=='template'){
+        const definitions=new Map(reportFieldCatalog(state.config).map(field=>[field.id,field])),filters=state.config.filterValues||{},rows=state.data?.entityRows||[],options=state.result?.filterOptions||{};
+        const controls=state.config.filters.map(field=>{
+          if(field==='scope')return `<label>Record Scope<select data-filter="scope"><option value="active" ${(filters.scope||'active')==='active'?'selected':''}>Active</option><option value="archived" ${filters.scope==='archived'?'selected':''}>Archived</option><option value="all" ${filters.scope==='all'?'selected':''}>All Records</option></select></label>`;
+          const definition=definitions.get(field);if(!definition)return '';
+          const selected=filters[field],name=html(definition.groupLabel);
+          if(definition.type==='date'){const range=selected&&typeof selected==='object'?selected:{};return `<label>${name} From<input type="date" data-filter="${html(field)}" data-filter-part="from" value="${html(range.from||'')}"></label><label>${name} To<input type="date" data-filter="${html(field)}" data-filter-part="to" value="${html(range.to||'')}"></label>`;}
+          if(definition.type==='numeric'){const range=selected&&typeof selected==='object'?selected:{};return `<label>${name} Minimum<input type="number" data-filter="${html(field)}" data-filter-part="min" value="${html(range.min??'')}" step="any"></label><label>${name} Maximum<input type="number" data-filter="${html(field)}" data-filter-part="max" value="${html(range.max??'')}" step="any"></label>`;}
+          if(definition.type==='boolean')return `<label>${name}<select data-filter="${html(field)}"><option value="">All</option><option value="true" ${key(selected)==='true'?'selected':''}>Yes</option><option value="false" ${key(selected)==='false'?'selected':''}>No</option></select></label>`;
+          if(['enum','status','user'].includes(definition.type)){
+            const fieldOptions=options[field]||[...new Set(rows.map(row=>String(row.values?.[field]??'')).filter(Boolean))].sort((left,right)=>left.localeCompare(right,undefined,{numeric:true})).slice(0,200).map(value=>[value,value]),selectedValues=Array.isArray(selected)?selected:selected?[selected]:[];
+            return `<label>${name}<select multiple size="${Math.min(4,Math.max(2,fieldOptions.length))}" data-filter="${html(field)}" data-filter-mode="multi" aria-label="Filter ${name}">${fieldOptions.map(([value,text])=>`<option value="${html(value)}" ${selectedValues.map(key).includes(key(value))?'selected':''}>${html(text)}</option>`).join('')}</select></label>`;
+          }
+          return `<label>${name}<input type="search" data-filter="${html(field)}" value="${html(selected||'')}" placeholder="Contains..."></label>`;
+        }).join('');
+        document.getElementById('report-filters').innerHTML=`<label class="shared-filter-search-label">Search Report Data<input id="report-filter-search" type="search" data-filter="search" value="${html(filters.search||'')}" placeholder="Search report data" aria-label="Search report data"></label>${controls}`;return;
+      }
       const data=state.data||{initiatives:[],programs:[],milestones:[]},filters=state.config.filterValues,initiatives=data.initiatives.map(normalizeInitiative).filter(row=>isVerticalAllowed(row.vertical));
       const unique=values=>analyticsUnique(values).map(value=>[value,value]);
       const options={program:data.programs.map(row=>[row.id,row.program_name||row.name||row.id]),initiative:initiatives.map(row=>[row.id,row.name]),template:state.templates.map(row=>[row.id,row.template_name]),vertical:unique(initiatives.map(row=>row.vertical)),owner:unique(initiatives.map(row=>row.businessOwner)),status:unique(initiatives.map(analyticsStatus)),milestoneStatus:unique(data.milestones.map(row=>row.status)),scope:[['active','Active'],['archived','Archived'],['all','Active and Archived']]};
       for(const field of engineerAssignments.fields)for(const [filter,records] of [[field,initiatives],['program_'+field,data.programs]])options[filter]=[['__unassigned__','Not Assigned'],...[...new Set(records.map(row=>row[field]).filter(value=>value!=null).map(String))].map(value=>[value,engineerAssignments.display(value)])];
       document.getElementById('report-filters').innerHTML=`<label class="shared-filter-search-label">Search Report Data<input id="report-filter-search" type="search" data-filter="search" value="${html(filters.search||'')}" placeholder="Search report data" aria-label="Search report data"></label>`+state.config.filters.map(field=>field==='dateRange'?`<label>From<input type="date" data-filter="from" value="${html(filters.from)}"></label><label>To<input type="date" data-filter="to" value="${html(filters.to)}"></label>`:`<label>${html(filterFields[field]||milestoneDimensions[field])}<select data-filter="${field}">${field==='scope'?options.scope.map(([value,text])=>`<option value="${value}" ${value===(filters.scope||'active')?'selected':''}>${text}</option>`).join(''):selectOptions(options[field]||state.result?.filterOptions?.[field]||[],filters[field])}</select></label>`).join('');
     }
-    function preview(){
-      if(!state.data){message('Select a template and Run the report.');return;}
+    function preview({renderFilterControls=true}={}){
+      if(!state.data||state.data.dataSource!==(state.config.dataSource||'template')){message(state.config.dataSource==='template'?'Select a template and Run the report.':'Run the report to load '+dataSourceLabel(state.config.dataSource)+' data.');return;}
       try{
-        const data={...state.data,templateRows:state.templateRows.get(key(state.config.templateId))||[],plannerTypes:window.milestonePlannerTypes?.state.values||[],plannerTypeGroups:window.milestonePlannerTypes?.state.groups||[]};
-        state.result=build(state.config,data,isVerticalAllowed);
-        document.getElementById('report-preview').innerHTML=`<table><thead><tr>${state.result.headers.map(title=>`<th scope="col">${html(title)}</th>`).join('')}</tr></thead><tbody>${state.result.rows.length?state.result.rows.map(row=>`<tr>${row.map(cell=>`<td>${html(cell)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${state.result.headers.length}">No matching initiatives with verified template usage.</td></tr>`}</tbody></table>`;
-        renderFilters();message(`${state.result.rows.length} initiative(s) | ${state.config.values.map(field=>valueFields[field]).join(', ')}${state.config.columns.includes('plannerTypes')&&!state.result.plannerTypeIds.length?' | No mapped Planner Types. An Admin must confirm the legacy mappings, or choose Legacy Template Milestones.':''}`);
-      }catch(error){state.result=null;document.getElementById('report-preview').replaceChildren();message(error.message,true);}
+        const signature=JSON.stringify(state.config);
+        if(!state.result||state.resultData!==state.data||state.resultConfig!==signature){
+          const data=state.config.dataSource==='template'?{...state.data,templateRows:state.templateRows.get(key(state.config.templateId))||[],plannerTypes:window.milestonePlannerTypes?.state.values||[],plannerTypeGroups:window.milestonePlannerTypes?.state.groups||[]}:state.data;
+          state.result=build(state.config,data,isVerticalAllowed);state.resultData=state.data;state.resultConfig=signature;state.previewPage=1;
+        }
+        const result=state.result,preview=document.getElementById('report-preview'),isEntity=state.config.dataSource!=='template',pageSize=100,pages=Math.max(1,Math.ceil(result.rows.length/pageSize));state.previewPage=Math.min(Math.max(1,state.previewPage||1),pages);
+        const rows=isEntity?result.rows.slice((state.previewPage-1)*pageSize,state.previewPage*pageSize):result.rows;
+        preview.innerHTML=`<table><thead><tr>${result.headers.map(title=>`<th scope="col">${html(title)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(cell=>`<td>${html(cell)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${result.headers.length}">${isEntity?'No matching records.':'No matching initiatives with verified template usage.'}</td></tr>`}</tbody></table>${isEntity?`<div class="report-preview-pager"><span>Showing ${result.rows.length?(state.previewPage-1)*pageSize+1:0}-${Math.min(state.previewPage*pageSize,result.rows.length)} of ${result.rows.length}</span><div><button type="button" data-action="preview-page" data-page="${Math.max(1,state.previewPage-1)}" ${state.previewPage===1?'disabled':''} aria-label="Previous report page">Previous</button><span>${state.previewPage} / ${pages}</span><button type="button" data-action="preview-page" data-page="${Math.min(pages,state.previewPage+1)}" ${state.previewPage===pages?'disabled':''} aria-label="Next report page">Next</button></div></div>`:''}`;
+        if(renderFilterControls)renderFilters();
+        const countLabel=isEntity?'record(s)':'initiative(s)',joinIssues=(result.joinDiagnostics||[]).filter(join=>join.unmatched>0).map(join=>`${dataSourceLabel(join.source)} → ${dataSourceLabel(join.target)}: ${join.unmatched} unmatched (${join.joinType})`);message(`${result.rows.length} ${countLabel} | ${state.config.values.map(field=>state.config.dataSource==='template'?valueFields[field]:reportFieldLabel(state.config,field)).join(', ')}${joinIssues.length?' | Join results: '+joinIssues.join('; '):''}${!isEntity&&state.config.columns.includes('plannerTypes')&&!result.plannerTypeIds.length?' | No mapped Planner Types. An Admin must confirm the legacy mappings, or choose Legacy Template Milestones.':''}`);
+      }catch(error){state.result=null;state.resultData=null;state.resultConfig=null;document.getElementById('report-preview').replaceChildren();message(error.message,true);}
     }
     async function loadSaved(){
       const result=await supabaseClient.from('report_definitions').select('*').eq('is_active',true).eq('report_type',reportType).order('report_name');
@@ -23358,12 +23786,12 @@
     function renderCatalog(){
       const table=document.getElementById('report-catalog-table');if(!table)return;
       const templates=new Map(state.templates.map(template=>[key(template.id),template.template_name]));
-      const templateSelect=document.getElementById('report-catalog-template');templateSelect.innerHTML='<option value="">All templates</option>'+[...new Set(state.saved.map(report=>key(report.template_id)))].map(id=>`<option value="${html(id)}">${html(templates.get(id)||id)}</option>`).join('');templateSelect.value=state.catalog.template;
-      const dateSelect=document.getElementById('report-catalog-date');dateSelect.parentElement.firstChild.textContent='Value Field';dateSelect.innerHTML='<option value="">All value fields</option>'+Object.entries(valueFields).map(([field,label])=>`<option value="${field}">${label}</option>`).join('');dateSelect.value=state.catalog.dateField;
+      const templateSelect=document.getElementById('report-catalog-template');templateSelect.innerHTML='<option value="">All templates</option>'+[...new Set(state.saved.filter(report=>(report.report_config?.dataSource||'template')==='template').map(report=>key(report.template_id)).filter(Boolean))].map(id=>`<option value="${html(id)}">${html(templates.get(id)||id)}</option>`).join('');templateSelect.value=state.catalog.template;
+      const dateSelect=document.getElementById('report-catalog-date');dateSelect.parentElement.firstChild.textContent='Value Field';const catalogValueLabels=new Map();for(const report of state.saved){const source=report.report_config?.dataSource||'template';for(const field of report.report_config?.values||[])catalogValueLabels.set(field,source==='template'?valueFields[field]||field:reportFieldLabel(report.report_config,field));}dateSelect.innerHTML='<option value="">All value fields</option>'+[...catalogValueLabels].map(([field,label])=>`<option value="${html(field)}">${html(label)}</option>`).join('');dateSelect.value=state.catalog.dateField;
       document.getElementById('report-catalog-search').value=state.catalog.search;
-      const reports=state.saved.filter(report=>(!state.catalog.search||report.report_name.toLowerCase().includes(state.catalog.search.trim().toLowerCase()))&&(!state.catalog.template||key(report.template_id)===state.catalog.template)&&(!state.catalog.dateField||report.report_config?.values?.includes(state.catalog.dateField)));
+      const reports=state.saved.filter(report=>(!state.catalog.search||report.report_name.toLowerCase().includes(state.catalog.search.trim().toLowerCase()))&&(!state.catalog.template||(report.report_config?.dataSource||'template')==='template'&&key(report.template_id)===state.catalog.template)&&(!state.catalog.dateField||report.report_config?.values?.includes(state.catalog.dateField)));
       document.getElementById('report-catalog-status').textContent=state.catalogError||`${reports.length} active report(s)`;
-      table.innerHTML=`<table><thead><tr>${['Report Name','Report Type','Template','Value Fields','Updated',...(admin()?['Actions']:[])].map(title=>`<th scope="col">${title}</th>`).join('')}</tr></thead><tbody>${reports.length?reports.map(report=>`<tr><td><button type="button" data-report-action="run" data-report-id="${html(report.id)}">${html(report.report_name)}</button></td><td>Initiative-wise Milestone Roadmap</td><td>${html(templates.get(key(report.template_id))||report.template_id)}</td><td>${html(report.report_config?.values?.map(field=>valueFields[field]||field).join(', ')||'-')}</td><td>${html(key(report.updated_at).slice(0,10)||'-')}</td>${admin()?`<td><div class="flex gap-2">${[['edit','pencil','Edit'],['rename','text-cursor-input','Rename'],['delete','trash-2','Delete']].map(([action,icon,label])=>`<button type="button" data-report-action="${action}" data-report-id="${html(report.id)}" title="${label} report" aria-label="${label} ${html(report.report_name)}"><i data-lucide="${icon}"></i></button>`).join('')}</div></td>`:''}</tr>`).join(''):`<tr><td colspan="${admin()?6:5}">No matching active reports.</td></tr>`}</tbody></table>`;
+      table.innerHTML=`<table><thead><tr>${['Report Name','Data Sources','Template','Value Fields','Updated',...(admin()?['Actions']:[])].map(title=>`<th scope="col">${title}</th>`).join('')}</tr></thead><tbody>${reports.length?reports.map(report=>{const config=normalizeConfig(clone(report.report_config)),source=config.primarySource||config.dataSource,sources=[source,...(config.joinedSources||[])];return `<tr><td><button type="button" data-report-action="run" data-report-id="${html(report.id)}">${html(report.report_name)}</button></td><td>${html(sources.map(dataSourceLabel).join(' + '))}</td><td>${source==='template'?html(templates.get(key(report.template_id))||report.template_id||'-'):'-'}</td><td>${html(report.report_config?.values?.map(field=>source==='template'?valueFields[field]||field:reportFieldLabel(config,field)).join(', ')||'-')}</td><td>${html(key(report.updated_at).slice(0,10)||'-')}</td>${admin()?`<td><div class="flex gap-2">${[['edit','pencil','Edit'],['rename','text-cursor-input','Rename'],['delete','trash-2','Delete']].map(([action,icon,label])=>`<button type="button" data-report-action="${action}" data-report-id="${html(report.id)}" title="${label} report" aria-label="${label} ${html(report.report_name)}"><i data-lucide="${icon}"></i></button>`).join('')}</div></td>`:''}</tr>`;}).join(''):`<tr><td colspan="${admin()?6:5}">No matching active reports.</td></tr>`}</tbody></table>`;
       table.querySelectorAll('button').forEach(button=>button.disabled=state.busy);lucide.createIcons();
     }
     function rememberPage(){
@@ -23374,12 +23802,12 @@
       state.view=view;const saved=state.pages[view];state.config=saved?clone(saved.config):defaults();state.selected=saved?.selected||null;state.editing=view==='report_builder'&&(saved?saved.editing:admin());state.result=null;
       document.getElementById('report-name').value=saved?.name||'Initiative-wise Milestone Roadmap';document.getElementById('report-template').value=state.config.templateId;
       const host=document.getElementById(view==='report_builder'?'report-builder-page':'custom-report-viewer');host.appendChild(root());root().hidden=view==='custom_reports'&&!state.selected;root().classList.toggle('report-viewer-mode',view==='custom_reports');root().querySelector('h2').textContent=view==='report_builder'?'Report Builder':saved?.name||'Report';
-      renderZones();renderFilters();if(state.data&&state.config.templateId)preview();else document.getElementById('report-preview').replaceChildren();
+      renderZones();renderFilters();if(state.data&&state.data.dataSource===(state.config.dataSource||'template')&&(state.config.dataSource!=='template'||state.config.templateId))preview();else document.getElementById('report-preview').replaceChildren();
     }
     async function getSavedReport(id){
       const result=await supabaseClient.from('report_definitions').select('*').eq('id',id).eq('is_active',true).eq('report_type',reportType).single();
       if(result.error)throw result.error;if(!result.data)throw new Error('This report is no longer active.');
-      const config=clone(result.data.report_config);config.templateId=key(result.data.template_id);config.groupId=key(result.data.planner_type_group_id||config.groupId);config.manualMilestoneIds||=[];config.filterValues||={scope:'active'};config.filterValues.search||='';config.sorting||=defaults().sorting;config.reportType=reportType;config.stageValue||=config.values?.[0];config.aggregationRules||={};checkConfig(config);return {...result.data,report_config:config};
+      const config=normalizeConfig(clone(result.data.report_config));if(config.dataSource==='template')config.templateId=key(result.data.template_id);else delete config.templateId;config.groupId=key(result.data.planner_type_group_id||config.groupId);config.manualMilestoneIds||=[];config.filterValues||={scope:'active'};config.filterValues.search||='';config.sorting||=defaults().sorting;config.reportType=reportType;config.stageValue||=config.values?.[0];config.aggregationRules||={};if(config.dataSource!=='template')config.fieldOrder||=Object.fromEntries(['rows','columns','values','filters'].map(zone=>[zone,(config[zone]||[]).slice()]));checkConfig(config);return {...result.data,report_config:config};
     }
     async function openReport(id,edit=false){
       if(state.busy)return;if(!currentUser)throw new Error('Sign in to run reports.');if(edit)await authorize();
@@ -23395,30 +23823,41 @@
       if(state.user!==user){state.user=user;state.config=defaults();state.selected=null;state.editing=admin();state.data=null;state.result=null;state.pages={report_builder:null,custom_reports:null};state.catalog={search:'',template:'',dateField:''};invalidate();}
       if(!root()){
         const section=document.createElement('section');section.id='delivery-reports';section.setAttribute('aria-label','Reports');
-        section.innerHTML=`<h2 class="text-lg font-bold text-slate-800">Report Builder</h2><div class="report-toolbar" data-builder-only><label>Saved Report<select id="report-saved"></select></label><label>Report Name<input id="report-name" maxlength="160" value="Initiative-wise Milestone Roadmap"></label><label>Change Request Template<select id="report-template"><option value="">Select template</option></select></label></div><div class="report-toolbar">${[['reset','rotate-ccw','Reset'],['run','play','Run'],['preview','table','Preview'],['save','save','Save'],['saveAs','copy-plus','Save As'],['edit','pencil','Edit'],['delete','trash-2','Delete']].map(([action,icon,text])=>`<button type="button" data-action="${action}" ${['save','saveAs','edit','delete'].includes(action)?'data-admin-action="true"':''}><i data-lucide="${icon}"></i>${text}</button>`).join('')}<label>Export Format<select id="report-export-format"><option value="excel">Excel</option><option value="pdf">PDF</option><option value="word">Word</option><option value="powerpoint">PowerPoint</option></select></label><button type="button" data-action="export"><i data-lucide="download"></i>Export</button></div><div class="report-layout"><aside><h3 class="font-bold">Available Fields</h3><div id="report-available"></div></aside><div class="report-zones">${['rows','columns','values','filters'].map(zone=>`<section class="report-zone" data-drop-zone="${zone}" aria-label="${zone}"><h4>${zone[0].toUpperCase()+zone.slice(1)}</h4><div id="report-zone-${zone}"></div></section>`).join('')}</div></div><label id="report-manual" hidden class="mt-3">Selected Manual Milestones<select id="report-manual-ids" multiple size="5"></select></label><div id="report-filters" class="report-filter-grid"></div><p id="report-message" role="status" aria-live="polite"></p><div id="report-preview" class="report-preview" aria-label="Report preview"></div>`;
+        section.innerHTML=`<h2 class="text-lg font-bold text-slate-800">Report Builder</h2><div class="report-toolbar" data-builder-only><label>Saved Report<select id="report-saved"></select></label><label>Report Name<input id="report-name" maxlength="160" value="Initiative-wise Milestone Roadmap"></label><label>Data Source<select id="report-data-source">${dataSourceOptions.map(([value,label])=>`<option value="${value}">${html(label)}</option>`).join('')}</select></label><label id="report-template-label">Choose Template<select id="report-template"><option value="">Select template</option></select></label></div><div class="report-toolbar">${[['reset','rotate-ccw','Reset'],['run','play','Run'],['preview','table','Preview'],['save','save','Save'],['saveAs','copy-plus','Save As'],['edit','pencil','Edit'],['delete','trash-2','Delete']].map(([action,icon,text])=>`<button type="button" data-action="${action}" ${['save','saveAs','edit','delete'].includes(action)?'data-admin-action="true"':''}><i data-lucide="${icon}"></i>${text}</button>`).join('')}<label>Export Format<select id="report-export-format"><option value="excel">Excel</option><option value="pdf">PDF</option><option value="word">Word</option><option value="powerpoint">PowerPoint</option></select></label><button type="button" data-action="export"><i data-lucide="download"></i>Export</button></div><div class="report-layout"><aside><h3 class="font-bold">Available Fields</h3><div id="report-available"></div></aside><div class="report-zones">${['rows','columns','values','filters'].map(zone=>`<section class="report-zone" data-drop-zone="${zone}" aria-label="${zone}"><h4>${zone[0].toUpperCase()+zone.slice(1)}</h4><div id="report-zone-${zone}"></div></section>`).join('')}</div></div><label id="report-manual" hidden class="mt-3">Selected Manual Milestones<select id="report-manual-ids" multiple size="5"></select></label><div id="report-filters" class="report-filter-grid"></div><p id="report-message" role="status" aria-live="polite"></p><div id="report-preview" class="report-preview" aria-label="Report preview"></div>`;
         document.getElementById('report-builder-page').appendChild(section);
-        section.addEventListener('click',onClick);section.addEventListener('change',onChange);section.addEventListener('dragstart',onDragStart);section.addEventListener('dragover',onDragOver);section.addEventListener('drop',onDrop);section.addEventListener('dragend',clearDrag);
+        const primarySourceLabel=section.querySelector('#report-data-source')?.closest('label');if(primarySourceLabel)primarySourceLabel.firstChild.textContent='Primary Data Source';
+        const relationshipPanel=document.createElement('section');relationshipPanel.id='report-relationship-panel';relationshipPanel.className='report-relationship-panel';relationshipPanel.innerHTML=`<div class="flex items-center justify-between gap-3"><div><h3 class="font-bold text-sm">Data Sources &amp; Relationships</h3><p class="text-xs text-slate-500">Connect sources using existing keys.</p></div><div class="report-relationship-toolbar"><label>Add Data Source<select id="report-add-source"></select></label><button type="button" data-action="add-source"><i data-lucide="plus"></i>Add Source</button></div></div><div id="report-relationship-validation" class="report-relationship-validation" role="status" aria-live="polite"></div><div id="report-relationship-canvas" class="report-relationship-canvas"><svg class="report-relationship-lines" aria-hidden="true"><defs><marker id="report-relationship-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L7,3 z" fill="#0891b2"></path></marker></defs></svg><div id="report-relationship-nodes" class="report-relationship-nodes"></div></div><div id="report-relationship-edges"></div>`;
+        const toolbar=section.querySelector('.report-toolbar[data-builder-only]');toolbar?.after(relationshipPanel);
+        const availableHeading=section.querySelector('.report-layout aside h3');if(availableHeading){const controls=document.createElement('div');controls.className='flex items-center justify-between gap-2';controls.innerHTML='<h3 class="font-bold">Available Fields</h3><button type="button" data-action="toggle-fields" title="Collapse field groups" aria-label="Collapse field groups"><i data-lucide="chevrons-up-down"></i></button>';availableHeading.replaceWith(controls);const search=document.createElement('input');search.id='report-field-search';search.type='search';search.className='report-field-search';search.placeholder='Search available fields';search.setAttribute('aria-label','Search available report fields');section.querySelector('#report-available').before(search);}
+        section.addEventListener('click',onClick);section.addEventListener('change',onChange);section.addEventListener('input',onInput);section.addEventListener('dragstart',onDragStart);section.addEventListener('dragover',onDragOver);section.addEventListener('drop',onDrop);section.addEventListener('dragend',clearDrag);
       }
       ensureCatalog();
       if(!state.channel){state.channel=supabaseClient.channel('delivery-shared-reports').on('postgres_changes',{event:'*',schema:'public',table:'report_definitions'},()=>{if(root())loadSaved().catch(error=>message(error.message,true));}).on('postgres_changes',{event:'*',schema:'public',table:'project_planner_templates'},refreshMetadata).on('postgres_changes',{event:'*',schema:'public',table:'project_planner_milestones'},refreshMetadata).subscribe();}
       renderZones();renderFilters();
-      try{await metadata();document.getElementById('report-template').innerHTML='<option value="">Select template</option>'+state.templates.map(template=>`<option value="${html(template.id)}">${html(template.template_name)}${template.is_active===false?' (Archived)':''}</option>`).join('');document.getElementById('report-template').value=state.config.templateId;renderFilters();await loadSaved();}catch(error){message(error.message,true);}
+      try{if(state.config.primarySource==='template'&&state.view==='report_builder')await metadata();document.getElementById('report-template').innerHTML='<option value="">Select template</option>'+state.templates.map(template=>`<option value="${html(template.id)}">${html(template.template_name)}${template.is_active===false?' (Archived)':''}</option>`).join('');document.getElementById('report-template').value=state.config.templateId;renderFilters();await loadSaved();}catch(error){message(error.message,true);}
     }
     async function run(){
       if(state.busy)return;
       if(!currentUser)throw new Error('Sign in to run reports.');
       checkConfig(state.config);state.busy=true;const request=++state.request,user=state.user;renderZones();renderCatalog();message('Loading report...');
       try{
-        await metadata();
-        const loaded=await loadInitiativesFromSupabase();if(loaded===false)throw new Error('Unable to refresh report data.');
-        const programRows=await allRows('programs');await metadata();
-        if(request!==state.request||user!==state.user||!currentUser)return;
-        state.data={initiatives:kpiInitiativeRows.slice(),milestones:kpiMilestoneRows.slice(),programs:programRows,tracks:typeof projects!=='undefined'?projects.flatMap(initiative=>initiative.tracks||[]):[],users:typeof userMaster!=='undefined'?userMaster.slice():[]};renderFilters();preview();
+        if(state.config.dataSource==='template'){
+          await metadata();
+          const loaded=await loadInitiativesFromSupabase();if(loaded===false)throw new Error('Unable to refresh report data.');
+          const programRows=await allRows('programs');await metadata();
+          if(request!==state.request||user!==state.user||!currentUser)return;
+          state.data={dataSource:'template',initiatives:kpiInitiativeRows.slice(),milestones:kpiMilestoneRows.slice(),programs:programRows,tracks:typeof projects!=='undefined'?projects.flatMap(initiative=>initiative.tracks||[]):[],users:typeof userMaster!=='undefined'?userMaster.slice():[]};
+        }else{
+          const entityData=state.config.joinedSources?.length?await loadJoinedEntityData(state.config):await loadEntityData(state.config);
+          if(request!==state.request||user!==state.user||!currentUser)return;
+          state.data={...entityData,dataSource:state.config.dataSource};
+        }
+        state.result=null;state.resultData=null;state.resultConfig=null;renderFilters();preview();
       }finally{state.busy=false;renderZones();renderCatalog();}
     }
     function refreshMetadata(){
       invalidate();clearTimeout(state.refreshTimer);
-      state.refreshTimer=setTimeout(async()=>{if(!root()||!currentUser)return;try{await metadata();const select=document.getElementById('report-template');select.innerHTML='<option value="">Select template</option>'+state.templates.map(template=>`<option value="${html(template.id)}">${html(template.template_name)}${template.is_active===false?' (Archived)':''}</option>`).join('');select.value=state.config.templateId;renderFilters();if(state.data)preview();}catch(error){message(error.message,true);}},150);
+      state.refreshTimer=setTimeout(async()=>{if(!root()||!currentUser)return;try{if(state.config.primarySource==='template')await metadata();else await loadTemplateCatalog();const select=document.getElementById('report-template');select.innerHTML='<option value="">Select template</option>'+state.templates.map(template=>`<option value="${html(template.id)}">${html(template.template_name)}${template.is_active===false?' (Archived)':''}</option>`).join('');select.value=state.config.templateId;renderRelationships();renderAvailableFields();renderFilters();if(state.data)preview();}catch(error){message(error.message,true);}},150);
     }
     async function authorize(){
       return deliveryRequireAdmin();
@@ -23429,7 +23868,7 @@
       if(state.view!=='report_builder')throw new Error('Open Report Builder to save a definition.');
       if(!state.editing&&!asNew)throw new Error('Select Edit before updating this definition.');
       checkConfig(state.config);
-      if(state.config.columns.includes('plannerTypes')){await metadata();const mapped=(state.templateRows.get(key(state.config.templateId))||[]).filter(row=>row.is_active!==false&&row.planner_type_id);if(!mapped.some(row=>!state.config.groupId||key(window.milestonePlannerTypes?.state.values.find(type=>key(type.id)===key(row.planner_type_id))?.group_id)===key(state.config.groupId)))throw new Error('Confirm the template Planner Type mappings before saving this roadmap, or select Legacy Template Milestones.');}
+      if(state.config.dataSource==='template'&&state.config.columns.includes('plannerTypes')){await metadata();const mapped=(state.templateRows.get(key(state.config.templateId))||[]).filter(row=>row.is_active!==false&&row.planner_type_id);if(!mapped.some(row=>!state.config.groupId||key(window.milestonePlannerTypes?.state.values.find(type=>key(type.id)===key(row.planner_type_id))?.group_id)===key(state.config.groupId)))throw new Error('Confirm the template Planner Type mappings before saving this roadmap, or select Legacy Template Milestones.');}
       let name=document.getElementById('report-name').value.trim();
       if(asNew){const entered=prompt('Save report as',name+' Copy');if(entered===null)return;name=entered.trim();}
       if(!name||name.length>160)throw new Error('Enter a report name of 1 to 160 characters.');
@@ -23439,9 +23878,10 @@
       if((existing.data||[]).some(report=>key(report.id)!==key(id)&&report.report_name.trim().toLowerCase()===name.toLowerCase()))throw new Error('An active report with this name already exists.');
       state.busy=true;renderZones();
       try{
-        const selectedMilestoneFields=new Set(state.config.values.filter(field=>Object.hasOwn(milestoneFields,field)));for(const zone of ['rows','columns','filters'])for(const field of state.config[zone])if(field.startsWith('milestone.'))selectedMilestoneFields.add(field.slice(10));state.config.selectedMilestoneFields=[...selectedMilestoneFields];state.config.reportType=reportType;
-        state.config.sorting={...defaults().sorting,...state.config.sorting,dateField:state.config.sorting?.dateField||(dateFields[state.config.stageValue]?state.config.stageValue:state.config.dateField||'deadline')};
-        const payload={report_name:name,report_type:reportType,template_id:key(state.config.templateId),report_config:clone(state.config),is_active:true,modified_by:user.id,updated_at:new Date().toISOString(),...(window.milestonePlannerTypes?.state.ready?{planner_type_group_id:state.config.groupId||null}:{})};
+        if(state.config.dataSource==='template'){const selectedMilestoneFields=new Set(state.config.values.filter(field=>Object.hasOwn(milestoneFields,field)));for(const zone of ['rows','columns','filters'])for(const field of state.config[zone])if(field.startsWith('milestone.'))selectedMilestoneFields.add(field.slice(10));state.config.selectedMilestoneFields=[...selectedMilestoneFields];state.config.sorting={...defaults().sorting,...state.config.sorting,dateField:state.config.sorting?.dateField||(dateFields[state.config.stageValue]?state.config.stageValue:state.config.dateField||'deadline')};}
+        syncFieldOrder();state.config.reportType=reportType;
+        const reportConfig=clone(state.config);if(reportConfig.dataSource!=='template')delete reportConfig.templateId;
+        const payload={report_name:name,report_type:reportType,template_id:state.config.dataSource==='template'?key(state.config.templateId):null,report_config:reportConfig,is_active:true,modified_by:user.id,updated_at:new Date().toISOString(),...(window.milestonePlannerTypes?.state.ready?{planner_type_group_id:state.config.dataSource==='template'?state.config.groupId||null:null}:{})};
         const result=id?await supabaseClient.from('report_definitions').update(payload).eq('id',id).eq('is_active',true).select().single():await supabaseClient.from('report_definitions').insert({...payload,created_by:user.id}).select().single();
         if(result.error)throw result.error;
         state.selected=result.data.id;state.editing=false;document.getElementById('report-name').value=name;rememberPage();await loadSaved();message('Shared report saved.');
@@ -23465,18 +23905,34 @@
       const allowed=allowedFields();
       if(!allowed[zone]?.includes(field))return;
       const fields=state.config[zone],oldIndex=fields.indexOf(field);if(oldIndex>=0)fields.splice(oldIndex,1);
-      fields.splice(Math.max(0,Math.min(index,fields.length)),0,field);state.config.aggregationRules||={};if(zone==='values'&&!state.config.aggregationRules[field])state.config.aggregationRules[field]=defaultAggregation(field);
-      renderZones();renderFilters();preview();
+      fields.splice(Math.max(0,Math.min(index,fields.length)),0,field);state.config.aggregationRules||={};if(zone==='values'&&!state.config.aggregationRules[field])state.config.aggregationRules[field]=state.config.dataSource==='template'?defaultAggregation(field):entityDefaultAggregation(reportFieldCatalog(state.config).find(item=>item.id===field));
+      syncFieldOrder();renderZones();renderFilters();preview();
     }
-    function clearDrag(){state.drag=null;root()?.querySelectorAll('.report-over').forEach(zone=>zone.classList.remove('report-over'));}
-    function onDragStart(event){const field=event.target.closest('.report-field');if(!editable()||!field){event.preventDefault();return;}state.drag={field:field.dataset.field,kind:field.dataset.kind};event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',field.dataset.field);}
-    function onDragOver(event){const zone=event.target.closest('[data-drop-zone]');if(!editable()||!zone||state.drag?.kind!==zone.dataset.dropZone)return;event.preventDefault();event.dataTransfer.dropEffect='move';root().querySelectorAll('.report-over').forEach(item=>item.classList.toggle('report-over',item===zone));}
-    function onDrop(event){const zone=event.target.closest('[data-drop-zone]');if(!editable()||!zone||state.drag?.kind!==zone.dataset.dropZone)return;event.preventDefault();const field=event.target.closest('.report-field'),items=state.config[zone.dataset.dropZone],index=field?items.indexOf(field.dataset.field):items.length;moveField(zone.dataset.dropZone,state.drag.field,index);clearDrag();}
+    function clearDrag(){state.drag=null;state.relationshipDrag=null;root()?.querySelectorAll('.report-over,.report-node-over').forEach(zone=>zone.classList.remove('report-over','report-node-over'));}
+    function onDragStart(event){const node=event.target.closest('.report-source-node');if(editable()&&node){state.relationshipDrag=node.dataset.sourceNode;event.dataTransfer.effectAllowed='link';event.dataTransfer.setData('text/plain',state.relationshipDrag);return;}const field=event.target.closest('.report-field');if(!editable()||!field){event.preventDefault();return;}state.drag={field:field.dataset.field,kind:field.dataset.kind};event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',field.dataset.field);}
+    function onDragOver(event){const node=event.target.closest('.report-source-node');if(editable()&&node&&state.relationshipDrag&&node.dataset.sourceNode!==state.relationshipDrag){event.preventDefault();event.dataTransfer.dropEffect='link';node.classList.add('report-node-over');return;}const zone=event.target.closest('[data-drop-zone]');if(!editable()||!zone||state.drag?.kind!==zone.dataset.dropZone)return;event.preventDefault();event.dataTransfer.dropEffect='move';root().querySelectorAll('.report-over').forEach(item=>item.classList.toggle('report-over',item===zone));}
+    function onDrop(event){const node=event.target.closest('.report-source-node');if(editable()&&node&&state.relationshipDrag){event.preventDefault();connectDataSources(state.relationshipDrag,node.dataset.sourceNode);clearDrag();return;}const zone=event.target.closest('[data-drop-zone]');if(!editable()||!zone||state.drag?.kind!==zone.dataset.dropZone)return;event.preventDefault();const field=event.target.closest('.report-field'),items=state.config[zone.dataset.dropZone],index=field?items.indexOf(field.dataset.field):items.length;moveField(zone.dataset.dropZone,state.drag.field,index);clearDrag();}
+    function syncFieldOrder(){state.config.fieldOrder=Object.fromEntries(['rows','columns','values','filters'].map(zone=>[zone,(state.config[zone]||[]).slice()]));}
+    function updateFilterValue(control){
+      const field=control.dataset.filter;if(!field)return;
+      if(field==='search'){state.config.filterValues.search=control.value;return;}
+      if(control.dataset.filterPart){const current=state.config.filterValues[field]&&typeof state.config.filterValues[field]==='object'?state.config.filterValues[field]:{};current[control.dataset.filterPart]=control.value;state.config.filterValues[field]=current;return;}
+      if(field==='from'||field==='to'){state.config.filterValues[field]=control.value;return;}
+      state.config.filterValues[field]=control.dataset.filterMode==='multi'?[...control.selectedOptions].map(option=>option.value):control.value;
+    }
+    function scheduleFilterPreview(){clearTimeout(state.filterTimer);state.filterTimer=setTimeout(()=>preview({renderFilterControls:false}),180);}
+    function onInput(event){if(event.target.id==='report-field-search'){state.fieldSearch=event.target.value;renderAvailableFields();lucide.createIcons();return;}if(!event.target.dataset.filter||state.busy)return;updateFilterValue(event.target);scheduleFilterPreview();}
     async function onClick(event){
       const button=event.target.closest('button');if(!button)return;
       try{
+        if(button.dataset.action==='add-source'){addDataSource(document.getElementById('report-add-source')?.value);return;}
+        if(button.dataset.removeSource){removeDataSource(button.dataset.removeSource);return;}
+        if(button.dataset.removeRelationship!==undefined){removeRelationship(Number(button.dataset.removeRelationship));return;}
+        if(button.dataset.collapseSource){const source=button.dataset.collapseSource;state.collapsedFieldSources.has(source)?state.collapsedFieldSources.delete(source):state.collapsedFieldSources.add(source);renderAvailableFields();lucide.createIcons();return;}
+        if(button.dataset.action==='toggle-fields'){state.collapseAllFields=!state.collapseAllFields;button.title=state.collapseAllFields?'Expand field groups':'Collapse field groups';renderAvailableFields();lucide.createIcons();return;}
+        if(button.dataset.action==='preview-page'){state.previewPage=Number(button.dataset.page)||1;preview({renderFilterControls:false});return;}
         if(button.dataset.add){moveField(button.dataset.add,button.dataset.field,state.config[button.dataset.add].length);return;}
-        if(button.dataset.remove&&editable()){state.config[button.dataset.remove]=state.config[button.dataset.remove].filter(field=>field!==button.dataset.field);if(button.dataset.remove==='values'&&state.config.stageValue===button.dataset.field)state.config.stageValue=state.config.values[0]||'';renderZones();renderFilters();preview();return;}
+        if(button.dataset.remove&&editable()){state.config[button.dataset.remove]=state.config[button.dataset.remove].filter(field=>field!==button.dataset.field);if(button.dataset.remove==='values'&&state.config.stageValue===button.dataset.field)state.config.stageValue=state.config.values[0]||'';syncFieldOrder();renderZones();renderFilters();preview();return;}
         if(button.dataset.move&&editable()){const zone=button.dataset.zone,index=state.config[zone].indexOf(button.dataset.field);moveField(zone,button.dataset.field,index+Number(button.dataset.move));return;}
         const action=button.dataset.action;
         if(action==='run'){if(state.view==='custom_reports'&&state.selected){const filters=clone(state.config.filterValues),report=await getSavedReport(state.selected);state.config=clone(report.report_config);state.config.filterValues={...state.config.filterValues,...filters};}await run();}
@@ -23487,7 +23943,7 @@
         if(action==='edit'){if(state.view==='custom_reports')await openReport(state.selected,true);else{await authorize();state.editing=true;renderZones();}}
         if(action==='export')await window.exportAnalyticsReport(document.getElementById('report-export-format').value);
         if(action==='reset'){
-          if(editable()){const template=state.config.templateId;state.config=defaults();state.config.templateId=template;}else state.config.filterValues=clone(state.saved.find(report=>key(report.id)===key(state.selected))?.report_config?.filterValues||{scope:'active'});
+          if(editable()){const source=state.config.dataSource,template=state.config.templateId;state.config=defaults(source);if(source==='template')state.config.templateId=template;}else state.config.filterValues=clone(state.saved.find(report=>key(report.id)===key(state.selected))?.report_config?.filterValues||{scope:'active'});
           renderZones();renderFilters();preview();
         }
       }catch(error){message(error.message||'Unable to complete report action.',true);}
@@ -23495,6 +23951,12 @@
     async function onChange(event){
       try{
         if(state.busy)return;
+        if(event.target.id==='report-add-source'){const button=root().querySelector('[data-action="add-source"]');if(button)button.disabled=!editable()||!event.target.value;return;}
+        if(event.target.dataset.relationshipIndex!==undefined&&event.target.dataset.relationshipProperty){changeRelationship(Number(event.target.dataset.relationshipIndex),event.target.dataset.relationshipProperty,event.target.value);return;}
+        if(event.target.id==='report-data-source'&&editable()){
+          const source=event.target.value;state.config=defaults(source);state.data=null;state.result=null;state.resultData=null;state.resultConfig=null;state.previewPage=1;document.getElementById('report-preview').replaceChildren();if(source==='template'){await metadata();document.getElementById('report-template').innerHTML='<option value="">Select template</option>'+state.templates.map(template=>`<option value="${html(template.id)}">${html(template.template_name)}${template.is_active===false?' (Archived)':''}</option>`).join('');}renderZones();renderFilters();message(source==='template'?'Choose a template and configure the roadmap.':'Choose fields for '+dataSourceLabel(source)+', then Run the report.');return;
+        }
+        if(event.target.id==='report-field-search'){state.fieldSearch=event.target.value;renderAvailableFields();lucide.createIcons();return;}
         if(event.target.id==='report-sort-date'&&editable()){state.config.sorting={...defaults().sorting,dateField:event.target.value};preview();return;}
         if(event.target.id==='report-type-group'&&editable()){state.config.groupId=event.target.value;preview();return;}
         if(event.target.id==='report-range-field'&&editable()){state.config.dateField=event.target.value;preview();return;}
@@ -23505,7 +23967,7 @@
         }
         if(event.target.id==='report-template'&&editable()){state.config.templateId=event.target.value;await metadata();if(state.data)preview();else if(state.config.templateId)await run();}
         if(event.target.id==='report-manual-ids'&&editable()){state.config.manualMilestoneIds=[...event.target.selectedOptions].map(option=>option.value);preview();}
-        if(event.target.dataset.filter){state.config.filterValues[event.target.dataset.filter]=event.target.value;preview();}
+        if(event.target.dataset.filter){updateFilterValue(event.target);scheduleFilterPreview();}
       }catch(error){message(error.message,true);}
     }
     function download(blob,name){const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);}
@@ -23515,13 +23977,13 @@
       preview();if(!state.result)throw new Error('Run a valid report before exporting.');
       const result=clone(state.result),config=clone(state.config),title=document.getElementById('report-name').value.trim()||'Initiative-wise Milestone Roadmap';
       const filename=title.replace(/[^a-z0-9_-]+/gi,'_')+'_'+new Date().toISOString().slice(0,10);
-      const template=state.templates.find(row=>key(row.id)===config.templateId);
-      const details=`Template: ${template?.template_name||config.templateId} | Group: ${window.milestonePlannerTypes?.state.groups.find(group=>key(group.id)===key(config.groupId))?.group_name||'All'} | Values: ${config.values.map(field=>valueFields[field]).join(', ')} | Aggregation: ${Object.entries(config.aggregationRules||{}).map(([field,mode])=>`${valueFields[field]}: ${aggregations[mode]}`).join('; ')} | Search: ${config.filterValues.search||'All'} | Filters: ${config.filters.map(field=>field==='dateRange'?`${config.filterValues.from||'*'} to ${config.filterValues.to||'*'}`:`${filterFields[field]||milestoneDimensions[field]}: ${config.filterValues[field]||'All'}`).join('; ')}`;
+      const template=state.templates.find(row=>key(row.id)===config.templateId),entityFields=new Map(reportFieldCatalog(config).map(field=>[field.id,field.groupLabel])),fieldLabel=field=>config.dataSource==='template'?valueFields[field]||milestoneDimensions[field]||filterFields[field]||field:entityFields.get(field)||filterFields[field]||field,sources=[config.primarySource||config.dataSource,...(config.joinedSources||[])].map(dataSourceLabel).join(' + '),relationshipDetails=(config.relationships||[]).map(relation=>`${dataSourceLabel(relation.source)}.${fieldLabel(relation.sourceField)} → ${dataSourceLabel(relation.target)}.${fieldLabel(relation.targetField)} (${relation.cardinality}, ${relation.joinType})`).join('; ');
+      const details=`Data Sources: ${sources}${relationshipDetails?` | Relationships: ${relationshipDetails}`:''}${config.dataSource==='template'?` | Template: ${template?.template_name||config.templateId} | Group: ${window.milestonePlannerTypes?.state.groups.find(group=>key(group.id)===key(config.groupId))?.group_name||'All'}`:''} | Values: ${config.values.map(fieldLabel).join(', ')} | Aggregation: ${Object.entries(config.aggregationRules||{}).map(([field,mode])=>`${fieldLabel(field)}: ${(config.dataSource==='template'?aggregations:entityAggregations)[mode]||mode}`).join('; ')} | Search: ${config.filterValues.search||'All'} | Filters: ${config.filters.map(field=>field==='dateRange'?`${config.filterValues.from||'*'} to ${config.filterValues.to||'*'}`:`${fieldLabel(field)}: ${JSON.stringify(config.filterValues[field]??'All')}`).join('; ')}`;
       const table=[result.headers,...result.rows];
       if(format==='excel'){
         const workbook=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(table);
         sheet['!cols']=result.headers.map(()=>({wch:28}));
-        XLSX.utils.book_append_sheet(workbook,sheet,'Milestone Roadmap');XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([[title],[details],['Exported',new Date().toISOString()]]),'Report Details');XLSX.writeFile(workbook,filename+'.xlsx');
+        XLSX.utils.book_append_sheet(workbook,sheet,(config.dataSource==='template'?'Milestone Roadmap':dataSourceLabel(config.dataSource)).slice(0,31));XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([[title],[details],['Exported',new Date().toISOString()]]),'Report Details');XLSX.writeFile(workbook,filename+'.xlsx');
       }else if(format==='pdf'){
         if(!window.jspdf?.jsPDF)throw new Error('PDF library failed to load.');
         const pdf=new window.jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4'}),width=277;
@@ -23566,7 +24028,7 @@
       for(const id of ['btn-page-import','btn-page-export','btn-new-program','btn-new-project']){const button=document.getElementById(id);if(button)button.style.display='none';}
       activeNavigation(view);try{await initialize();if(currentWorkspaceView!==view)return;restorePage(view);renderCatalog();window.scrollTo(0,state.scrolls[view]||0);}catch(error){message(error.message,true);}
     }
-    window.deliveryReportBuilder={build,fields:milestoneFields,validate:checkConfig,run,save,rename,delete:remove,export:exportReport,invalidate,initialize,showPage,openReport,isActive:()=>['report_builder','custom_reports'].includes(currentWorkspaceView)&&Boolean(state.config?.templateId)};
+    window.deliveryReportBuilder={build,fields:milestoneFields,fieldCatalog:entityFieldCatalog,reportFieldCatalog,loadEntityData,loadJoinedEntityData,validate:checkConfig,validateJoinPlan,run,save,rename,delete:remove,export:exportReport,invalidate,initialize,showPage,openReport,isActive:()=>['report_builder','custom_reports'].includes(currentWorkspaceView)&&Boolean(state.config&&(state.config.primarySource!=='template'||state.config.templateId))};
     const showAnalytics=window.showAnalyticsView;
     window.showAnalyticsView=function(){document.body.classList.remove('report-workspace-active');state.request++;state.openRequest++;rememberPage();state.scrolls[currentWorkspaceView]=window.scrollY;hideReportPages();const result=showAnalytics.apply(this,arguments);activeNavigation('analytics');window.scrollTo(0,state.scrolls.analytics||0);return result;};
     for(const name of ['showWorkspaceView','showTodoListView']){const previous=window[name];window[name]=function(){if(name==='showWorkspaceView'&&['report_builder','custom_reports'].includes(arguments[0]))return showPage(arguments[0]);document.body.classList.remove('report-workspace-active');state.request++;state.openRequest++;rememberPage();state.scrolls[currentWorkspaceView]=window.scrollY;hideReportPages();return previous.apply(this,arguments);};}
@@ -23574,7 +24036,7 @@
     const priorLoadPlanners=window.loadPlanners;let fingerprint=JSON.stringify(plannerTemplates.map(row=>[row.id,row.updated_at,row.is_active]));
     window.loadPlanners=async function(){const result=await priorLoadPlanners.apply(this,arguments);const next=JSON.stringify(plannerTemplates.map(row=>[row.id,row.updated_at,row.is_active]));if(next!==fingerprint){fingerprint=next;invalidate();}return result;};
     const priorLoadInitiatives=window.loadInitiativesFromSupabase;
-    window.loadInitiativesFromSupabase=async function(){const result=await priorLoadInitiatives.apply(this,arguments);try{if(result!==false&&state.data&&currentUser){state.data.initiatives=kpiInitiativeRows.slice();state.data.milestones=kpiMilestoneRows.slice();if(!state.busy&&root()&&['report_builder','custom_reports'].includes(currentWorkspaceView)){await metadata();renderFilters();preview();}}}catch(error){state.result=null;document.getElementById('report-preview')?.replaceChildren();message('Report refresh failed: '+error.message,true);}return result;};
+    window.loadInitiativesFromSupabase=async function(){const result=await priorLoadInitiatives.apply(this,arguments);try{if(result!==false&&state.data&&state.config?.dataSource==='template'&&currentUser){state.data.initiatives=kpiInitiativeRows.slice();state.data.milestones=kpiMilestoneRows.slice();if(!state.busy&&root()&&['report_builder','custom_reports'].includes(currentWorkspaceView)){state.result=null;state.resultData=null;state.resultConfig=null;await metadata();renderFilters();preview();}}}catch(error){state.result=null;state.resultData=null;state.resultConfig=null;document.getElementById('report-preview')?.replaceChildren();message('Report refresh failed: '+error.message,true);}return result;};
     supabaseClient.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT'){state.user=null;state.data=null;state.result=null;state.saved=[];state.pages={report_builder:null,custom_reports:null};state.catalog={search:'',template:'',dateField:''};state.request++;state.openRequest++;state.metadataPromise=null;clearTimeout(state.refreshTimer);if(state.channel)supabaseClient.removeChannel(state.channel);state.channel=null;root()?.remove();const page=document.getElementById('custom-reports-page');if(page){page.querySelector('#report-catalog-table')?.replaceChildren();page.querySelector('#report-catalog-status')?.replaceChildren();}hideReportPages();}});
   })();
   </script>
@@ -23592,6 +24054,7 @@
     modified_by uuid references auth.users(id),
     updated_at timestamptz not null default now()
   );
+  alter table public.report_definitions alter column template_id drop not null;
   create unique index if not exists report_definitions_active_name_uq
     on public.report_definitions (lower(trim(report_name))) where is_active;
   create or replace function public.delivery_reports_is_admin()
@@ -26084,6 +26547,7 @@
     const ticketColumnMap={
       'RequestID':'request_id','Request Type':'request_type','Subject':'subject','Request Status':'request_status','Location':'location','Department':'department','Service Category':'service_category','Request Mode':'request_mode','Category':'category','Sub Category':'sub_category','Type of issue':'type_of_issue','Priority':'priority','Template':'template','Group':'ticket_group','Status':'status','Technician':'technician','Created Time':'created_time','Last Updated Time':'last_updated_time','Resolution':'resolution','Requester':'requester','Approval Status':'approval_status','Assigned Time':'assigned_time','Completed Time':'completed_time','Created By':'ticket_created_by','Due By Time':'due_by_time','Item':'item','Last Updated By':'last_updated_by','Overdue Status':'overdue_status','Requester Email':'requester_email','Resolved By':'resolved_by','Resolved Time':'resolved_time','Site':'site','Site Code':'site_code','Type':'ticket_type','Time Elapsed':'time_elapsed','Solution':'solution','Responded Date':'responded_date','Response Due By Time':'response_due_by_time','Resolve Mode':'resolve_mode','Region':'region'
     };
+    window.deliverySupportTicketColumnMap=ticketColumnMap;
     const ticketSchemaColumns=['request_id','normalized_request_id','fields','source_cells','source_import_id','source_sheet','source_row','source_filename','source_file_index','version',...Object.values(ticketColumnMap).filter(column=>column!=='request_id')];
     let supportImportBusy=false;
     let supportRefreshCounts=null;
