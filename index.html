@@ -564,6 +564,13 @@
   <!-- Logout -->
   <div>
     <button
+      id="sidebar-sync-history"
+      type="button"
+      onclick="deliveryOffline.showHistory().catch(()=>{})"
+      class="sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+      title="Sync History"
+    ><i data-lucide="history" class="w-5 h-5 text-sky-400 flex-shrink-0"></i><span class="sidebar-text font-medium truncate">Sync History</span></button>
+    <button
       id="sidebar-logout"
       type="button"
       onclick="logoutUser()"
@@ -2010,6 +2017,40 @@
       const editableTables=new Set(['programs','initiatives','milestones','milestone_tracks','support_tickets','todo_items','master_values','project_planners','project_planner_milestones','planner_type_groups','planner_type_values']);
       let database,scope='',sessionScope=null,reachable=navigator.onLine,busy=false,lastSynced=0,retryTimer=0,failures=0,activeImport=null,storageError='',blockedReason='',statusTimer=0,statusAt=0;
       let yields=0;
+      const ops=new Map();
+      let counts={count:0,attention:0},celebrateUntil=0,celebrateTimer=0,renderAt=0,renderTimer=0,syncFailed=false,probing=null;
+      let offlineMode=!navigator.onLine,session=null,summary=null,lastMode='',recoveryTimer=0,offlineAt=0;
+      const moduleNames={programs:'Program',initiatives:'Initiative',milestone_tracks:'Track',milestones:'Milestone',support_tickets:'Support Ticket',todo_items:'To Do',master_values:'Master Data',project_planners:'Project Planner',project_planner_milestones:'Project Planner',planner_type_groups:'Planner Types',planner_type_values:'Planner Types'};
+      async function probe(){
+        if(!navigator.onLine){setReachable(false);return false;}
+        probing??=boundedFetch(`${SUPABASE_URL}/rest/v1/user_master?select=id&limit=0`,{headers:{apikey:SUPABASE_KEY}},5000).then(()=>true,()=>false).then(ok=>{setReachable(ok);return ok;}).finally(()=>{probing=null;});
+        return probing;
+      }
+      // Offline mode starts only when Supabase is genuinely unreachable; it ends when a sync finishes or nothing is saved.
+      function setReachable(ok){
+        if(reachable===ok)return;
+        reachable=ok;
+        if(!ok){
+          offlineMode=true;offlineAt||=Date.now();
+          recoveryTimer||=setInterval(()=>{if(navigator.onLine)probe();},10000);
+          status();return;
+        }
+        clearInterval(recoveryTimer);recoveryTimer=0;failures=0;
+        window.dispatchEvent(new CustomEvent('delivery-reconnected'));
+        window.dispatchEvent(new CustomEvent('delivery-online'));
+        schedule(300);status();
+      }
+      // Any HTTP response proves Supabase is reachable; a slow or failing query alone does not.
+      function markUnreachable(){
+        if(!navigator.onLine){setReachable(false);return;}
+        probe().then(ok=>{if(ok){failures=0;if(scope)schedule(300);}status();});
+      }
+      function paint(){
+        if(Date.now()-renderAt<120){if(!renderTimer)renderTimer=setTimeout(()=>{renderTimer=0;paint();},120);return;}
+        renderAt=Date.now();render();
+      }
+      // Loading progress is not shown to users; the API stays so existing callers keep working.
+      const progress={set(){},end(){}};
       const yieldUi=()=>document.visibilityState!=='hidden'&&++yields%4===0?new Promise(resolve=>setTimeout(resolve,0)):new Promise(resolve=>{
         const channel=new MessageChannel();
         channel.port1.onmessage=()=>{channel.port1.close();channel.port2.close();resolve();};
@@ -2114,12 +2155,17 @@
           if(verifiedSession&&blockedReason){blockedReason='';schedule(1000);status();}
           return;
         }
-        scope=owner;lastSynced=0;failures=0;blockedReason='';
+        scope=owner;lastSynced=0;failures=0;blockedReason='';session=null;summary=null;celebrateUntil=0;counts={count:0,attention:0};lastMode='';
         clearTimeout(retryTimer);
+        document.getElementById('delivery-sync-dialog')?.close();
         if(scope){const saved=await get('meta',scoped('sync'));if(scope!==owner)return;lastSynced=saved?.at||0;schedule(1000);}
+        if(scope&&verifiedSession&&reachable)window.dispatchEvent(new CustomEvent('delivery-online'));
         status();
       }
       function errorResponse(message,code='OFFLINE_UNAVAILABLE',statusCode=503){
+        if(code==='OFFLINE_STORAGE_ERROR')message='This device could not save your change. Please reconnect before continuing.';
+        else if(code==='OFFLINE_CREDENTIAL_WRITE')message='Please reconnect before saving this change.';
+        else if(code==='OFFLINE_UNAVAILABLE')message='This information is not available on this device yet. Please reconnect to continue.';
         return new Response(JSON.stringify({message,code}),{status:statusCode,headers:{'content-type':'application/json'}});
       }
       const transient=response=>[408,425,429,502,503,504].includes(response.status);
@@ -2191,13 +2237,13 @@
           let response=await boundedFetch(url,options);
           if(transient(response)&&!options.signal?.aborted){await new Promise(resolve=>setTimeout(resolve,700));response=await boundedFetch(url,options);}
           if(response.ok){
-            reachable=true;
+            setReachable(true);
             try{
               const before=await get('reads',key),after=await saveRead(key,url,response,owner,options);
               if(before&&after&&before.text!==after.text&&owner===scope)changed(after.table);
             }catch(error){report(error);}
-          }else if(transient(response))reachable=false;
-          status();return response;
+          }else if(transient(response))markUnreachable();
+          return response;
         })();
         pending.set(key,{task,signal:options.signal});
         try{return (await task).clone();}finally{if(pending.get(key)?.task===task)pending.delete(key);}
@@ -2207,17 +2253,17 @@
         if(cached){
           if(cached.at===0&&navigator.onLine&&reachable){
             try{const fresh=await networkRead(key,url,options,owner);if(fresh.ok)return fresh;if(!transient(fresh))return fresh;}
-            catch(error){if(options.signal?.aborted)throw error;reachable=false;console.warn('Changed data refresh deferred:',error.message);}
+            catch(error){if(options.signal?.aborted)throw error;markUnreachable();console.warn('Changed data refresh deferred:',error.message);}
           }
           if(navigator.onLine&&Date.now()-cached.at>60000&&!refreshes.has(key)){
-            const refresh=networkRead(key,url,{...options,signal:undefined},owner).catch(error=>{reachable=false;console.warn('Background refresh deferred:',error.message);status();}).finally(()=>refreshes.delete(key));
+            const refresh=networkRead(key,url,{...options,signal:undefined},owner).catch(error=>{markUnreachable();console.warn('Background refresh deferred:',error.message);status();}).finally(()=>refreshes.delete(key));
             refreshes.set(key,refresh);
           }
           return overlay(cached);
         }
         if(!navigator.onLine)return errorResponse('No cached data is available for this view. Connect once to load it.');
         try{return await networkRead(key,url,options,owner);}
-        catch(error){if(options.signal?.aborted)throw error;reachable=false;status();return errorResponse(error.message);}
+        catch(error){if(options.signal?.aborted)throw error;markUnreachable();return errorResponse(error.message);}
       }
       function exactIdentity(url,table){
         const column=table==='support_tickets'?'request_id':'id',filter=url.searchParams.get(column);
@@ -2238,9 +2284,11 @@
         const queued=await list('outbox',owner),previous=queued.find(item=>item.url===String(url)&&item.method===options.method&&JSON.stringify(item.payload)===JSON.stringify(payload));
         const createdAt=queued.reduce((at,item)=>Math.max(at,item.createdAt+1),Date.now());
         const operationId=previous?.operationId||id(),operation=previous||{key:scoped(operationId,owner),scope:owner,operationId,table,method:options.method,url:String(url),payload,identity:keyValue,createdAt,retryCount:0,status:supported?'pending':'needs-review',lastError:supported?'':'This operation needs an online confirmation or a server idempotency key; it was not applied locally.',base,versionColumn,localApplied:Boolean(supported),ambiguous};
+        if(offlineMode)operation.offlineAt=offlineAt||createdAt;
+        operation.offlineChange=offlineMode;
         await put('outbox',operation);
         await status();schedule(1500);
-        if(!operation.localApplied)return errorResponse('Saved as a pending draft (Needs Review). This action cannot be replayed safely automatically. Your form remains open.','OFFLINE_NEEDS_REVIEW',409);
+        if(!operation.localApplied)return errorResponse('Your change is saved on this device and needs attention before it can be updated.','OFFLINE_NEEDS_REVIEW',409);
         const localRow=options.method==='DELETE'?null:{...base,...(stableInsert?rows[0]:payload)};
         changed(table);
         window.dispatchEvent(new CustomEvent('delivery-saved-locally',{detail:operation}));
@@ -2263,16 +2311,16 @@
       }
       async function write(url,options,owner){
         if(activeImport&&options.importKey===activeImport.key)return importRequest(url,options,owner);
-        if((await list('outbox',owner)).some(item=>item.table===new URL(url).pathname.split('/').pop()&&item.localApplied))return queueWrite(url,options,owner);
         if(!navigator.onLine||!reachable)return queueWrite(url,options,owner);
         try{
           const response=await boundedFetch(url,options);
           if(response.ok){try{await invalidate(new URL(url).pathname.split('/').pop(),owner);await markSynced(owner);}catch(error){report(error);}return response;}
-          if(transient(response)){reachable=false;return queueWrite(url,options,owner,true);}
+          if(transient(response)&&!await probe())return queueWrite(url,options,owner,true);
           return response;
         }catch(error){
           if(options.signal?.aborted)throw error;
-          reachable=false;return queueWrite(url,options,owner,true);
+          if(!await probe())return queueWrite(url,options,owner,true);
+          return errorResponse('Your change could not be confirmed. Please check the record before trying again.','SAVE_UNCONFIRMED');
         }
       }
       async function fetchRequest(input,init={}){
@@ -2305,22 +2353,51 @@
         if(error||!data.session||data.session.user.id!==scope)throw Object.assign(new Error('Sign in as the original user to synchronize these changes.'),{code:'AUTH_REQUIRED'});
         return new Headers({apikey:SUPABASE_KEY,authorization:`Bearer ${data.session.access_token}`,'content-type':'application/json',prefer:'return=representation'});
       }
+      function note(operation,result){
+        if(!session)return;
+        session.done++;session[result==='updated'?'ok':'failed']++;
+        const p=operation.payload&&!Array.isArray(operation.payload)?operation.payload:{},b=operation.base||{};
+        session.items.push({module:moduleNames[operation.table]||'Data',name:String(p.actions||b.actions||p.milestone_title||b.milestone_title||p.title||b.title||p.track_name||b.track_name||p.program_name||b.program_name||p.request_id||b.request_id||p.name||b.name||p.subject||b.subject||''),action:operation.method==='DELETE'?'Removed':operation.method==='POST'?'Added':'Updated',result,opKey:operation.key});
+        paint();
+      }
+      async function finishSession(){
+        const s=session;session=null;if(!s)return;
+        s.completedAt=Date.now();s.status=s.failed?(s.ok?'Partly updated':'Needs attention'):'Completed';
+        s.modules=[...new Set(s.items.map(item=>item.module))];
+        if(s.owner===scope){summary=s;celebrateUntil=Date.now()+3500;}
+        try{
+          await put('meta',{...s,key:scoped(`history|${s.completedAt}|${s.id}`,s.owner),scope:s.owner,kind:'history'});
+          for(const item of s.items.filter(entry=>entry.result==='attention')){
+            const operation=await get('outbox',item.opKey);
+            if(operation){operation.historyRecorded=true;await put('outbox',operation);}
+          }
+          const old=(await list('meta',s.owner)).filter(row=>row.kind==='history').sort((a,b)=>b.completedAt-a.completedAt).slice(50);
+          for(const row of old)await remove('meta',row.key);
+        }catch(error){report(error);}
+      }
       function schedule(delay=30000){clearTimeout(retryTimer);if(scope)retryTimer=setTimeout(()=>sync().catch(report),delay);}
       async function sync(){
-        if(busy||!scope||!navigator.onLine||blockedReason)return;
+        if(busy||!scope||!navigator.onLine||!reachable||blockedReason)return;
         const owner=scope;
+        const saved=await list('outbox',owner),waiting=saved.filter(op=>op.offlineChange!==false&&!op.historyRecorded);
+        if(!waiting.length){if(session)await finishSession();offlineMode=false;offlineAt=0;status();return;}
         const run=async()=>{
-          busy=true;await status();
+          busy=true;syncFailed=false;let retry=false;const updatedTables=new Set();await status();
           try{
             const headers=await authHeaders();
             const probe=await boundedFetch(`${SUPABASE_URL}/rest/v1/user_master?select=id&limit=0`,{headers},5000);
             if(!probe.ok)throw Object.assign(new Error(`Supabase connectivity/authentication check failed (${probe.status}).`),{code:[401,403].includes(probe.status)?'AUTH_REQUIRED':'CONNECTION_FAILED'});
-            reachable=true;
-            const operations=(await list('outbox',owner)).sort((a,b)=>a.createdAt-b.createdAt);
+            setReachable(true);
+            const operations=(await list('outbox',owner)).filter(op=>op.offlineChange!==false&&!op.historyRecorded).sort((a,b)=>a.createdAt-b.createdAt);
+            const queue=operations;
+            session??={id:id(),owner,offlineAt:Math.min(...queue.map(op=>op.offlineAt||op.createdAt))||Date.now(),startedAt:Date.now(),total:0,done:0,ok:0,failed:0,items:[]};
+            if(session)session.total=session.done+queue.length;
+            let failedRun=false;
             for(const operation of operations){
+              paint();
               if(owner!==scope)break;
-              if(operation.status==='needs-review')continue;
-              if(operations.some(earlier=>earlier.createdAt<operation.createdAt&&earlier.table===operation.table&&earlier.identity===operation.identity&&earlier.status==='needs-review'))continue;
+              if(operation.status==='needs-review'){note(operation,'attention');operation.historyRecorded=true;await put('outbox',operation);continue;}
+              if(operations.some(earlier=>earlier.createdAt<operation.createdAt&&earlier.table===operation.table&&earlier.identity===operation.identity&&earlier.status==='needs-review')){operation.status='needs-review';operation.reason='blocked';await put('outbox',operation);note(operation,'attention');continue;}
               const url=new URL(operation.url);
               operation.retryCount++;operation.status='syncing';await put('outbox',operation);
               try{
@@ -2332,8 +2409,8 @@
                   const server=await response.json(),row=server[0];
                   if(!row||String(row[operation.versionColumn])!==String(operation.base[operation.versionColumn])){
                     const alreadyApplied=row&&operation.method==='PATCH'&&Object.entries(operation.payload).every(([key,value])=>sameValue(row[key],value));
-                    if(alreadyApplied||!row&&operation.method==='DELETE'){await remove('outbox',operation.key);await invalidate(operation.table,owner);await markSynced(owner);continue;}
-                    operation.status='needs-review';operation.lastError='Server data changed after the local edit. Both versions have been retained.';operation.server=row||null;await put('outbox',operation);continue;
+                    if(alreadyApplied||!row&&operation.method==='DELETE'){await remove('outbox',operation.key);updatedTables.add(operation.table);await markSynced(owner);note(operation,'updated');continue;}
+                    operation.status='needs-review';operation.reason='changed';operation.lastError='Server data changed after the local edit. Both versions have been retained.';operation.server=row||null;await put('outbox',operation);note(operation,'attention');continue;
                   }
                   url.searchParams.set(operation.versionColumn,`eq.${operation.base[operation.versionColumn]}`);
                 }
@@ -2342,10 +2419,10 @@
                 const text=await response.text();
                 const confirmed=response.ok&&text?JSON.parse(text):[];
                 if(!response.ok||!Array.isArray(confirmed)||confirmed.length!==1){
-                  operation.status=transient(response)?'pending':'needs-review';operation.lastError=text||`Supabase rejected the change (${response.status}).`;
-                  await put('outbox',operation);if(transient(response)){reachable=false;break;}continue;
+                  operation.status=transient(response)?'pending':'needs-review';operation.reason='rejected';operation.lastError=text||`Supabase rejected the change (${response.status}).`;
+                  await put('outbox',operation);if(transient(response)){failedRun=true;break;}note(operation,'attention');continue;
                 }
-                await remove('outbox',operation.key);await invalidate(operation.table,owner);await markSynced(owner);
+                await remove('outbox',operation.key);updatedTables.add(operation.table);await markSynced(owner);note(operation,'updated');
                 if(confirmed[0]&&operation.method!=='DELETE'){
                   await put('entities',{key:scoped(`${operation.table}|${operation.identity}`,owner),scope:owner,table:operation.table,row:clean(confirmed[0]),full:true,at:Date.now()});
                   for(const later of operations.filter(item=>item.createdAt>operation.createdAt&&item.table===operation.table&&item.identity===operation.identity&&item.status!=='needs-review')){
@@ -2355,14 +2432,17 @@
                   }
                 }
                 await yieldUi();
-              }catch(error){operation.status='pending';operation.lastError=error.message;await put('outbox',operation);reachable=false;break;}
+              }catch(error){operation.status='pending';operation.lastError=error.message;await put('outbox',operation);failedRun=true;break;}
             }
-            if(owner===scope&&reachable){
-              failures=0;
-              window.dispatchEvent(new CustomEvent('delivery-online'));
-            }
-          }catch(error){reachable=false;failures++;if(error.code==='AUTH_REQUIRED')blockedReason=error.message;console.warn('Synchronization deferred:',error.message);}
-          finally{busy=false;await status();if(!blockedReason)schedule(Math.min(300000,30000*2**Math.min(failures,4)));}
+            if(failedRun){syncFailed=true;failures++;retry=true;}
+            else if(owner===scope&&reachable){failures=0;syncFailed=false;offlineMode=false;offlineAt=0;await finishSession();}
+          }catch(error){syncFailed=true;retry=true;markUnreachable();failures++;if(error.code==='AUTH_REQUIRED')blockedReason=error.message;console.warn('Synchronization deferred:',error.message);}
+          finally{
+            busy=false;
+            for(const table of updatedTables)await invalidate(table,owner);
+            await status();
+            if(retry&&reachable&&!blockedReason)schedule(Math.min(300000,30000*2**Math.min(failures,4)));
+          }
         };
         if(navigator.locks)await navigator.locks.request('delivery-hub-sync',{ifAvailable:true},lock=>lock?run():undefined);
         else {storageError='Automatic replay requires browser Web Locks support; pending changes are retained.';await status();}
@@ -2375,31 +2455,148 @@
         if(scope&&!storageError){try{[operations,jobs]=await Promise.all([list('outbox'),list('imports')]);}catch(error){storageError=error.message;}}
         const attention=operations.filter(op=>op.status==='needs-review').length+jobs.filter(job=>job.status==='needs-review').length;
         const count=operations.length+jobs.filter(job=>!['complete','cancelled','needs-review'].includes(job.status)).length;
-        const label=storageError?'Offline Storage Needs Attention':blockedReason?`${Math.max(1,count)} Changes Need Attention`:attention?`${attention} Changes Need Attention`:busy?`Syncing ${count} Changes`:!navigator.onLine||!reachable?'Offline \u2013 Working Locally':count?`${count} Changes Pending Sync`:'';
-        node.querySelector('span').textContent=label;
-        node.style.display=label?'':'none';
-        const dot=node.querySelector('[data-sync-toggle]');dot.dataset.count=String(storageError||blockedReason||attention?Math.max(1,attention||count):count||'');
-        node.querySelector('small').textContent=`Last Synced: ${lastSynced?new Date(lastSynced).toLocaleString():'Not yet'}`;
-        node.title=storageError||blockedReason||'Open pending changes and import recovery';
+        counts={count,attention};render();
       }
-      async function showPending(){
-        const [operations,jobs]=await Promise.all([list('outbox'),list('imports')]);
-        let dialog=document.getElementById('delivery-sync-dialog');
-        if(!dialog){dialog=document.createElement('dialog');dialog.id='delivery-sync-dialog';dialog.className='rounded-xl border border-slate-200 p-5 shadow-xl max-w-lg w-full';document.body.append(dialog);}
-        dialog.replaceChildren();
-        const heading=document.createElement('h3');heading.textContent='Local Changes / Import Recovery';heading.className='font-bold mb-3';dialog.append(heading);
-        for(const item of [...operations,...jobs.filter(job=>!['complete','cancelled'].includes(job.status))]){
-          const line=document.createElement('p');line.className='text-xs border-b py-2 break-words';line.textContent=`${item.table||item.kind}${item.identity||item.name?' ('+(item.identity||item.name)+')':''} - ${item.status}: ${item.lastError||'Waiting for Supabase confirmation'}`;dialog.append(line);
-          if(item.operationId&&item.status==='needs-review'){
-            const details=document.createElement('details'),summary=document.createElement('summary'),content=document.createElement('pre');
-            summary.textContent='Review retained local / server values';content.className='max-h-60 overflow-auto whitespace-pre-wrap break-words text-xs';
-            content.textContent=JSON.stringify({operationId:item.operationId,method:item.method,base:item.base,local:item.payload,server:item.server},null,2);
-            details.append(summary,content);dialog.append(details);
-          }
+      const plural=(n,word)=>`${n} ${word}${n===1?'':'s'}`;
+      function render(){
+        const node=document.getElementById('delivery-sync-status');if(!node)return;
+        const {count,attention}=counts,offlineNow=!navigator.onLine||!reachable,celebrate=Date.now()<celebrateUntil&&summary,needs=Math.max(attention,blockedReason?1:0,syncFailed&&!busy?count:0);
+        let mode='';
+        if(offlineNow)mode='offline';
+        else if(!blockedReason&&!syncFailed&&(session||offlineMode&&count))mode='syncing';
+        else if(celebrate)mode='done';
+        else if(summary)mode='summary';
+        else if(needs)mode='attention';
+        node.style.display=mode?'':'none';node.dataset.mode=mode;
+        if(!mode){lastMode='';return;}
+        if(mode!==lastMode){
+          if(mode==='offline'||mode==='syncing'||mode==='attention'&&!lastMode)node.classList.remove('collapsed');
+          if(mode==='summary')node.classList.add('collapsed');
+          lastMode=mode;
         }
-        if(!dialog.querySelector('p')||blockedReason){const line=document.createElement('p');line.textContent=storageError||blockedReason||'No pending changes.';dialog.append(line);}
-        const retry=document.createElement('button');retry.textContent='Retry Connection';retry.className='mt-4 mr-3 rounded border px-3 py-2';retry.onclick=()=>{blockedReason='';sync().catch(report);};
-        const close=document.createElement('button');close.textContent='Close';close.onclick=()=>dialog.close();dialog.append(retry,close);dialog.showModal();
+        if(mode==='done'){clearTimeout(celebrateTimer);celebrateTimer=setTimeout(render,celebrateUntil-Date.now()+50);}
+        const total=session?.total||count,done=session?.done||0,pct=total?Math.min(100,Math.round(done/total*100)):0;
+        let label='',detail='',meta='',text='',bar=null,badge=0;
+        if(mode==='offline'){label='Working Offline';detail='Your changes are saved on this device.';meta=count?plural(count,'change')+' saved':'';text=count?String(count):'Off';}
+        else if(mode==='syncing'){label='Updating your changes';detail=`${done} of ${total} completed`;meta=`${pct}%`;text=`${pct}%`;bar=pct;badge=Math.max(0,total-done);}
+        else if(mode==='done'){label=summary.failed?`${plural(summary.ok,'change')} updated \u00b7 ${summary.failed} need attention`:`${plural(summary.ok,'change')} updated successfully`;bar=100;text='\u2713';}
+        else if(mode==='summary'){label='Offline update complete';text=needs?'!':'\u2713';badge=needs;}
+        else{label=blockedReason&&!attention?'Please sign in again to update your changes.':`${plural(needs,'change')} need${needs===1?'s':''} attention`;detail='Select to review.';text='!';badge=needs;}
+        node.querySelector('[data-sync-label]').textContent=label;
+        node.querySelector('[data-sync-detail]').textContent=detail;
+        node.querySelector('[data-sync-meta]').textContent=meta;
+        const track=node.querySelector('.sync-track');track.style.visibility=bar==null?'hidden':'';track.firstElementChild.style.width=`${bar??0}%`;
+        const toggle=node.querySelector('[data-sync-toggle]'),pill=toggle.firstElementChild;
+        toggle.dataset.text=text;pill.textContent=badge>99?'99+':String(badge);pill.style.display=badge?'':'none';
+      }
+      const el=(tag,cls,text,parent)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;parent?.append(node);return node;};
+      const btn=(label,cls,onclick,parent)=>{const node=el('button',cls,label,parent);node.type='button';node.onclick=onclick;return node;};
+      const fmt=ts=>{const d=new Date(ts),h=d.getHours()%12||12;return `${String(d.getDate()).padStart(2,'0')}-${d.toLocaleString('en-GB',{month:'short'})}-${d.getFullYear()}, ${h}:${String(d.getMinutes()).padStart(2,'0')} ${d.getHours()<12?'AM':'PM'}`;};
+      const span=ms=>{const m=Math.round(ms/60000);return m<1?'Less than a minute':m<60?`${m} min`:`${Math.floor(m/60)} h ${m%60} min`;};
+      function dialogBox(){
+        let box=document.getElementById('delivery-sync-dialog');
+        if(!box){box=document.createElement('dialog');box.id='delivery-sync-dialog';box.className='rounded-xl border border-slate-200 p-5 shadow-xl max-w-lg w-full';document.body.append(box);}
+        box.replaceChildren();if(!box.open)box.showModal();return box;
+      }
+      const closeBox=()=>document.getElementById('delivery-sync-dialog')?.close();
+      const BTN='rounded border border-slate-300 px-3 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50',PRIMARY='rounded bg-indigo-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-indigo-500';
+      async function updateHistoryItem(opKey,result){
+        for(const row of (await list('meta')).filter(item=>item.kind==='history'&&item.items?.some(entry=>entry.opKey===opKey))){
+          row.items.find(entry=>entry.opKey===opKey).result=result;await put('meta',row);
+        }
+      }
+      async function tryAgain(key){
+        const op=await get('outbox',key);if(!op)return true;
+        if(!op.localApplied||op.method==='POST'&&op.ambiguous)return false;
+        try{
+          if(op.reason!=='rejected'&&op.method!=='POST'){
+            if(op.reason==='changed'&&!confirm('Apply your saved change to the current data?'))return false;
+            const check=new URL(op.url);check.searchParams.set('select','*');
+            for(const name of ['version','updated_at','modified_at','modified_time'])check.searchParams.delete(name);
+            const response=await boundedFetch(check,{headers:await authHeaders()}),row=response.ok?(await response.json())[0]:null;
+            if(row)op.base=clean(row);else if(op.method!=='DELETE')return false;
+          }
+          op.status='pending';op.reason='';op.lastError='';op.historyRecorded=false;await put('outbox',op);
+          await sync();
+        }catch{return false;}
+        return !(await get('outbox',key));
+      }
+      async function keepCurrent(key){
+        const op=await get('outbox',key);
+        if(op){
+          if(session?.owner===op.scope&&!session.items.some(item=>item.opKey===key)){
+            note(op,'attention');session.items[session.items.length-1].result='kept';
+          }
+          await remove('outbox',key);await invalidate(op.table,op.scope);
+          if(!(await list('outbox')).length){blockedReason='';await sync();}
+        }
+      }
+      const humanize=key=>key.replace(/_/g,' ').replace(/^./,letter=>letter.toUpperCase());
+      const show=value=>value==null||value===''?'(blank)':typeof value==='object'?'(details)':String(value).slice(0,80);
+      function reviewText(op){
+        const mine=op.payload&&!Array.isArray(op.payload)?op.payload:{};
+        return Object.keys(mine).filter(key=>!['id','updated_at','modified_at','modified_by','version'].includes(key)&&(!key.endsWith('_id')||key==='request_id')&&(typeof mine[key]!=='object'||mine[key]===null)).map(key=>`${humanize(key)}: your change ${show(mine[key])}${op.server&&Object.hasOwn(op.server,key)?`, current ${show(op.server[key])}`:''}`).join('\n')||'Your offline change is saved on this device.';
+      }
+      async function showDetails(title,items,back){
+        const box=dialogBox();el('h3','font-bold text-lg mb-3',title,box);
+        const list_=el('div','max-h-80 overflow-auto',undefined,box);
+        if(!items.length)el('p','text-sm text-slate-500','No changes to show.',list_);
+        for(const item of items){
+          const row=el('div','border-b py-2 text-sm',undefined,list_);
+          el('p','font-semibold text-slate-800',`${item.module}${item.name?' \u2013 '+item.name:''}`,row);
+          el('p','text-slate-500',item.result==='updated'?`${item.action} successfully`:item.result==='kept'?'Current data kept':'Your offline change could not be updated.',row);
+          const op=item.result==='attention'&&item.opKey?await get('outbox',item.opKey):null;
+          if(!op)continue;
+          const actions=el('div','mt-2 flex flex-wrap gap-2',undefined,row),review=el('pre','hidden mt-2 whitespace-pre-wrap break-words rounded bg-slate-50 p-2 text-xs text-slate-600',reviewText(op),row);
+          if(op.localApplied&&!(op.method==='POST'&&op.ambiguous))btn('Try Again',PRIMARY,async()=>{
+            if(await tryAgain(item.opKey)){item.result='updated';await updateHistoryItem(item.opKey,'updated');window.showToast?.('Your change was updated.','success');}
+            else window.showToast?.('Your change could not be updated yet.','error');
+            status();showDetails(title,items,back);
+          },actions);
+          btn('Review',BTN,()=>review.classList.toggle('hidden'),actions);
+          btn('Keep Current Data',BTN,async()=>{
+            if(!confirm('Keep the current data and discard your offline change?'))return;
+            await keepCurrent(item.opKey);item.result='kept';await updateHistoryItem(item.opKey,'kept');status();showDetails(title,items,back);
+          },actions);
+        }
+        const foot=el('div','mt-4 flex justify-end gap-2',undefined,box);
+        if(back)btn('Back',BTN,back,foot);
+        btn('Close',BTN,closeBox,foot);
+      }
+      function showSummary(s=summary){
+        if(!s)return;
+        const box=dialogBox();el('h3','font-bold text-lg mb-3','Offline Update Summary',box);
+        const grid=el('div','grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm',undefined,box);
+        for(const [name,value] of [['Started',fmt(s.startedAt)],['Completed',fmt(s.completedAt)],['Total changes',s.total],['Successfully updated',s.ok],['Not updated',s.failed],['Data updated',s.modules.join(', ')||'\u2013']]){el('span','text-slate-500',name,grid);el('span','font-semibold text-slate-800',String(value),grid);}
+        const foot=el('div','mt-4 flex justify-end gap-2',undefined,box);
+        btn('View Details',PRIMARY,()=>showDetails('Offline Update Details',s.items,()=>showSummary(s)),foot);
+        btn('Close',BTN,()=>{if(s===summary){summary=null;celebrateUntil=0;status();}closeBox();},foot);
+      }
+      async function showAttention(){
+        const [operations,jobs]=await Promise.all([list('outbox'),list('imports')]);
+        const items=[...operations.filter(op=>op.status==='needs-review'||syncFailed&&op.status==='pending').map(op=>{const p=op.payload&&!Array.isArray(op.payload)?op.payload:{},b=op.base||{};return{module:moduleNames[op.table]||'Data',name:String(p.actions||b.actions||p.milestone_title||b.milestone_title||p.title||b.title||p.track_name||b.track_name||p.program_name||b.program_name||p.request_id||b.request_id||p.name||b.name||''),action:'Updated',result:'attention',opKey:op.key};}),
+          ...jobs.filter(job=>job.status==='needs-review').map(job=>({module:'Import',name:String(job.name||''),action:'Imported',result:'attention'}))];
+        if(blockedReason){
+          const box=dialogBox();el('h3','font-bold text-lg mb-3','Changes that need attention',box);
+          el('p','text-sm text-slate-600','Please sign in again to update your changes.',box);
+          const foot=el('div','mt-4 flex justify-end gap-2',undefined,box);
+          btn('Try Again',PRIMARY,()=>{blockedReason='';closeBox();sync().catch(report);},foot);btn('Close',BTN,closeBox,foot);return;
+        }
+        showDetails('Changes that need attention',items);
+      }
+      async function showHistory(){
+        const box=dialogBox();el('h3','font-bold text-lg mb-3','Sync History',box);
+        const rows=scope?(await list('meta')).filter(row=>row.kind==='history').sort((a,b)=>b.completedAt-a.completedAt):[];
+        const body=el('div','max-h-96 overflow-auto',undefined,box);
+        if(!rows.length)el('p','text-sm text-slate-500','No offline updates yet.',body);
+        for(const row of rows){
+          const item=btn('','block w-full border-b py-2 text-left text-sm hover:bg-slate-50',()=>showDetails(fmt(row.completedAt),row.items,showHistory),body);
+          el('p','font-semibold text-slate-800',fmt(row.completedAt),item);
+          el('p','text-slate-600',`Offline updates: ${row.total} \u00b7 Updated: ${row.ok} \u00b7 Not updated: ${row.failed}`,item);
+          el('p','text-slate-500',`Status: ${row.status} \u00b7 Offline for ${span(row.startedAt-row.offlineAt)}`,item);
+          el('p','text-slate-500',`Data: ${row.modules.join(', ')||'\u2013'}`,item);
+        }
+        btn('Close',BTN+' mt-4 ml-auto block',closeBox,box);
       }
       async function importRequest(url,options,owner){
         const job=activeImport;
@@ -2443,7 +2640,7 @@
             job.error=Object.assign(new Error(text||`Import request failed (${response.status}).`),{needsReview:!transient(response)});
           }
           return response;
-        }catch(error){reachable=false;job.error=error;throw error;}
+        }catch(error){markUnreachable();job.error=error;throw error;}
       }
       async function runImport(kind,file,callback,resumeKey){
         if(activeImport)throw new Error('Another import is already running.');
@@ -2648,16 +2845,21 @@
         }
       }
       document.addEventListener('DOMContentLoaded',()=>{
-        const css=document.createElement('style');css.textContent='#delivery-sync-status{position:fixed;right:8px;bottom:8px;z-index:50;display:flex;align-items:center;justify-content:flex-end;height:44px;max-width:340px;overflow:hidden;border:1px solid #e2e8f0;border-radius:22px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.12);font-size:12px;color:#475569;transition:max-width .2s ease}#delivery-sync-status.collapsed{max-width:44px}#delivery-sync-status [data-sync-open]{flex:0 0 auto;white-space:nowrap;text-align:left;padding:0 6px 0 16px;background:none;border:0;cursor:pointer}#delivery-sync-status [data-sync-toggle]{flex:0 0 42px;width:42px;height:42px;border:0;border-radius:50%;background:none;cursor:pointer;font-size:16px;color:#475569}#delivery-sync-status.collapsed [data-sync-toggle]{background:#f59e0b;color:#fff;font-size:13px;font-weight:700}#delivery-sync-status.collapsed [data-sync-toggle]::after{content:attr(data-count)}#delivery-sync-status:not(.collapsed) [data-sync-toggle]::after{content:"\\203A"}';document.head.append(css);
-        const node=document.createElement('div');node.id='delivery-sync-status';node.style.display='none';node.innerHTML='<button type="button" data-sync-open><span class="block"></span><small class="block text-slate-400">Last Synced: Not yet</small></button><button type="button" data-sync-toggle aria-label="Toggle sync panel"></button>';
-        node.querySelector('[data-sync-open]').onclick=()=>showPending().catch(report);
-        node.querySelector('[data-sync-toggle]').onclick=()=>node.classList.toggle('collapsed');document.body.append(node);
+        const css=document.createElement('style');css.textContent='#delivery-sync-status{position:fixed;right:8px;bottom:8px;z-index:50;display:flex;align-items:flex-end;justify-content:flex-end;min-height:44px;max-width:360px;overflow:hidden;border:1px solid #e2e8f0;border-radius:16px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.12);font-size:12px;color:#475569;transition:max-width .2s ease,border-radius .2s ease}#delivery-sync-status.collapsed{max-width:44px;height:44px;border-radius:22px}#delivery-sync-status [data-sync-open]{flex:0 0 auto;min-width:230px;white-space:nowrap;text-align:left;padding:6px 6px 6px 14px;background:none;border:0;cursor:pointer}#delivery-sync-status [data-sync-toggle]{position:relative;flex:0 0 42px;width:42px;height:42px;margin:1px;border:0;border-radius:50%;background:none;cursor:pointer;font-size:16px;color:#475569}#delivery-sync-status [data-sync-toggle]::after{content:"\\203A"}#delivery-sync-status.collapsed [data-sync-toggle]{background:#4f46e5;color:#fff;font-size:12px;font-weight:700}#delivery-sync-status.collapsed [data-sync-toggle]::after{content:attr(data-text)}#delivery-sync-status.collapsed [data-sync-toggle].spin::before{content:"";position:absolute;inset:4px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:dhsync .8s linear infinite}#delivery-sync-status [data-sync-badge]{position:absolute;top:0;right:0;min-width:16px;height:16px;padding:0 3px;border-radius:8px;background:#dc2626;color:#fff;font-size:10px;line-height:16px;text-align:center}#delivery-sync-status:not(.collapsed) [data-sync-badge]{display:none!important}#delivery-sync-status .sync-track{display:block;height:6px;margin:4px 0;border-radius:3px;background:#e2e8f0;overflow:hidden}#delivery-sync-status .sync-track>i{display:block;height:100%;width:0;background:#4f46e5;transition:width .15s linear}#delivery-sync-status .sync-track.ind>i{width:40%!important;animation:dhind 1.1s ease-in-out infinite}@keyframes dhsync{to{transform:rotate(360deg)}}@keyframes dhind{0%{margin-left:-40%}100%{margin-left:100%}}';document.head.append(css);
+        const node=document.createElement('div');node.id='delivery-sync-status';node.style.display='none';node.innerHTML='<button type="button" data-sync-open><span class="block font-semibold" data-sync-label></span><small class="block text-slate-500" data-sync-detail></small><span class="sync-track"><i></i></span><small class="block text-slate-400" data-sync-meta></small></button><button type="button" data-sync-toggle aria-label="Toggle sync panel"><b data-sync-badge></b></button>';
+        css.textContent+='#delivery-sync-status{max-width:min(360px,calc(100vw - 16px))}#delivery-sync-status [data-sync-open]{flex:0 0 min(300px,calc(100vw - 64px));width:min(300px,calc(100vw - 64px));min-width:0;white-space:normal;overflow-wrap:anywhere}#delivery-sync-dialog{max-height:calc(100vh - 32px);max-width:calc(100vw - 24px);width:512px;overflow:auto}#delivery-sync-dialog::backdrop{background:rgba(15,23,42,.35)}@media(prefers-reduced-motion:reduce){#delivery-sync-status,#delivery-sync-status .sync-track>i{transition:none}}';
+        node.querySelector('[data-sync-open]').onclick=()=>{const mode=node.dataset.mode;if(mode==='attention')showAttention().catch(report);else if(mode==='done'||mode==='summary')showSummary();};
+        node.querySelector('[data-sync-toggle]').onclick=()=>{
+          const mode=node.dataset.mode;
+          if(node.classList.contains('collapsed')&&(mode==='attention'||mode==='done'||mode==='summary')){if(mode==='attention')showAttention().catch(report);else showSummary();return;}
+          node.classList.toggle('collapsed');
+        };document.body.append(node);
         open().then(status).catch(report);
         excelSource().catch(error=>console.warn('Offline Excel parser is not cached yet:',error.message));
       });
-      window.addEventListener('online',()=>{reachable=true;schedule(300);status();});
-      window.addEventListener('offline',()=>{reachable=false;status();});
-      return {fetch:fetchRequest,get,put,list,remove,scoped,readSnapshot,saveSnapshot,localRows,runImport,prepared,readWorkbook,parseSupportFile,forEachChunked,confirmImport,importQuery,importFailed,cleanup,status,sync,setScope,yieldUi,invalidate,get scope(){return scope;},get reachable(){return reachable;},get activeImport(){return activeImport;},report};
+      window.addEventListener('online',()=>{probe().then(()=>status());});
+      window.addEventListener('offline',()=>{offlineMode=true;setReachable(false);status();});
+      return {fetch:fetchRequest,get,put,list,remove,scoped,readSnapshot,saveSnapshot,localRows,runImport,prepared,readWorkbook,parseSupportFile,forEachChunked,confirmImport,importQuery,importFailed,cleanup,status,sync,setScope,yieldUi,invalidate,progress,probe,showHistory,get scope(){return scope;},get reachable(){return reachable;},get activeImport(){return activeImport;},report};
     })();
     </script>
     <script>
@@ -18832,6 +19034,13 @@
     supportAnalyticsSnapshot=null;
     window.clearSupportTicketPageCache?.();
   }
+  let supportWarnedAt=0;
+  function supportRefreshWarning(error){
+    console.warn('Support dataset refresh deferred:',error);
+    if(Date.now()-supportWarnedAt<60000)return;
+    supportWarnedAt=Date.now();
+    showToast('Support Tickets could not be refreshed. Showing cached data.','info');
+  }
   async function loadSupportTicketRows(headers=supportTicketAnalyticsFields,refresh=false){
     const account=supportTicketReadAccount();
     if(supportTicketReadCache.account!==account){invalidateSupportTicketReads();supportTicketReadCache.account=account;}
@@ -18846,7 +19055,7 @@
     }
     if(!refresh&&supportTicketReadCache.rows&&headers.every(header=>supportTicketReadCache.headers.has(header))){
       if(Date.now()-supportTicketReadCache.loadedAt>=300000&&navigator.onLine&&offline?.reachable&&!supportTicketReadCache.pending){
-        setTimeout(()=>loadSupportTicketRows(headers,true).catch(error=>console.warn('Support dataset refresh deferred:',error)),0);
+        setTimeout(()=>loadSupportTicketRows(headers,true).catch(supportRefreshWarning),0);
       }
       return offline.localRows('support_tickets',supportTicketReadCache.rows);
     }
@@ -18866,26 +19075,23 @@
       const dateIndexes=dateHeaders.map(header=>sample?.source_cells?.cells?.findIndex(cell=>fieldKey(cell.header)===fieldKey(header))??-1);
       const compactDates=dateIndexes.every(index=>index>=0);
       const columns=[...new Set(['request_id','version',...selectedHeaders.map(header=>mapping[header])])].join(',')+(!compactDates?',source_cells':','+dateIndexes.map((index,offset)=>`date_cell_${offset}:source_cells->cells->${index}`).join(',')+',date_1904:source_cells->date1904');
-      let pageSize=1000;
-      const first=await supabaseClient.from('support_tickets').select(columns,{count:'exact'}).order('request_id',{ascending:true}).range(0,pageSize-1);
-      if(first.error)throw first.error;
-      if(!Array.isArray(first.data)||!Number.isFinite(first.count))throw new Error('Support Ticket data did not include the requested row count.');
-      if(first.count&&!first.data.length)throw new Error('Support Ticket data did not include the requested first page.');
-      if(first.data.length)pageSize=first.data.length;
-      const pages=[first.data],total=first.count;
-      let next=first.data.length;
-      async function readPages(){
-        while(next<total){
-          const from=next;next+=pageSize;
-          const result=await supabaseClient.from('support_tickets').select(columns).order('request_id',{ascending:true}).range(from,from+pageSize-1);
-          if(result.error)throw result.error;
-          if(!Array.isArray(result.data)||!result.data.length)throw new Error('Support Ticket data changed during loading. Refresh tickets to retry.');
-          pages[Math.floor(from/pageSize)]=result.data;
-        }
+      const label=supportTicketReadCache.rows?'Refreshing Support Tickets':'Loading Support Tickets';
+      // Planned count is only a progress estimate; keyset paging avoids exact counts and deep OFFSET scans that hit statement timeout.
+      const estimate=await supabaseClient.from('support_tickets').select('request_id',{count:'planned',head:true}).abortSignal(AbortSignal.timeout(10000));
+      const total=estimate.error?0:estimate.count||0,rows=[];
+      let last=null;
+      offline.progress.set('support',label,0,total);
+      for(;;){
+        let query=supabaseClient.from('support_tickets').select(columns).order('request_id',{ascending:true}).limit(1000);
+        if(last!==null)query=query.gt('request_id',last);
+        const result=await query.abortSignal(AbortSignal.timeout(20000));
+        if(result.error)throw result.error;
+        if(!Array.isArray(result.data)||!result.data.length)break;
+        for(const row of result.data)rows.push(row);
+        last=result.data[result.data.length-1].request_id;
+        offline.progress.set('support',label,rows.length,total);
+        await offline.yieldUi();
       }
-      await Promise.all(Array.from({length:8},()=>readPages()));
-      const rows=pages.flat();
-      if(rows.length!==total)throw new Error('Support Ticket row count changed during loading. Refresh tickets to retry.');
       for(let index=0;index<rows.length;index++){
         const row=rows[index];row.fields=Object.fromEntries(selectedHeaders.map(header=>[header,row[mapping[header]]??'']));
         for(const header of selectedHeaders)if(mapping[header]!=='request_id')delete row[mapping[header]];
@@ -18927,7 +19133,7 @@
       return rows;
     })();
     supportTicketReadCache.pending=pending;
-    try{return await pending;}finally{if(supportTicketReadCache.pending===pending)supportTicketReadCache.pending=null;}
+    try{return await pending;}finally{offline.progress.end('support');if(supportTicketReadCache.pending===pending)supportTicketReadCache.pending=null;}
   }
   function supportAnalyticsRaw(record,field){
     return window.supportTickets?.value?window.supportTickets.value(record,field):String(record?.fields?.[field]??'');
@@ -19026,7 +19232,7 @@
     if(!canvas||!label)return;
     const entries=supportAnalyticsEntries(type);
     if(!entries.length){
-      label.textContent=supportAnalyticsLoading?'Loading Support Ticket data…':supportAnalyticsLoadError?`Unable to load Support Ticket data: ${supportAnalyticsLoadError}`:supportAnalyticsSnapshot?.tickets.length?'No matching tickets at this hierarchy level.':'No ticket data available.';
+      label.textContent=supportAnalyticsLoading?'Loading Support Ticket data…':supportAnalyticsLoadError?'Support Ticket data is not available yet.':supportAnalyticsSnapshot?.tickets.length?'No matching tickets at this hierarchy level.':'No ticket data available.';
       canvas.classList.add('hidden');return;
     }
     canvas.classList.remove('hidden');
@@ -19079,7 +19285,8 @@
       }catch(error){
         const message=String(error?.message||error||'Unable to load Support Ticket analytics.');
         supportAnalyticsLoadError=message;
-        if(status)status.textContent=`Unable to load Support Ticket analytics: ${message}`;
+        if(status)status.textContent='Support Ticket data is unavailable. Showing cached data when available.';
+        supportRefreshWarning(error);
         console.error('Support Ticket analytics could not be loaded:',error);
       }finally{
         supportAnalyticsLoading=false;
@@ -22506,6 +22713,8 @@
     function findRecord(mid){for(const project of (projects||[])){const milestone=(project.milestones||[]).find(m=>Number(m.id)===Number(mid));if(milestone)return {project,milestone};}return {project:null,milestone:null};}
     function effective(m){if(hasMilestoneCompletion(m))return 'Done';const stored=String(m?.status||'').trim();if(stored==='Critical')return 'Critical';if(stored==='On Hold'||stored==='On-Hold')return 'On-Hold';return originalEffectiveStatus(m);}
     window.getEffectiveMilestoneStatus=effective;
+    // Clearing the stored hold lets the existing status logic recompute the status.
+    window.resumedMilestoneStatus=m=>originalEffectiveStatus({...m,status:'',persistedStatus:'',rawStatus:''});
     function isInteractive(target){return Boolean(target.closest('a,button,input,select,textarea,label,[contenteditable="true"],[role="button"]'));}
     function state(){return {x:window.scrollX,y:window.scrollY,activeDailyTaskBucket:window.activeDailyTaskBucket,dailyCurrentPage:window.dailyCurrentPage,dailySortField:window.dailySortField,dailySortDirection:window.dailySortDirection};}
     function restore(snapshot){requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo(snapshot.x,snapshot.y)));}
@@ -22522,6 +22731,7 @@
       if(!done)actions.push(`<button type="button" class="daily-milestone-action-button" data-action="complete"><i data-lucide="check-circle" class="text-emerald-600"></i><span>Complete / Close Milestone</span></button>`);
       if(!done)actions.push(`<button type="button" class="daily-milestone-action-button" data-action="deviate"><i data-lucide="git-branch" class="text-rose-600"></i><span>Mark as Deviated</span></button>`);
       if(!done&&!hold)actions.push(`<button type="button" class="daily-milestone-action-button" data-action="hold"><i data-lucide="pause-circle" class="text-slate-600"></i><span>Put On Hold</span></button>`);
+      if(!done&&hold)actions.push(`<button type="button" class="daily-milestone-action-button" data-action="resume"><i data-lucide="play-circle" class="text-emerald-600"></i><span>Resume Milestone</span></button>`);
       if(!done&&!critical)actions.push(`<button type="button" class="daily-milestone-action-button" data-action="critical"><i data-lucide="alert-triangle" class="text-red-800"></i><span>Mark as Critical</span></button>`);
       if(typeof openMilestoneRevisionHistory==='function'&&getMilestoneTotalOverallDeviation?.(milestone)>0)actions.push(`<button type="button" class="daily-milestone-action-button" data-action="history"><i data-lucide="history"></i><span>Revision History</span></button>`);
       const modal=document.getElementById('daily-milestone-action-modal');document.getElementById('daily-milestone-action-context').textContent=`${milestone.actions||milestone.title||'Milestone'} · ${status}`;document.getElementById('daily-milestone-action-list').innerHTML=actions.join('')||'<p class="text-sm text-slate-500">No status actions are available.</p>';
@@ -22535,9 +22745,9 @@
     window.completeDailyMilestoneWithNext=function(){if(!actionContext)return;const {milestone}=actionContext;closeDailyMilestoneCompleteChoice();return originalDailyStart.call(window,milestone.id);};
     window.confirmDailyMilestoneCloseOnly=async function(event){event.preventDefault();if(statusSaveBusy||!actionContext)return;const {project,milestone,snapshot}=actionContext;if(!canAct(project,milestone))return showToast('Permission denied.','error');const completionDate=document.getElementById('daily-milestone-close-only-date').value;if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)||completionDate>localToday())return showToast('Enter a valid Actual End Date.','error');const button=document.getElementById('daily-milestone-close-only-confirm'),cancel=document.getElementById('daily-milestone-close-only-cancel'),end=milestone.deadline||milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);statusSaveBusy=true;button.disabled=true;cancel.disabled=true;button.textContent='Saving...';try{const {data,error}=await supabaseClient.from('milestones').update({completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,milestone.startDate,completionDate)||null}).eq('id',Number(milestone.id)).select().single();if(error)throw error;if(!data)throw new Error('Supabase did not return the updated Milestone.');await loadInitiativesFromSupabase();if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();restore(snapshot);showToast('Milestone closed and Actual End Date updated.','success');statusSaveBusy=false;closeDailyMilestoneCloseOnly();}catch(error){console.error('Daily Tracker Milestone close failed:',error);showToast(error?.message||'Milestone close failed.','error');statusSaveBusy=false;button.disabled=false;cancel.disabled=false;button.textContent='Close Milestone';}};
     document.getElementById('daily-milestone-action-list').addEventListener('click',function(e){const button=e.target.closest('[data-action]');if(!button||!actionContext)return;const {project,milestone}=actionContext,action=button.dataset.action;closeDailyMilestoneActionMenu();if(action==='complete')return openDailyMilestoneCompleteChoice();if(action==='deviate')return openMilestoneDeviationModal(project.id,milestone.id);if(action==='history')return openMilestoneRevisionHistory(project.id,milestone.id);openDailyMilestoneStatusModal(action);});
-    window.openDailyMilestoneStatusModal=function(action){if(!actionContext)return;const {milestone}=actionContext,newStatus=action==='hold'?'On-Hold':'Critical',modal=document.getElementById('daily-milestone-status-modal');modal.dataset.status=newStatus;document.getElementById('daily-status-milestone').textContent=milestone.actions||milestone.title||'-';document.getElementById('daily-status-current').textContent=effective(milestone);document.getElementById('daily-status-new').textContent=newStatus==='On-Hold'?'On Hold':'Critical';modal.classList.remove('hidden');modal.classList.add('flex');document.getElementById('daily-status-confirm').focus();};
+    window.openDailyMilestoneStatusModal=function(action){if(!actionContext)return;const {milestone}=actionContext,newStatus=action==='hold'?'On-Hold':action==='resume'?resumedMilestoneStatus(milestone):'Critical',modal=document.getElementById('daily-milestone-status-modal');modal.dataset.status=newStatus;modal.dataset.resume=action==='resume'?'1':'';document.getElementById('daily-status-milestone').textContent=milestone.actions||milestone.title||'-';document.getElementById('daily-status-current').textContent=effective(milestone);document.getElementById('daily-status-new').textContent=newStatus==='On-Hold'?'On Hold':newStatus;modal.classList.remove('hidden');modal.classList.add('flex');document.getElementById('daily-status-confirm').focus();};
     window.closeDailyMilestoneStatusModal=function(){if(statusSaveBusy)return;const modal=document.getElementById('daily-milestone-status-modal');modal.classList.add('hidden');modal.classList.remove('flex');originRow?.focus?.();};
-    window.confirmDailyMilestoneStatus=async function(event){event.preventDefault();if(statusSaveBusy||!actionContext)return;const {project,milestone,snapshot}=actionContext;if(!canAct(project,milestone))return showToast('Permission denied.','error');const status=document.getElementById('daily-milestone-status-modal').dataset.status;if(status===effective(milestone))return showToast('Milestone already has this status.','error');const button=document.getElementById('daily-status-confirm'),cancel=document.getElementById('daily-status-cancel');statusSaveBusy=true;button.disabled=true;cancel.disabled=true;button.textContent='Saving...';try{const {data,error}=await supabaseClient.from('milestones').update({status}).eq('id',Number(milestone.id)).select().single();if(error)throw error;if(!data)throw new Error('Supabase did not return the updated Milestone.');await loadInitiativesFromSupabase();if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();restore(snapshot);showToast(`Milestone marked ${status==='On-Hold'?'On Hold':'Critical'}.`,'success');statusSaveBusy=false;closeDailyMilestoneStatusModal();}catch(error){console.error('Daily Tracker Milestone status update failed:',error);showToast(error?.message||'Milestone update failed.','error');statusSaveBusy=false;button.disabled=false;cancel.disabled=false;button.textContent='Confirm';}};
+    window.confirmDailyMilestoneStatus=async function(event){event.preventDefault();if(statusSaveBusy||!actionContext)return;const {project,milestone,snapshot}=actionContext;if(!canAct(project,milestone))return showToast('Permission denied.','error');const status=document.getElementById('daily-milestone-status-modal').dataset.status;if(status===effective(milestone))return showToast('Milestone already has this status.','error');const button=document.getElementById('daily-status-confirm'),cancel=document.getElementById('daily-status-cancel');statusSaveBusy=true;button.disabled=true;cancel.disabled=true;button.textContent='Saving...';try{const {data,error}=await supabaseClient.from('milestones').update({status}).eq('id',Number(milestone.id)).select().single();if(error)throw error;if(!data)throw new Error('Supabase did not return the updated Milestone.');await loadInitiativesFromSupabase();if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();restore(snapshot);showToast(document.getElementById('daily-milestone-status-modal').dataset.resume?`Milestone resumed. Status: ${status}.`:`Milestone marked ${status==='On-Hold'?'On Hold':'Critical'}.`,'success');statusSaveBusy=false;closeDailyMilestoneStatusModal();}catch(error){console.error('Daily Tracker Milestone status update failed:',error);showToast(error?.message||'Milestone update failed.','error');statusSaveBusy=false;button.disabled=false;cancel.disabled=false;button.textContent='Confirm';}};
     document.addEventListener('dblclick',function(e){const row=e.target.closest('#workspace-flat-page tr');if(currentWorkspaceView!=='daily'||!row||isInteractive(e.target))return;const raw=row.getAttribute('ondblclick')||'',match=raw.match(/startDailyTrackerEdit\((\d+)\)/);if(!match)return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation();row.tabIndex=-1;openDailyMilestoneActionMenu(Number(match[1]),row);},true);
     document.addEventListener('keydown',function(e){if(e.key!=='Escape'||statusSaveBusy)return;const action=document.getElementById('daily-milestone-action-modal'),status=document.getElementById('daily-milestone-status-modal');if(action.classList.contains('flex')){e.preventDefault();closeDailyMilestoneActionMenu();}else if(document.getElementById('daily-milestone-close-only-modal').classList.contains('flex')){e.preventDefault();closeDailyMilestoneCloseOnly();}else if(status.classList.contains('flex')){e.preventDefault();closeDailyMilestoneStatusModal();}},true);
   })();
@@ -22594,7 +22804,7 @@
   function userOptions(selected){const names=[...new Set((userMaster||[]).filter(u=>u&&u.name&&u.status!=='Inactive').map(u=>u.name))];if(selected&&!names.includes(selected))names.unshift(selected);return '<option value="">'+(state.multi?'Mixed Values / No Change':'-- Select User --')+'</option>'+names.map(name=>{const user=(userMaster||[]).find(u=>u.name===name),label=user?.department?`${name} [${user.department}]`:name;return `<option value="${escapeHtml(name)}"${name===selected?' selected':''}>${escapeHtml(label)}</option>`;}).join('');}
   function statuses(){const values=['Pending','WIP','In-Queue','On-Hold','Deviated','Critical','Done'];return '<option value="">'+(state.multi?'Mixed Values / No Change':'-- Select Status --')+'</option>'+values.map(v=>`<option value="${v}">${v==='On-Hold'?'On Hold':v}</option>`).join('');}
   function appendChangeActions(){const list=document.getElementById('daily-milestone-action-list');if(!list)return;list.insertAdjacentHTML('beforeend',`<button type="button" class="daily-milestone-action-button" data-action="change-status"><i data-lucide="refresh-cw" class="text-indigo-600"></i><span>Change Status</span></button><button type="button" class="daily-milestone-action-button" data-action="change-owner"><i data-lucide="user-round" class="text-indigo-600"></i><span>Change Milestone Owner</span></button><button type="button" class="daily-milestone-action-button" data-action="change-dependency"><i data-lucide="users-round" class="text-indigo-600"></i><span>Change Dependency</span></button><button type="button" class="daily-milestone-action-button" data-action="change-start"><i data-lucide="calendar-days" class="text-indigo-600"></i><span>Change Start Date</span></button><button type="button" class="daily-milestone-action-button" data-action="change-planner-type"><i data-lucide="list-tree" class="text-indigo-600"></i><span>Change Milestone Planner Type</span></button><div id="daily-action-change-editor" class="daily-change-editor hidden"></div>`);lucide.createIcons();}
-  function showMenu(){const modal=document.getElementById('daily-milestone-action-modal');document.getElementById('daily-milestone-action-context').textContent=state.multi?`${state.rows.length} Milestones selected`: `${state.rows[0].milestone.actions||state.rows[0].milestone.title||'Milestone'} · ${getEffectiveMilestoneStatus(state.rows[0].milestone)}`;const actions=[];const open=state.rows.filter(r=>getEffectiveMilestoneStatus(r.milestone)!=='Done');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="complete"><i data-lucide="check-circle" class="text-emerald-600"></i><span>Complete / Close Milestone</span></button>');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="deviate"><i data-lucide="git-branch" class="text-rose-600"></i><span>Mark as Deviated</span></button>');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="hold"><i data-lucide="pause-circle" class="text-slate-600"></i><span>Put On Hold</span></button><button type="button" class="daily-milestone-action-button" data-action="critical"><i data-lucide="alert-triangle" class="text-red-800"></i><span>Mark as Critical</span></button>');if(!state.multi&&typeof openMilestoneRevisionHistory==='function'&&getMilestoneTotalOverallDeviation?.(state.rows[0].milestone)>0)actions.push('<button type="button" class="daily-milestone-action-button" data-action="history"><i data-lucide="history"></i><span>Revision History</span></button>');document.getElementById('daily-milestone-action-list').innerHTML=actions.join('');appendChangeActions();modal.classList.remove('hidden');modal.classList.add('flex');modal.querySelector('[data-action]')?.focus();lucide.createIcons();}
+  function showMenu(){const modal=document.getElementById('daily-milestone-action-modal');document.getElementById('daily-milestone-action-context').textContent=state.multi?`${state.rows.length} Milestones selected`: `${state.rows[0].milestone.actions||state.rows[0].milestone.title||'Milestone'} · ${getEffectiveMilestoneStatus(state.rows[0].milestone)}`;const actions=[];const open=state.rows.filter(r=>getEffectiveMilestoneStatus(r.milestone)!=='Done');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="complete"><i data-lucide="check-circle" class="text-emerald-600"></i><span>Complete / Close Milestone</span></button>');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="deviate"><i data-lucide="git-branch" class="text-rose-600"></i><span>Mark as Deviated</span></button>');if(open.length)actions.push('<button type="button" class="daily-milestone-action-button" data-action="hold"><i data-lucide="pause-circle" class="text-slate-600"></i><span>Put On Hold</span></button><button type="button" class="daily-milestone-action-button" data-action="critical"><i data-lucide="alert-triangle" class="text-red-800"></i><span>Mark as Critical</span></button>');if(open.some(r=>getEffectiveMilestoneStatus(r.milestone)==='On-Hold'))actions.push('<button type="button" class="daily-milestone-action-button" data-action="resume"><i data-lucide="play-circle" class="text-emerald-600"></i><span>Resume Milestone</span></button>');if(!state.multi&&typeof openMilestoneRevisionHistory==='function'&&getMilestoneTotalOverallDeviation?.(state.rows[0].milestone)>0)actions.push('<button type="button" class="daily-milestone-action-button" data-action="history"><i data-lucide="history"></i><span>Revision History</span></button>');document.getElementById('daily-milestone-action-list').innerHTML=actions.join('');appendChangeActions();modal.classList.remove('hidden');modal.classList.add('flex');modal.querySelector('[data-action]')?.focus();lucide.createIcons();}
   function openRows(ids,origin){const rows=findRows([...new Set(ids.map(Number))]);if(!rows.length)return showToast('Select at least one Milestone.','error');state.rows=rows;state.multi=rows.length>1;state.origin=origin||document.activeElement;state.snapshot={x:scrollX,y:scrollY};state.viewState=captureDeliveryViewState(state.origin);state.viewState.milestoneId=rows[0].milestone.id;if(!canUpdate())return showToast('One or more selected Milestones cannot be updated.','error');if(!state.multi){baseOpen(Number(rows[0].milestone.id),origin);appendChangeActions();return;}showMenu();}
   window.openDailyMilestoneActionMenu=function(id,row){openRows([id],row);};
   window.startDailyTrackerEdit=function(id){openRows([id],document.activeElement);};
@@ -22630,7 +22840,7 @@
       showToast(`${updated} Milestone${updated===1?'':'s'} updated.`,'success');
     }catch(error){console.error('Daily Tracker Milestone change failed:',error);showToast(error?.message||'Milestone update failed.','error');save.disabled=false;save.textContent='Apply Change';}finally{state.busy=false;}
   }
-  async function applyMultiWorkflow(action){if(state.busy)return;const active=state.rows.filter(r=>getEffectiveMilestoneStatus(r.milestone)!=='Done');if(!active.length)return showToast('No eligible selected Milestones.','error');let completionDate='';if(action==='complete'){completionDate=prompt('Completion Date (YYYY-MM-DD)',localToday())||'';if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)||completionDate>localToday())return showToast('Enter a valid Completion Date.','error');}if(!confirm(`${action==='complete'?'Complete':action==='hold'?'Put On Hold':'Mark as Critical'} ${active.length} selected Milestone${active.length===1?'':'s'}?`))return;state.busy=true;try{for(const row of active){let patch;if(action==='complete'){const end=row.milestone.deadline||row.milestone.endDate||calculateMilestoneEndDate(row.milestone.days,row.milestone.startDate);patch={completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,row.milestone.startDate,completionDate)||null};}else patch={status:action==='hold'?'On-Hold':'Critical'};const {data:updatedMilestone,error}=await supabaseClient.from('milestones').update(patch).eq('id',row.milestone.id).select('id,status,completion_date,deviation_days').single();if(error)throw error;if(!updatedMilestone||String(updatedMilestone.id)!==String(row.milestone.id))throw new Error(`Supabase did not confirm the update for Milestone ${row.milestone.id}.`);if(action==='hold'&&String(updatedMilestone.status||'').trim()!=='On-Hold')throw new Error(`Milestone ${row.milestone.id} was not saved as On-Hold in Supabase.`);Object.assign(row.milestone,{status:updatedMilestone.status,completionDate:updatedMilestone.completion_date,deviationDays:updatedMilestone.deviation_days});}await loadInitiativesFromSupabase();resetDailyMultiSelectAfterSuccess();document.getElementById('daily-milestone-action-modal').classList.add('hidden');if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));showToast(`${active.length} Milestone${active.length===1?'':'s'} updated.`,'success');}catch(error){console.error('Daily Tracker Milestone action failed:',error);showToast(error?.message||'Milestone action failed.','error');}finally{state.busy=false;}}
+  async function applyMultiWorkflow(action){if(state.busy)return;const active=state.rows.filter(r=>{const current=getEffectiveMilestoneStatus(r.milestone);return action==='resume'?current==='On-Hold':current!=='Done';});if(!active.length)return showToast('No eligible selected Milestones.','error');let completionDate='';if(action==='complete'){completionDate=prompt('Completion Date (YYYY-MM-DD)',localToday())||'';if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)||completionDate>localToday())return showToast('Enter a valid Completion Date.','error');}if(!confirm(`${action==='complete'?'Complete':action==='hold'?'Put On Hold':action==='resume'?'Resume':'Mark as Critical'} ${active.length} selected Milestone${active.length===1?'':'s'}?`))return;state.busy=true;try{for(const row of active){let patch;if(action==='complete'){const end=row.milestone.deadline||row.milestone.endDate||calculateMilestoneEndDate(row.milestone.days,row.milestone.startDate);patch={completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,row.milestone.startDate,completionDate)||null};}else patch={status:action==='hold'?'On-Hold':action==='resume'?window.resumedMilestoneStatus(row.milestone):'Critical'};const {data:updatedMilestone,error}=await supabaseClient.from('milestones').update(patch).eq('id',row.milestone.id).select('id,status,completion_date,deviation_days').single();if(error)throw error;if(!updatedMilestone||String(updatedMilestone.id)!==String(row.milestone.id))throw new Error(`Supabase did not confirm the update for Milestone ${row.milestone.id}.`);if(action==='hold'&&String(updatedMilestone.status||'').trim()!=='On-Hold')throw new Error(`Milestone ${row.milestone.id} was not saved as On-Hold in Supabase.`);Object.assign(row.milestone,{status:updatedMilestone.status,completionDate:updatedMilestone.completion_date,deviationDays:updatedMilestone.deviation_days});}await loadInitiativesFromSupabase();resetDailyMultiSelectAfterSuccess();document.getElementById('daily-milestone-action-modal').classList.add('hidden');if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));showToast(`${active.length} Milestone${active.length===1?'':'s'} updated.`,'success');}catch(error){console.error('Daily Tracker Milestone action failed:',error);showToast(error?.message||'Milestone action failed.','error');}finally{state.busy=false;}}
   let multiDeviationQueue=[],multiDeviationActive=false;
   function showBulkProgress(title,total){const modal=document.getElementById('bulk-operation-progress-modal');document.getElementById('bulk-operation-progress-title').textContent=title;document.getElementById('bulk-operation-progress-detail').textContent=`Preparing ${total} selected Milestone${total===1?'':'s'}...`;document.getElementById('bulk-operation-progress-bar').style.width='0%';document.getElementById('bulk-operation-progress-count').textContent=`0 of ${total}`;modal.classList.remove('hidden');modal.classList.add('flex');}
   function updateBulkProgress(done,total,label){const pct=total?Math.round((done/total)*100):100;document.getElementById('bulk-operation-progress-bar').style.width=`${pct}%`;document.getElementById('bulk-operation-progress-count').textContent=`${done} of ${total}`;document.getElementById('bulk-operation-progress-detail').textContent=label||`Updating selected Milestones... ${pct}%`;}
@@ -22670,7 +22880,7 @@
   }
   window.saveMilestoneDeviation=async function(event){if(!multiDeviationActive)return sharedSaveMilestoneDeviation.call(this,event);event.preventDefault();const button=document.getElementById('save-deviation-btn'),values={newStart:document.getElementById('deviation-new-start').value,newDays:document.getElementById('deviation-new-days').value,dependency:document.getElementById('deviation-dependency').value.trim(),remarks:document.getElementById('deviation-remarks').value.trim()};if(!values.newStart||!normalizeMilestoneDays(values.newDays)){return showToast('Enter a valid Start Date and positive Days.','error');}button.disabled=true;multiDeviationActive=false;closeMilestoneDeviationModal();showBulkProgress('Applying Milestone Deviation',multiDeviationQueue.length);let updated=0;try{for(const row of multiDeviationQueue){await saveOneBulkDeviation(row,values);updated+=1;updateBulkProgress(updated,multiDeviationQueue.length,`Applied deviation to ${updated} of ${multiDeviationQueue.length} selected Milestones.`);}await loadInitiativesFromSupabase();resetDailyMultiSelectAfterSuccess();if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();updateBulkProgress(multiDeviationQueue.length,multiDeviationQueue.length,'All selected Milestones updated successfully.');setTimeout(hideBulkProgress,450);requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));showToast(`Deviation applied to ${updated} selected Milestone${updated===1?'':'s'}.`,'success');}catch(error){console.error('Multi Select deviation failed:',error);hideBulkProgress();showToast(`Updated ${updated} of ${multiDeviationQueue.length}. ${error?.message||'Unable to complete the bulk deviation update.'}`,'error');requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));}finally{button.disabled=false;multiDeviationQueue=[];}};
   document.getElementById('milestone-deviation-modal').addEventListener('click',function(event){if(multiDeviationActive&&event.target.closest('button[onclick="closeMilestoneDeviationModal()"]')){multiDeviationActive=false;multiDeviationQueue=[];requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));}},true);
-  document.getElementById('daily-milestone-action-list').addEventListener('click',function(e){const button=e.target.closest('[data-action]');if(!button)return;const action=button.dataset.action;if(action.startsWith('change-')){e.preventDefault();e.stopImmediatePropagation();editor(action);return;}if(!state.multi)return;if(action==='deviate'){e.preventDefault();e.stopImmediatePropagation();startMultiDeviation();return;}if(['complete','hold','critical'].includes(action)){e.preventDefault();e.stopImmediatePropagation();applyMultiWorkflow(action);}},true);
+  document.getElementById('daily-milestone-action-list').addEventListener('click',function(e){const button=e.target.closest('[data-action]');if(!button)return;const action=button.dataset.action;if(action.startsWith('change-')){e.preventDefault();e.stopImmediatePropagation();editor(action);return;}if(!state.multi)return;if(action==='deviate'){e.preventDefault();e.stopImmediatePropagation();startMultiDeviation();return;}if(['complete','hold','critical','resume'].includes(action)){e.preventDefault();e.stopImmediatePropagation();applyMultiWorkflow(action);}},true);
   document.getElementById('daily-milestone-action-modal').addEventListener('click',function(e){if(e.target.closest('[data-change-save]'))applyChange();if(e.target.closest('[data-change-cancel]'))document.getElementById('daily-action-change-editor').classList.add('hidden');});
   })();
   </script>
@@ -27604,30 +27814,13 @@
             if(generation===pageGeneration&&owner===account()){if(result.data?.options)metadata=result.data.options;remember(key,result);}
             return result;
           }
-          const response=await originalFrom('support_tickets').select('*',{count:'exact'})
+          const response=await originalFrom('support_tickets').select('*',{count:'estimated'})
             .order('normalized_request_id',{ascending:args.p_direction>=0}).order('request_id',{ascending:true})
             .range(args.p_offset,args.p_offset+args.p_limit-1).abortSignal(controller.signal);
           if(response.error)return response;
           const result={data:{records:response.data,total:response.count,groups:[],group_total:0,metrics:{total:response.count,open:'...',closed:'...',high:'...',unassigned:'...',average_age:null},options:metadata},error:null};
           if(generation===pageGeneration&&owner===account()){
             remember(key,result);
-            setTimeout(async()=>{
-              try{
-                const complete=await originalRpc(name,{...args,p_metadata:includeMetadata},options).abortSignal(controller.signal);
-                if(generation!==pageGeneration||owner!==account())return;
-                if(complete.error)throw complete.error;
-                if(complete.data?.options)metadata=complete.data.options;
-                remember(key,complete);
-                const state=matchingState(args);
-                if(state){state.metrics=complete.data.metrics;state.options=metadata||state.options;if(currentWorkspaceView==='support')window.supportTickets.render();}
-              }catch(error){
-                if(controller.signal.aborted)return;
-                if(generation===pageGeneration&&owner===account()){
-                  console.error('Support Ticket summary could not be refreshed:',error);
-                  if(currentWorkspaceView==='support')showToast(`Tickets loaded, but summary refresh failed: ${error.message||error}`,'error');
-                }
-              }
-            },0);
           }
           return result;
         })();
@@ -27919,6 +28112,7 @@
       catch(error){offline.report(error);if(!navigator.onLine)throw error;return null;}
       if(!cached)return null;
       supportTicketReadCache.account=supportTicketReadAccount();supportTicketReadCache.rows=cached.rows;supportTicketReadCache.headers=new Set(cached.headers);supportTicketReadCache.loadedAt=cached.at;
+      ensureSupportRealtime();
       return offline.localRows('support_tickets',cached.rows);
     }
     async function sortedRows(rows,compare,signal){
@@ -28028,17 +28222,62 @@
       clearTimeout(refreshTimer);refreshTimer=setTimeout(()=>refreshVisible().catch(offline.report),500);
     });
     window.addEventListener('delivery-support-ready',()=>{
+      ensureSupportRealtime();
       queryCache.clear();supportAnalyticsSnapshot=null;
       if(currentWorkspaceView==='analytics')refreshSupportAnalyticsData().catch(offline.report);
       if(currentWorkspaceView==='support'&&!editing())window.supportTickets.load(true).catch(offline.report);
     });
+    let supportChannel=null,supportUiTimer=0,supportPersistTimer=0,supportPersisting=false;
+    function ensureSupportRealtime(){
+      if(!currentUser||!supabaseClient.channel||['joined','joining'].includes(supportChannel?.state))return;
+      if(supportChannel)supabaseClient.removeChannel(supportChannel);
+      supportChannel=supabaseClient.channel('support-tickets-live').on('postgres_changes',{event:'*',schema:'public',table:'support_tickets'},payload=>applySupportChange(payload).catch(offline.report)).subscribe();
+    }
+    async function persistSupportRows(){
+      const cache=supportTicketReadCache,rows=cache.rows,generation=cache.generation;
+      if(!rows||!offline.scope)return;
+      if(supportPersisting){supportPersistTimer=setTimeout(persistSupportRows,3000);return;}
+      supportPersisting=true;
+      try{await offline.saveSnapshot('support_tickets:shared','support_tickets',rows,[...cache.headers],()=>generation===cache.generation);}
+      finally{supportPersisting=false;}
+    }
+    async function applySupportChange(payload){
+      await sharedTickets();
+      const cache=supportTicketReadCache,rows=cache.rows,mapping=window.deliverySupportTicketColumnMap;
+      if(!rows||!mapping)return;
+      const key=value=>String(value??'').trim().toLocaleLowerCase('en-US'),isDelete=payload.eventType==='DELETE',source=isDelete?payload.old:payload.new,id=key(source?.request_id);
+      if(!id){loadSupportTicketRows(undefined,true).catch(supportRefreshWarning);return;}
+      const index=rows.findIndex(row=>key(row.request_id)===id);
+      if(isDelete){if(index>=0)rows.splice(index,1);}
+      else{
+        const changes={};
+        for(const header of cache.headers){const column=mapping[header];if(column&&Object.hasOwn(source,column))changes[header]=source[column]??'';}
+        if(index>=0){
+          const row=rows[index];
+          row.fields={...row.fields,...changes};
+          if(source.version!==undefined)row.version=source.version;
+          if(source.source_cells)row.source_cells=source.source_cells;
+        }else rows.push({request_id:source.request_id,version:source.version,fields:Object.fromEntries([...cache.headers].map(header=>[header,changes[header]??''])),source_cells:source.source_cells});
+      }
+      cache.loadedAt=Date.now();queryCache.clear();supportAnalyticsSnapshot=null;
+      const refreshUi=()=>{
+        if(editing()){supportUiTimer=setTimeout(refreshUi,1500);return;}
+        if(currentWorkspaceView==='support')window.supportTickets.load(true).catch(offline.report);
+        if(currentWorkspaceView==='analytics')refreshSupportAnalyticsData().catch(offline.report);
+      };
+      clearTimeout(supportUiTimer);supportUiTimer=setTimeout(refreshUi,300);
+      clearTimeout(supportPersistTimer);supportPersistTimer=setTimeout(()=>persistSupportRows().catch(offline.report),3000);
+    }
+    window.addEventListener('delivery-reconnected',ensureSupportRealtime);
     const previousToast=window.showToast;
     window.addEventListener('delivery-saved-locally',()=>{localSaveAt=Date.now();});
     window.showToast=function(message,type){
       if(type==='success'&&submittedDraftKey&&Date.now()-submittedAt<15000){
         clearTimeout(draftTimer);offline.remove('drafts',submittedDraftKey).catch(offline.report);submittedDraftKey='';
       }
-      return previousToast.call(this,type==='success'&&Date.now()-localSaveAt<5000?`Saved Locally - Pending Sync. ${message}`:message,type);
+      const savedLocally=type==='success'&&Date.now()-localSaveAt<5000;
+      const technical=/idempotency|needs-review|local\/server|server data changed|IndexedDB|\boutbox\b|\bpayload\b/i.test(String(message));
+      return previousToast.call(this,savedLocally?'Your changes are saved on this device.':technical?'Your change needs attention. Open Sync History to review it.':message,type);
     };
     const importPage=window.importCurrentWorkspacePage;
     async function executeImport(file,job){
