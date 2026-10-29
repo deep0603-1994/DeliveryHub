@@ -8124,6 +8124,7 @@
     program.collapsed =
       !program.collapsed;
 
+    overviewSearch.explore('Program',program.id,program.collapsed);
     renderProjects();
   }
 
@@ -8398,6 +8399,7 @@
         const p = projects.find(x => x.id === projectId);
         if (p) {
           p.collapsed = !p.collapsed;
+          overviewSearch.explore('Initiative',p.id,p.collapsed);
           saveToStorage();
         }
       }
@@ -8526,14 +8528,17 @@
   }
 
   const overviewSearch = (() => {
-    let scope='All',term='',snapshot=null;
+    let scope='All',term='',snapshot=null,queryKey='';
     const matches=new Map(),programMatches=new Set(),programPaths=new Set();
+    const manualPrograms=new Map(),manualProjects=new Map(),manualTracks=new Map(),trackParents=new Set();
     const key=value=>String(value??'');
-    const text=values=>values.filter(value=>value!==null&&value!==undefined).join(' ').toLowerCase();
-    const includes=values=>text(values).includes(term);
+    const normalize=value=>String(value??'').trim().toLowerCase();
+    const includes=values=>values.filter(value=>value!==null&&value!==undefined).map(normalize).join(' ').includes(term);
     const enabled=level=>scope==='All'||scope===level;
     const assigned=record=>engineerAssignments.fields.map(field=>record[field]==null?'':engineerAssignments.display(record[field]));
     const active=()=>currentWorkspaceView==='overview'&&Boolean(term);
+    const exploring=project=>manualPrograms.get(key(project.programId))===false||manualProjects.get(key(project.id))===false;
+    const projectMatch=project=>matches.get(key(project.id))?.found||manualProjects.has(key(project.id))||trackParents.has(key(project.id))||manualPrograms.get(key(project.programId))===false;
     function capture(){
       if(snapshot||!document.getElementById('filter-search')?.value.trim())return;
       snapshot={
@@ -8545,7 +8550,9 @@
       };
     }
     function prepare(){
-      term=document.getElementById('filter-search')?.value.trim().toLowerCase()||'';
+      term=normalize(document.getElementById('filter-search')?.value);
+      const nextQuery=`${scope}:${term}`;
+      if(nextQuery!==queryKey){manualPrograms.clear();manualProjects.clear();manualTracks.clear();trackParents.clear();queryKey=nextQuery;}
       matches.clear();programMatches.clear();programPaths.clear();
       if(!term){
         if(snapshot){
@@ -8576,19 +8583,26 @@
         }
         const descendants=Boolean(tracks.size||milestones.size),found=own||descendants;
         matches.set(key(project.id),{own,found,tracks,ownTracks,milestones});
-        project.collapsed=!descendants;
-        for(const track of project.tracks||[])track.collapsed=!openTracks.has(key(track.id));
-        if(found&&isVerticalAllowed(project.vertical)&&matchesRecordStatusFilter(project.recordStatus))programPaths.add(key(project.programId));
+        project.collapsed=manualProjects.get(key(project.id))??!descendants;
+        for(const track of project.tracks||[])track.collapsed=manualTracks.get(`${project.id}:${track.id}`)??!openTracks.has(key(track.id));
+        if(projectMatch(project)&&isVerticalAllowed(project.vertical)&&matchesRecordStatusFilter(project.recordStatus))programPaths.add(key(project.programId));
       }
-      for(const program of programs)program.collapsed=!programPaths.has(key(program.id));
+      for(const program of programs)program.collapsed=manualPrograms.get(key(program.id))??!programPaths.has(key(program.id));
     }
     return {
-      prepare,capture,active,term:()=>term,scope:()=>scope,
-      setScope(value){if(['All','Program','Initiative','Track','Milestone'].includes(value))scope=value;},
-      program:record=>programMatches.has(key(record.id)),
-      project:record=>matches.get(key(record.id))?.found||false,
-      milestone:(project,record)=>matches.get(key(project.id))?.milestones.has(key(record.id))||false,
-      track:(project,record)=>matches.get(key(project.id))?.tracks.has(key(record.id))||false,
+      prepare,capture,active,exploring,term:()=>term,scope:()=>scope,
+      explore(level,id,collapsed,projectId){
+        if(!active())return;
+        if(level==='Program')manualPrograms.set(key(id),collapsed);
+        else if(level==='Initiative')manualProjects.set(key(id),collapsed);
+        else{manualTracks.set(`${projectId}:${id}`,collapsed);trackParents.add(key(projectId));}
+      },
+      manualProgram:record=>manualPrograms.has(key(record.id)),
+      setScope(value){const selected=['All','Program','Initiative','Track','Milestone'].find(level=>normalize(level)===normalize(value));if(selected)scope=selected;},
+      program:record=>programMatches.has(key(record.id))||manualPrograms.has(key(record.id)),
+      project:projectMatch,
+      milestone:(project,record)=>exploring(project)||manualTracks.get(`${project.id}:${record.trackId}`)===false||matches.get(key(project.id))?.milestones.has(key(record.id))||false,
+      track:(project,record)=>exploring(project)||manualTracks.has(`${project.id}:${record.id}`)||matches.get(key(project.id))?.tracks.has(key(record.id))||false,
       own(level,id,projectId){
         if(level==='Program')return programMatches.has(key(id));
         if(level==='Initiative')return matches.get(key(id))?.own||false;
@@ -9251,6 +9265,7 @@
     const filterBar = document.querySelector('[data-delivery-filter-page="overview"]');
     const activeFilter = [...(filterBar?.querySelectorAll('input,select') || [])].some(control => {
       if (control.id === 'filter-record-status' || control.type === 'checkbox' || control.disabled) return false;
+      if(control.id==='filter-search'&&overviewSearch.active()&&overviewSearch.exploring(project))return false;
       const value=String(control.value||'').trim();
       if(control.id==='filter-reviewed'&&value==='all')return false;
       return value!=='';
@@ -11347,7 +11362,7 @@
                 sortNewestCreatedFirst
               );
 
-          if(overviewSearch.active())program.collapsed=childInitiatives.length===0;
+          if(overviewSearch.active()&&!overviewSearch.manualProgram(program))program.collapsed=childInitiatives.length===0;
           return {
             type:
               'program',
@@ -13223,6 +13238,7 @@
     track.collapsed =
       !track.collapsed;
 
+    overviewSearch.explore('Track',track.id,track.collapsed,initiative.id);
     renderProjects();
   }
 
@@ -17376,13 +17392,16 @@
     programs.forEach(program => {
       if (scope.programIds.has(Number(program.id))) {
         program.collapsed = verifiedOverviewHierarchyStage < 1;
+        overviewSearch.explore('Program',program.id,program.collapsed);
       }
     });
     projects.forEach(project => {
       if (!scope.initiativeIds.has(Number(project.id))) return;
       project.collapsed = verifiedOverviewHierarchyStage < 2;
+      overviewSearch.explore('Initiative',project.id,project.collapsed);
       (project.tracks || []).forEach(track => {
         track.collapsed = verifiedOverviewHierarchyStage < 3;
+        overviewSearch.explore('Track',track.id,track.collapsed,project.id);
       });
     });
 
@@ -22403,7 +22422,9 @@
       const workbook=new ExcelJS.Workbook();
       workbook.creator='PMO Delivery Hub';
       workbook.created=new Date();
+      workbook.views=[{firstSheet:1,activeTab:1}];
       const listSheet=workbook.addWorksheet('Master Data',{state:'veryHidden'});
+      listSheet.views=[{state:'normal',tabSelected:false}];
       const definitions=[
         ['Active Users',lists.userNames,'userNames'],
         ['Active User Emails',lists.userEmails,'userEmails'],
@@ -22423,7 +22444,7 @@
       listSheet.getRow(1).font={bold:true};
       listSheet.columns.forEach(column=>{column.width=34;});
 
-      sheetJsWorkbook.SheetNames.forEach(sheetName=>{
+      sheetJsWorkbook.SheetNames.forEach((sheetName,sheetIndex)=>{
         const source=sheetJsWorkbook.Sheets[sheetName];
         const values=XLSX.utils.sheet_to_json(source,{header:1,defval:'',raw:true});
         const target=workbook.addWorksheet(sheetName.slice(0,31));
@@ -22434,7 +22455,7 @@
         headerRow.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF4F46E5'}};
         headerRow.alignment={vertical:'middle',horizontal:'center'};
         headerRow.height=24;
-        target.views=[{state:'frozen',ySplit:1}];
+        target.views=[{state:'frozen',ySplit:1,tabSelected:sheetIndex===0,activeCell:'A2'}];
         headerRow.eachCell((cell,columnNumber)=>{
           const list=validationListForHeader(cell.value,columns);
           if(!list||!list.count)return;
