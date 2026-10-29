@@ -2182,7 +2182,8 @@
         const timer=setTimeout(()=>controller.abort(new DOMException('Supabase request timed out.','TimeoutError')),timeout);
         try{
           const response=await nativeFetch(url,{...options,signal:controller.signal});
-          const body=response.body===null?null:await response.arrayBuffer();
+          const noBody=options.method==='HEAD'||[204,205,304].includes(response.status);
+          const body=noBody||response.body===null?null:await response.arrayBuffer();
           return new Response(body,{status:response.status,statusText:response.statusText,headers:response.headers});
         }
         finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
@@ -2313,13 +2314,32 @@
         if(activeImport&&options.importKey===activeImport.key)return importRequest(url,options,owner);
         if(!navigator.onLine||!reachable)return queueWrite(url,options,owner);
         try{
-          const response=await boundedFetch(url,options);
+          const milestoneUpdate=options.method==='PATCH'&&new URL(url).pathname.endsWith('/milestones');
+          const response=await boundedFetch(url,options,milestoneUpdate?60000:12000);
           if(response.ok){try{await invalidate(new URL(url).pathname.split('/').pop(),owner);await markSynced(owner);}catch(error){report(error);}return response;}
           if(transient(response)&&!await probe())return queueWrite(url,options,owner,true);
           return response;
         }catch(error){
           if(options.signal?.aborted)throw error;
+          console.warn('Supabase save confirmation was interrupted:',error);
           if(!await probe())return queueWrite(url,options,owner,true);
+          const parsed=new URL(url),table=parsed.pathname.split('/').pop(),identity=exactIdentity(parsed,table);
+          if(table==='milestones'&&options.method==='PATCH'&&identity&&owner===scope){
+            try{
+              const payload=JSON.parse(options.body),check=new URL(url);
+              check.search='';check.searchParams.set(identity.column,`eq.${identity.value}`);
+              check.searchParams.set('select','*');
+              const headers=new Headers(options.headers);headers.delete('prefer');headers.set('accept','application/json');
+              const confirmation=await boundedFetch(check,{method:'GET',headers},15000);
+              const rows=confirmation.ok?await confirmation.json():null;
+              if(owner===scope&&Array.isArray(rows)&&rows.length===1&&Object.entries(payload).every(([key,value])=>sameValue(rows[0][key],value))){
+                try{await invalidate(table,owner);await markSynced(owner);}catch(storageFailure){report(storageFailure);}
+                const representation=(options.headers.get('prefer')||'').includes('return=representation');
+                const single=(options.headers.get('accept')||'').includes('vnd.pgrst.object');
+                return new Response(representation?JSON.stringify(single?rows[0]:rows):null,{status:representation?200:204,headers:{'content-type':'application/json'}});
+              }
+            }catch(confirmationError){console.warn('Milestone save could not be verified:',confirmationError);}
+          }
           return errorResponse('Your change could not be confirmed. Please check the record before trying again.','SAVE_UNCONFIRMED');
         }
       }
@@ -8108,10 +8128,13 @@
   }
 
   async function deleteProgram(
-    programId
+    programId,
+    options = {}
   ) {
 
     if (!canDeleteInitiative()) {
+
+      if(options.bulk)return {status:'skipped'};
 
       showToast(
         'You do not have permission to delete Programs.',
@@ -8122,7 +8145,7 @@
     }
 
     const confirmed =
-      confirm(
+      options.bulk || confirm(
         'Delete this Program? Its Initiatives will become unmapped and will not be deleted.'
       );
 
@@ -8142,6 +8165,8 @@
       );
 
     if (unmapError) {
+
+      if(options.bulk)return {status:'failed',error:unmapError};
 
       showToast(
         'Unable to unmap Program Initiatives: ' +
@@ -8169,6 +8194,8 @@
 
     if (programError) {
 
+      if(options.bulk)return {status:'failed',error:programError};
+
       showToast(
         'Unable to delete Program: ' +
         programError.message,
@@ -8178,6 +8205,12 @@
       return;
     }
 
+    if(options.bulk){
+      for(const initiative of projects)if(Number(initiative.programId)===Number(programId))initiative.programId=null;
+      const program=programs.find(record=>Number(record.id)===Number(programId));
+      if(program)program.recordStatus='deleted';
+      return {status:'archived'};
+    }
     await loadInitiativesFromSupabase();
 
     showToast(
@@ -8492,6 +8525,78 @@
       .toLowerCase() === 'agile';
   }
 
+  const overviewSearch = (() => {
+    let scope='All',term='',snapshot=null;
+    const matches=new Map(),programMatches=new Set(),programPaths=new Set();
+    const key=value=>String(value??'');
+    const text=values=>values.filter(value=>value!==null&&value!==undefined).join(' ').toLowerCase();
+    const includes=values=>text(values).includes(term);
+    const enabled=level=>scope==='All'||scope===level;
+    const assigned=record=>engineerAssignments.fields.map(field=>record[field]==null?'':engineerAssignments.display(record[field]));
+    const active=()=>currentWorkspaceView==='overview'&&Boolean(term);
+    function capture(){
+      if(snapshot||!document.getElementById('filter-search')?.value.trim())return;
+      snapshot={
+        programs:new Map(programs.map(record=>[key(record.id),record.collapsed])),
+        projects:new Map(projects.map(record=>[key(record.id),record.collapsed])),
+        tracks:new Map(projects.flatMap(project=>(project.tracks||[]).map(track=>[`${project.id}:${track.id}`,track.collapsed]))),
+        classes:[...document.body.classList].filter(name=>name.startsWith('overview-progressive-level-')||name==='overview-hierarchy-stage-3'),
+        stage:verifiedOverviewHierarchyStage,level:overviewHierarchyLevel,page:deliveryCurrentPage
+      };
+    }
+    function prepare(){
+      term=document.getElementById('filter-search')?.value.trim().toLowerCase()||'';
+      matches.clear();programMatches.clear();programPaths.clear();
+      if(!term){
+        if(snapshot){
+          for(const record of programs)if(snapshot.programs.has(key(record.id)))record.collapsed=snapshot.programs.get(key(record.id));
+          for(const project of projects){
+            if(snapshot.projects.has(key(project.id)))project.collapsed=snapshot.projects.get(key(project.id));
+            for(const track of project.tracks||[])if(snapshot.tracks.has(`${project.id}:${track.id}`))track.collapsed=snapshot.tracks.get(`${project.id}:${track.id}`);
+          }
+          document.body.classList.remove(...[...document.body.classList].filter(name=>name.startsWith('overview-progressive-level-')||name==='overview-hierarchy-stage-3'));
+          for(const name of snapshot.classes)document.body.classList.add(name);
+          verifiedOverviewHierarchyStage=snapshot.stage;overviewHierarchyLevel=snapshot.level;deliveryCurrentPage=snapshot.page;
+          snapshot=null;
+        }
+        return;
+      }
+      capture();
+      document.body.classList.remove(...[...document.body.classList].filter(name=>name.startsWith('overview-progressive-level-')||name==='overview-hierarchy-stage-3'));
+      for(const program of programs){
+        if(enabled('Program')&&includes([program.id,program.sequenceNo,program.name,program.owner,program.assignedTo,program.vertical,program.impactCategory,program.measurableImpact,program.businessBenefit,...assigned(program)]))programMatches.add(key(program.id));
+      }
+      for(const project of projects){
+        const own=enabled('Initiative')&&includes([project.id,project.sequenceNo,project.name,project.type,project.crNo,project.vertical,project.businessOwner,project.assignedTo,project.impactCategory,project.measurableImpact,project.businessBenefit,project.deliveryMethod,...assigned(project)]);
+        const tracks=new Set(),ownTracks=new Set(),milestones=new Set(),openTracks=new Set();
+        for(const track of getVisibleInitiativeTracks(project))if(enabled('Track')&&includes([track.id,track.sequenceNo,track.name,track.owner,track.assignedTo,track.description])){tracks.add(key(track.id));ownTracks.add(key(track.id));}
+        for(const milestone of getVisibleInitiativeMilestones(project))if(enabled('Milestone')&&includes([milestone.id,milestone.sequenceNo,milestone.title,milestone.actions,milestone.owner,milestone.dependency,milestone.remarks,milestone.kpi,milestone.bucket])){
+          milestones.add(key(milestone.id));
+          if(milestone.trackId){tracks.add(key(milestone.trackId));openTracks.add(key(milestone.trackId));}
+        }
+        const descendants=Boolean(tracks.size||milestones.size),found=own||descendants;
+        matches.set(key(project.id),{own,found,tracks,ownTracks,milestones});
+        project.collapsed=!descendants;
+        for(const track of project.tracks||[])track.collapsed=!openTracks.has(key(track.id));
+        if(found&&isVerticalAllowed(project.vertical)&&matchesRecordStatusFilter(project.recordStatus))programPaths.add(key(project.programId));
+      }
+      for(const program of programs)program.collapsed=!programPaths.has(key(program.id));
+    }
+    return {
+      prepare,capture,active,term:()=>term,scope:()=>scope,
+      setScope(value){if(['All','Program','Initiative','Track','Milestone'].includes(value))scope=value;},
+      program:record=>programMatches.has(key(record.id)),
+      project:record=>matches.get(key(record.id))?.found||false,
+      milestone:(project,record)=>matches.get(key(project.id))?.milestones.has(key(record.id))||false,
+      track:(project,record)=>matches.get(key(project.id))?.tracks.has(key(record.id))||false,
+      own(level,id,projectId){
+        if(level==='Program')return programMatches.has(key(id));
+        if(level==='Initiative')return matches.get(key(id))?.own||false;
+        return matches.get(key(projectId))?.[level==='Track'?'ownTracks':'milestones'].has(key(id))||false;
+      }
+    };
+  })();
+
   function renderInitiativeCards(
     initiativesToRender = projects,
     targetContainer = null
@@ -8543,7 +8648,7 @@
             .filter(Boolean).join(' ').toLowerCase();
           const projectMatchesSearch = !q || projectSearchText.includes(q);
 
-          const anyMilestoneMatchesSearch = allMilestones.some(m => {
+          const anyMilestoneMatchesSearch = !overviewSearch.active()&&allMilestones.some(m => {
             const milestoneSearchText = [m.title, m.actions, m.owner, m.dependency, m.remarks, m.kpi, m.bucket]
               .filter(Boolean).join(' ').toLowerCase();
             return !q || milestoneSearchText.includes(q);
@@ -8555,9 +8660,9 @@
 
           const matchingMilestones = allMilestones.filter(m => {
             const mStat = getMilestoneStatus(m);
-            const milestoneSearchText = [m.title, m.actions, m.owner, m.dependency, m.remarks, m.kpi, m.bucket]
+            const milestoneSearchText = overviewSearch.active()?'':[m.title, m.actions, m.owner, m.dependency, m.remarks, m.kpi, m.bucket]
               .filter(Boolean).join(' ').toLowerCase();
-            const matchSearch = !q || projectMatchesSearch || milestoneSearchText.includes(q);
+            const matchSearch = overviewSearch.active()?overviewSearch.milestone(p,m):!q || projectMatchesSearch || milestoneSearchText.includes(q);
 
             const matchStatus=trackerFilterSome('filter-status',selected=>{
             let selectedMatches = true;
@@ -8590,7 +8695,7 @@
           });
 
           // PROJECT-LEVEL DROPDOWN FILTERS
-          const matchProjSearch = projectMatchesSearch || anyMilestoneMatchesSearch;
+          const matchProjSearch = overviewSearch.active()?overviewSearch.project(p):projectMatchesSearch || anyMilestoneMatchesSearch;
           const matchProjType = trackerFilterMatches('filter-type',p.type,typeFilter);
           const matchProjVert = trackerFilterMatches('filter-vertical',p.vertical,vertFilter);
           const matchProjImpact = trackerFilterMatches('filter-impact',impactSelections.values(p.impactCategory),impactFilter);
@@ -8664,6 +8769,7 @@
     document.createElement('div');
 
   projectCard.className = initiativeTheme.card;
+  projectCard.dataset.overviewSearchLevel='Initiative';projectCard.dataset.overviewSearchId=String(p.id);
                   projectCard.innerHTML = `
             <!-- Structured Initiative Header (mirrors Program gradient) -->
             <div class="px-5 py-4 ${initiativeTheme.header}" ondblclick="if(event.target.closest('[data-milestone-row=true]')){event.preventDefault();event.stopPropagation();return false;}openProjectModal(${p.id})" title="Double Click to Edit Initiative">
@@ -9093,7 +9199,7 @@
   }
 
   function renderAgileTracks(project, matchingMilestones, canEdit) {
-    const tracks = getVisibleInitiativeTracks(project).slice().sort((first, second) =>
+    const tracks = getVisibleInitiativeTracks(project).filter(track=>!overviewSearch.active()||overviewSearch.track(project,track)).slice().sort((first, second) =>
       Number(first.sequenceNo || first.displayOrder || Number.MAX_SAFE_INTEGER) - Number(second.sequenceNo || second.displayOrder || Number.MAX_SAFE_INTEGER) ||
       Number(first.id) - Number(second.id)
     );
@@ -10537,7 +10643,7 @@
       .join(' ')
       .toLowerCase();
 
-    const milestoneSearchMatches =
+    const milestoneSearchMatches = !overviewSearch.active()&&
     filteredMilestones.some(
         milestone => {
           const milestoneSearchText = [
@@ -10559,7 +10665,7 @@
         }
       );
 
-    const matchesSearch =
+    const matchesSearch = overviewSearch.active()?overviewSearch.project(project):
       !searchText ||
       projectSearchText.includes(searchText) ||
       milestoneSearchMatches;
@@ -10731,7 +10837,7 @@
       .join(' ')
       .toLowerCase();
 
-    const programMatchesSearch =
+    const programMatchesSearch = overviewSearch.active()?overviewSearch.program(program):
       !searchText ||
       programSearchText.includes(searchText);
 
@@ -11180,6 +11286,7 @@
       return;
     }
 
+    overviewSearch.prepare();
     masterContainer.innerHTML = '';
 
     /*
@@ -11240,6 +11347,7 @@
                 sortNewestCreatedFirst
               );
 
+          if(overviewSearch.active())program.collapsed=childInitiatives.length===0;
           return {
             type:
               'program',
@@ -11416,6 +11524,7 @@
           );
 
         programCard.className = programTheme.card;
+        programCard.dataset.overviewSearchLevel='Program';programCard.dataset.overviewSearchId=String(program.id);
 
         programCard.innerHTML = `
           <div
@@ -12553,19 +12662,28 @@
     showToast('Initiative duplicated successfully.', 'success');
   }
 
-      async function deleteProject(projectId) {
+      async function deleteProject(projectId,options={}) {
+    if(options.bulk){
+      const initiative=projects.find(record=>Number(record.id)===Number(projectId));
+      if(!canDeleteInitiative()||!initiative||initiative.recordStatus==='deleted')return {status:'skipped'};
+    }
     if (!canDeleteInitiative()) { showToast('You do not have permission to archive Initiatives.','error'); return; }
     const initiative=projects.find(p=>Number(p.id)===Number(projectId));
     if (!initiative) { showToast('Initiative was not found.','error'); return; }
     if (initiative.recordStatus==='deleted') { showToast('This Initiative is already archived.','info'); return; }
-    if (!confirm(`Archive Initiative ${initiative.sequenceNo}: ${initiative.name}?\n\nThe Initiative, Tracks and Milestones will be hidden from the Active Records view. Nothing will be permanently deleted.`)) return;
+    if (!options.bulk&&!confirm(`Archive Initiative ${initiative.sequenceNo}: ${initiative.name}?\n\nThe Initiative, Tracks and Milestones will be hidden from the Active Records view. Nothing will be permanently deleted.`)) return;
     const updated_at=new Date().toISOString();
     let result=await supabaseClient.from('milestones').update({record_status:'deleted'}).eq('initiative_id',Number(projectId));
-    if(result.error){showToast('Unable to archive Milestones: '+result.error.message,'error');return;}
+    if(result.error){if(options.bulk)return {status:'failed',error:result.error};showToast('Unable to archive Milestones: '+result.error.message,'error');return;}
     result=await supabaseClient.from('milestone_tracks').update({record_status:'deleted',updated_at}).eq('initiative_id',Number(projectId));
-    if(result.error){showToast('Unable to archive Tracks: '+result.error.message,'error');return;}
+    if(result.error){if(options.bulk)return {status:'failed',error:result.error};showToast('Unable to archive Tracks: '+result.error.message,'error');return;}
     result=await supabaseClient.from('initiatives').update({record_status:'deleted'}).eq('id',Number(projectId));
-    if(result.error){showToast('Unable to archive Initiative: '+result.error.message,'error');return;}
+    if(result.error){if(options.bulk)return {status:'failed',error:result.error};showToast('Unable to archive Initiative: '+result.error.message,'error');return;}
+    if(options.bulk){
+      initiative.recordStatus='deleted';
+      for(const record of [...(initiative.tracks||[]),...(initiative.milestones||[])])record.recordStatus='deleted';
+      return {status:'archived'};
+    }
     deliveryCurrentPage=1; await loadInitiativesFromSupabase();
     showToast(`Initiative ${initiative.sequenceNo} archived successfully.`,'success');
   }
@@ -13218,18 +13336,23 @@
       'success'
     );
   }
-  async function deleteMilestoneTrack(initiativeId, trackId) {
+  async function deleteMilestoneTrack(initiativeId, trackId, options={}) {
     const initiative=projects.find(p=>Number(p.id)===Number(initiativeId));
+    if(options.bulk){
+      const track=initiative?.tracks?.find(record=>Number(record.id)===Number(trackId));
+      if(!initiative||initiative.recordStatus==='deleted'||!canEditInitiative(initiative)||!track||track.recordStatus==='deleted')return {status:'skipped'};
+    }
     if(!initiative){showToast('Initiative was not found.','error');return;}
     if(initiative.recordStatus==='deleted'){showToast('An archived Initiative cannot be modified.','error');return;}
     if(!canEditInitiative(initiative)){showToast('You do not have permission to archive this Track.','error');return;}
     const track=(initiative.tracks||[]).find(t=>Number(t.id)===Number(trackId));
     if(!track){showToast('Track was not found.','error');return;}
     const active=(initiative.milestones||[]).filter(m=>Number(m.trackId)===Number(trackId)&&m.recordStatus!=='deleted');
-    if(active.length){showToast(`Track ${track.sequenceNo} contains ${active.length} active Milestone(s). Archive or move those Milestones first.`,'error');return;}
-    if(!confirm(`Archive Track ${track.sequenceNo}: ${track.name}?\n\nThe Track will remain in the database.`))return;
+    if(active.length){if(options.bulk)return {status:'skipped'};showToast(`Track ${track.sequenceNo} contains ${active.length} active Milestone(s). Archive or move those Milestones first.`,'error');return;}
+    if(!options.bulk&&!confirm(`Archive Track ${track.sequenceNo}: ${track.name}?\n\nThe Track will remain in the database.`))return;
     const result=await softDeleteRecords('milestone_tracks',[trackId]);
-    if(result.error){showToast('Unable to archive Track: '+result.error.message,'error');return;}
+    if(result.error){if(options.bulk)return {status:'failed',error:result.error};showToast('Unable to archive Track: '+result.error.message,'error');return;}
+    if(options.bulk){track.recordStatus='deleted';return {status:'archived'};}
     await loadInitiativesFromSupabase(); showToast(`Track ${track.sequenceNo} archived successfully.`,'success');
   }
 
@@ -13520,17 +13643,22 @@
 
 
 
-          async function deleteMilestone(projectId, milestoneId) {
+              async function deleteMilestone(projectId, milestoneId, options={}) {
     const initiative=projects.find(p=>Number(p.id)===Number(projectId));
+            if(options.bulk){
+          const milestone=initiative?.milestones?.find(record=>Number(record.id)===Number(milestoneId));
+          if(!initiative||initiative.recordStatus==='deleted'||!canEditInitiative(initiative)||!milestone||milestone.recordStatus==='deleted')return {status:'skipped'};
+            }
     if(!initiative){showToast('Initiative was not found.','error');return;}
     if(initiative.recordStatus==='deleted'){showToast('An archived Initiative cannot be modified.','error');return;}
     if(!canEditInitiative(initiative)){showToast('You do not have permission to archive this Milestone.','error');return;}
     const milestone=(initiative.milestones||[]).find(m=>Number(m.id)===Number(milestoneId));
     if(!milestone){showToast('Milestone was not found.','error');return;}
     if(milestone.recordStatus==='deleted'){showToast('This Milestone is already archived.','info');return;}
-    if(!confirm('Archive this Milestone?\n\nThe Milestone will remain in the database.'))return;
+    if(!options.bulk&&!confirm('Archive this Milestone?\n\nThe Milestone will remain in the database.'))return;
     const result=await softDeleteRecords('milestones',[milestoneId]);
-    if(result.error){showToast('Unable to archive Milestone: '+result.error.message,'error');return;}
+    if(result.error){if(options.bulk)return {status:'failed',error:result.error};showToast('Unable to archive Milestone: '+result.error.message,'error');return;}
+    if(options.bulk){milestone.recordStatus='deleted';return {status:'archived'};}
     await loadInitiativesFromSupabase(); showToast('Milestone archived successfully.','success');
   }
 
@@ -16916,6 +17044,8 @@
   <style>
   /* Overview selection controls extension */
   #overview-control-bar { min-height: 58px; }
+  body.overview-multi-select-active #main-content { height:max-content; min-height:100vh; }
+  #overview-selection-actions { position:sticky !important; top:65px; z-index:29; flex-wrap:wrap !important; }
   body:not(.overview-multi-select-active) #projects-container .overview-bulk-checkbox { display:none !important; }
   </style>
   <script>
@@ -20536,6 +20666,7 @@
     const flatFilterRoot=document.getElementById('workspace-flat-page');
     overviewFilterRoot?.addEventListener('input',event=>{
       const input=event.target;if(currentWorkspaceView!=='overview'||input?.id!=='filter-search')return;
+      overviewSearch.capture();
       event.stopImmediatePropagation();if(overviewSearchTimer)clearTimeout(overviewSearchTimer);
       overviewSearchTimer=setTimeout(()=>{overviewSearchTimer=0;if(currentWorkspaceView==='overview')resetDeliveryPagination();},160);
     },true);
@@ -26634,7 +26765,7 @@
         selection.querySelectorAll('button').forEach(button=>{if(!button.dataset.deliveryControlAction)button.dataset.deliveryControlAction=`${slug(config.key)}:${slug(button.textContent.trim())}`;});
       }
       if(config.key==='overview'){
-        const actions=root.querySelector('#overview-selection-actions'),bar=query(root,config.selection);if(actions&&bar&&actions.parentElement!==bar)bar.appendChild(actions);
+        const actions=root.querySelector('#overview-selection-actions'),bar=query(root,config.selection);if(actions&&bar&&(actions.parentElement!==bar.parentElement||actions.previousElementSibling!==bar))bar.after(actions);
       }else if(config.key.startsWith('flat:')){
         const toolbar=root.querySelector('#bulk-action-toolbar'),bar=query(root,config.selection);if(toolbar&&bar&&toolbar.parentElement!==bar)bar.appendChild(toolbar);
       }else if(config.key==='analytics'){
@@ -27660,10 +27791,58 @@
         if (!allowed) throw new Error('You do not have permission to change every selected record.');
       }
     }
+    async function archiveSelected(records, ask) {
+      const selected=Object.fromEntries(entities.map(entity=>[entity,[...new Set((records[entity]||[]).map(Number))]]));
+      const totals={selected:entities.reduce((count,entity)=>count+selected[entity].length,0),archived:0,skipped:0,failed:0};
+      if(!totals.selected||ask&&!confirm('Archive the selected records? Programs will unmap their Initiatives. Selected Initiatives will archive their Tracks and Milestones.'))return false;
+      const viewState=captureDeliveryViewState(),covered=new Set();
+      const recordFor=(entity,id)=>{
+        const source=sourceFor(entity,id);
+        return entity==='tracks'||entity==='milestones'?source?.[entity]?.find(record=>Number(record.id)===id):source;
+      };
+      const alreadyArchived=new Set();
+      for(const entity of entities)for(const id of selected[entity]){
+        const record=recordFor(entity,id);
+        if(!record||!Number.isFinite(id)||['deleted','archived'].includes(record.recordStatus)||record.isActive===false||record.is_active===false)alreadyArchived.add(`${entity}:${id}`);
+      }
+      for(const entity of ['initiatives','milestones','tracks','programs'])for(const id of selected[entity]){
+        const key=`${entity}:${id}`;
+        let result;
+        if(alreadyArchived.has(key))result={status:'skipped'};
+        else if(covered.has(key))result={status:'archived'};
+        else{
+          try{
+            const source=sourceFor(entity,id);
+            result=entity==='programs'?await deleteProgram(id,{bulk:true})
+              :entity==='initiatives'?await deleteProject(id,{bulk:true})
+              :entity==='tracks'?await deleteMilestoneTrack(source?.id,id,{bulk:true})
+              :await deleteMilestone(source?.id,id,{bulk:true});
+            if(result?.status==='archived'&&entity==='initiatives'){
+              for(const child of [...(source.tracks||[]).map(record=>`tracks:${Number(record.id)}`),...(source.milestones||[]).map(record=>`milestones:${Number(record.id)}`)])covered.add(child);
+            }
+          }catch(error){result={status:'failed',error};}
+        }
+        const outcome=result?.status||'failed';
+        totals[outcome]++;
+        if(outcome==='archived')bulkWorkspaceSelection[entity].delete(id);
+        if(result?.error)console.error('Hierarchy archive failed for a selected record:',result.error);
+        await deliveryOffline.yieldUi();
+      }
+      if(totals.archived||totals.failed){
+        await loadInitiativesFromSupabase({render:false});
+        renderActiveDeliveryWorkspace();
+        restoreDeliveryViewState(viewState);
+      }
+      overviewBulkEntity=entities.find(entity=>bulkWorkspaceSelection[entity].size)||'';
+      syncBulkSelectionUI();syncHierarchyCheckboxes();
+      showToast(`Selected: ${totals.selected} / Archived: ${totals.archived} / Skipped: ${totals.skipped} / Failed: ${totals.failed}`,totals.failed?'error':totals.skipped?'info':'success');
+      return totals;
+    }
     async function mutate(action, records, ask) {
       if (mutationInProgress || editInProgress) return;
       mutationInProgress = true;
       try {
+        if(action==='archive')return await archiveSelected(records,ask);
         requirePermission(records, action);
         const count = entities.reduce((total, entity) => total + (records[entity]?.length || 0), 0);
         if (!count || ask && !confirm(`${action === 'duplicate' ? 'Duplicate' : 'Archive'} the selected records and their descendants?`)) return;
@@ -28359,6 +28538,87 @@
         (form.matches('tr')?form.querySelector('td'):form)?.prepend(button);
       }).catch(offline.report);
     });
+  })();
+  </script>
+  <style id="overview-scoped-search-style">
+  .overview-search-scope-host{position:relative}
+  #overview-search-scopes{position:fixed;z-index:60;display:flex;flex-wrap:wrap;gap:4px;padding:5px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;box-shadow:0 4px 12px rgba(15,23,42,.12)}#overview-search-scopes[hidden]{display:none!important}#overview-search-scopes button{flex:1 0 auto;padding:5px 7px;border-radius:4px;font-size:11px;color:#475569}#overview-search-scopes button[aria-checked="true"]{background:#e0e7ff;color:#3730a3;font-weight:600}#overview-search-scopes button:focus-visible{outline:2px solid #6366f1;outline-offset:1px}
+  #projects-container mark[data-overview-search-hit]{padding:0;background:#fde047;color:#1f2937;border-radius:1px}
+  </style>
+  <script id="overview-scoped-search-ui">
+  (()=>{
+    let input,menu,highlightFrame=0;
+    function positionMenu(){
+      if(!input||!menu||menu.hidden)return;
+      const rect=input.getBoundingClientRect();
+      const width=Math.min(Math.max(rect.width,300),innerWidth-16);
+      menu.style.width=`${width}px`;menu.style.left=`${Math.max(8,Math.min(rect.left,innerWidth-width-8))}px`;menu.style.top=`${rect.bottom+4}px`;
+    }
+    function updateScope(){
+      menu.querySelectorAll('button').forEach(button=>button.setAttribute('aria-checked',String(button.dataset.scope===overviewSearch.scope())));
+    }
+    function openMenu(){
+      if(currentWorkspaceView!=='overview'||!mount())return;
+      menu.hidden=false;input.setAttribute('aria-expanded','true');positionMenu();
+    }
+    function closeMenu(){if(menu)menu.hidden=true;if(input)input.setAttribute('aria-expanded','false');}
+    function mount(){
+      input=document.getElementById('filter-search');if(!input)return false;
+      let host=input.parentElement.closest('.unified-search-host,.relative');
+      if(!host){host=document.createElement('div');input.before(host);host.append(input);}
+      input.classList.remove('unified-search-host','overview-search-scope-host');
+      host.classList.add('unified-search-host','relative','overview-search-scope-host');
+      input.setAttribute('aria-controls','overview-search-scopes');
+      if(!menu){
+        menu=document.createElement('div');menu.id='overview-search-scopes';menu.hidden=true;menu.setAttribute('role','radiogroup');menu.setAttribute('aria-label','Search scope');
+        for(const scope of ['All','Program','Initiative','Track','Milestone']){
+          const button=document.createElement('button');button.type='button';button.textContent=scope;button.dataset.scope=scope;button.setAttribute('role','radio');
+          button.onclick=()=>{overviewSearch.setScope(scope);updateScope();input.focus({preventScroll:true});input.dispatchEvent(new Event('input',{bubbles:true}));};menu.append(button);
+        }
+        document.body.append(menu);
+        menu.onkeydown=event=>{
+          const buttons=[...menu.children],index=buttons.indexOf(document.activeElement);
+          if(['ArrowRight','ArrowDown','ArrowLeft','ArrowUp'].includes(event.key)){event.preventDefault();buttons[(index+(['ArrowLeft','ArrowUp'].includes(event.key)?buttons.length-1:1))%buttons.length].focus();}
+          if(event.key==='Escape'){event.preventDefault();input.focus({preventScroll:true});closeMenu();}
+        };
+      }
+      updateScope();positionMenu();return true;
+    }
+    function highlight(){
+      const root=document.getElementById('projects-container');if(!root)return;
+      for(const mark of root.querySelectorAll('mark[data-overview-search-hit]')){const parent=mark.parentNode;mark.replaceWith(...mark.childNodes);parent.normalize();}
+      if(!overviewSearch.active())return;
+      for(const header of root.querySelectorAll('.track-card-header')){
+        const ids=header.querySelector('button[onclick^="toggleMilestoneTrack("]')?.getAttribute('onclick')?.match(/toggleMilestoneTrack\((\d+)\s*,\s*(\d+)\)/);
+        if(ids){const card=header.parentElement;card.dataset.overviewSearchLevel='Track';card.dataset.overviewSearchId=ids[2];card.dataset.overviewSearchProject=ids[1];}
+      }
+      const term=overviewSearch.term(),walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),nodes=[];
+      while(walker.nextNode()){
+        const node=walker.currentNode,parent=node.parentElement;
+        if(!node.nodeValue.toLowerCase().includes(term)||parent.closest('mark,script,style,svg,input,textarea,select,.hidden,[hidden]'))continue;
+        const record=parent.closest('tr[data-inline-milestone-id],[data-overview-search-level]');if(!record)continue;
+        const level=record.dataset.inlineMilestoneId?'Milestone':record.dataset.overviewSearchLevel,id=record.dataset.inlineMilestoneId||record.dataset.overviewSearchId,projectId=record.dataset.inlineMilestoneProjectId||record.dataset.overviewSearchProject;
+        if(overviewSearch.own(level,id,projectId))nodes.push(node);
+      }
+      for(const node of nodes){
+        const value=node.nodeValue,lower=value.toLowerCase(),fragment=document.createDocumentFragment();let from=0,index;
+        while((index=lower.indexOf(term,from))!==-1){fragment.append(document.createTextNode(value.slice(from,index)));const mark=document.createElement('mark');mark.dataset.overviewSearchHit='';mark.textContent=value.slice(index,index+term.length);fragment.append(mark);from=index+term.length;}
+        fragment.append(document.createTextNode(value.slice(from)));node.replaceWith(fragment);
+      }
+    }
+    const render=window.renderProjects;
+    window.renderProjects=function(){
+      const result=render.apply(this,arguments);
+      if(currentWorkspaceView==='overview'){mount();cancelAnimationFrame(highlightFrame);highlightFrame=requestAnimationFrame(highlight);}else closeMenu();
+      return result;
+    };
+    document.addEventListener('focusin',event=>{if(event.target.id==='filter-search')openMenu();else if(menu&&!menu.contains(event.target))closeMenu();});
+    document.addEventListener('input',event=>{if(event.target.id==='filter-search')openMenu();},true);
+    document.addEventListener('pointerdown',event=>{if(event.target.id==='filter-search'){openMenu();return;}if(menu&&!menu.contains(event.target))closeMenu();});
+    document.addEventListener('keydown',event=>{if(event.target===input&&event.key==='ArrowDown'){event.preventDefault();openMenu();menu.firstElementChild.focus();}if(event.target===input&&event.key==='Escape')closeMenu();});
+    window.addEventListener('resize',positionMenu,{passive:true});
+    document.addEventListener('scroll',event=>{if(menu&&!menu.contains(event.target))closeMenu();},true);
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();
   })();
   </script>
   <script id="delivery-offline-deployment-notes" type="text/plain">
