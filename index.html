@@ -19258,12 +19258,28 @@
     supportTicketReadCache.generation++;
     supportTicketReadCache.rows=null;
     supportTicketReadCache.pending=null;
+    supportTicketReadCache.firstPage=null;
     supportTicketReadCache.loadedAt=0;
     supportTicketReadCache.headers.clear();
     supportAnalyticsSnapshot=null;
     window.clearSupportTicketPageCache?.();
   }
   let supportWarnedAt=0;
+  const supportLoadProgress={active:false,received:0,total:0,account:''};
+  function renderSupportLoadProgress(){
+    let node=document.getElementById('support-load-progress');
+    if(currentWorkspaceView!=='support'||!supportLoadProgress.active||supportLoadProgress.account!==supportTicketReadAccount()){node?.remove();return;}
+    const host=document.getElementById('support-metrics');if(!host)return;
+    if(!node){
+      node=document.createElement('div');node.id='support-load-progress';node.className='text-xs text-slate-600';node.setAttribute('role','status');node.setAttribute('aria-live','polite');
+      node.innerHTML='<span></span><progress class="block w-full mt-1 h-2" style="accent-color:#4f46e5"></progress>';
+      host.after(node);
+    }
+    const {received,total}=supportLoadProgress;
+    node.querySelector('span').textContent=total?`Loading Support Tickets: ${received.toLocaleString()} received (about ${total.toLocaleString()} total)`:`Loading Support Tickets: ${received.toLocaleString()} received`;
+    const progress=node.querySelector('progress');
+    if(total&&received<total){progress.max=total;progress.value=received;}else progress.removeAttribute('value');
+  }
   function supportRefreshWarning(error){
     console.warn('Support dataset refresh deferred:',error);
     if(Date.now()-supportWarnedAt<60000)return;
@@ -19288,15 +19304,21 @@
       }
       return offline.localRows('support_tickets',supportTicketReadCache.rows);
     }
-    if(supportTicketReadCache.pending){await supportTicketReadCache.pending;return loadSupportTicketRows(headers);}
+    if(supportTicketReadCache.pending)return refresh?supportTicketReadCache.pending:supportTicketReadCache.firstPage||supportTicketReadCache.pending;
     const selectedHeaders=[...new Set([...(window.supportTickets?.headers||supportTicketAnalyticsFields),...supportTicketReadCache.headers,...headers])],mapping=window.deliverySupportTicketColumnMap;
     if(!mapping||selectedHeaders.some(header=>!mapping[header]))throw new Error('Support Ticket report field mapping is unavailable.');
     const generation=supportTicketReadCache.generation;
+    const hadCache=Boolean(supportTicketReadCache.rows);
+    let publishFirst;
+    const firstPage=new Promise(resolve=>{publishFirst=resolve;});
+    Object.assign(supportLoadProgress,{active:true,received:0,total:0,account});renderSupportLoadProgress();
+    const progressHost=document.getElementById('workspace-flat-page'),progressObserver=new MutationObserver(renderSupportLoadProgress);
+    if(progressHost)progressObserver.observe(progressHost,{childList:true});
     const pending=(async()=>{
       const fieldKey=value=>String(value||'').toLowerCase().replace(/[^a-z0-9]/g,'');
       let sample=(window.supportTickets?.state.records||[]).find(row=>row.source_cells?.cells?.some(cell=>fieldKey(cell.header)==='createdtime'));
       if(!sample){
-        const probe=await supabaseClient.from('support_tickets').select('source_cells').order('request_id',{ascending:true}).limit(1);
+        const probe=await supabaseClient.from('support_tickets').select('source_cells').order('request_id',{ascending:true}).limit(1).abortSignal(AbortSignal.timeout(15000));
         if(probe.error)throw probe.error;
         sample=probe.data?.[0];
       }
@@ -19304,23 +19326,16 @@
       const dateIndexes=dateHeaders.map(header=>sample?.source_cells?.cells?.findIndex(cell=>fieldKey(cell.header)===fieldKey(header))??-1);
       const compactDates=dateIndexes.every(index=>index>=0);
       const columns=[...new Set(['request_id','version',...selectedHeaders.map(header=>mapping[header])])].join(',')+(!compactDates?',source_cells':','+dateIndexes.map((index,offset)=>`date_cell_${offset}:source_cells->cells->${index}`).join(',')+',date_1904:source_cells->date1904');
-      const label=supportTicketReadCache.rows?'Refreshing Support Tickets':'Loading Support Tickets';
-      // Planned count is only a progress estimate; keyset paging avoids exact counts and deep OFFSET scans that hit statement timeout.
-      const estimate=await supabaseClient.from('support_tickets').select('request_id',{count:'planned',head:true}).abortSignal(AbortSignal.timeout(10000));
-      const total=estimate.error?0:estimate.count||0,rows=[];
+      const total=window.supportTickets?.state.total||0,loadedRows=[];
       let last=null;
-      offline.progress.set('support',label,0,total);
+      supportLoadProgress.total=total;renderSupportLoadProgress();
       for(;;){
-        let query=supabaseClient.from('support_tickets').select(columns).order('request_id',{ascending:true}).limit(1000);
+        let query=supabaseClient.from('support_tickets').select(columns).order('request_id',{ascending:true}).limit(last===null&&!hadCache?100:1000);
         if(last!==null)query=query.gt('request_id',last);
         const result=await query.abortSignal(AbortSignal.timeout(20000));
         if(result.error)throw result.error;
         if(!Array.isArray(result.data)||!result.data.length)break;
-        for(const row of result.data)rows.push(row);
-        last=result.data[result.data.length-1].request_id;
-        offline.progress.set('support',label,rows.length,total);
-        await offline.yieldUi();
-      }
+        const rows=result.data;
       for(let index=0;index<rows.length;index++){
         const row=rows[index];row.fields=Object.fromEntries(selectedHeaders.map(header=>[header,row[mapping[header]]??'']));
         for(const header of selectedHeaders)if(mapping[header]!=='request_id')delete row[mapping[header]];
@@ -19344,12 +19359,23 @@
           delete row.date_1904;
         }
         for(let offset=0;offset<missing.length;offset+=100){
-          const batch=missing.slice(offset,offset+100),result=await supabaseClient.from('support_tickets').select('request_id,source_cells').in('request_id',batch.map(row=>row.request_id));
+          const batch=missing.slice(offset,offset+100),result=await supabaseClient.from('support_tickets').select('request_id,source_cells').in('request_id',batch.map(row=>row.request_id)).abortSignal(AbortSignal.timeout(15000));
           if(result.error)throw result.error;
           const sources=new Map((result.data||[]).map(row=>[row.request_id,row.source_cells]));
           for(const row of batch){if(!sources.has(row.request_id))throw new Error('Support Ticket date metadata changed during loading. Refresh tickets to retry.');row.source_cells=sources.get(row.request_id);}
         }
       }
+        if(generation!==supportTicketReadCache.generation||account!==supportTicketReadAccount()||owner!==offline.scope)throw new Error('The account or ticket data changed during loading.');
+        loadedRows.push(...rows);last=rows[rows.length-1].request_id;
+        supportLoadProgress.received=loadedRows.length;renderSupportLoadProgress();
+        if(!hadCache){
+          supportTicketReadCache.rows=loadedRows.slice();supportTicketReadCache.headers=new Set(selectedHeaders);supportTicketReadCache.loadedAt=Date.now();
+          publishFirst(supportTicketReadCache.rows);
+          window.dispatchEvent(new CustomEvent('delivery-support-ready'));
+        }
+        await offline.yieldUi();
+      }
+      const rows=loadedRows;
       if(generation!==supportTicketReadCache.generation||account!==supportTicketReadAccount())throw new Error('Support Ticket data changed during loading. Please reopen the report.');
       await offline.localRows('support_tickets',rows);
       supportTicketReadCache.rows=rows;
@@ -19361,8 +19387,11 @@
       }
       return rows;
     })();
-    supportTicketReadCache.pending=pending;
-    try{return await pending;}finally{offline.progress.end('support');if(supportTicketReadCache.pending===pending)supportTicketReadCache.pending=null;}
+    const completion=pending.finally(()=>{progressObserver.disconnect();if(supportTicketReadCache.pending===completion){supportTicketReadCache.pending=null;supportTicketReadCache.firstPage=null;supportLoadProgress.active=false;renderSupportLoadProgress();}});
+    supportTicketReadCache.pending=completion;
+    supportTicketReadCache.firstPage=Promise.race([completion,firstPage]);
+    completion.catch(supportRefreshWarning);
+    return refresh?completion:supportTicketReadCache.firstPage;
   }
   function supportAnalyticsRaw(record,field){
     return window.supportTickets?.value?window.supportTickets.value(record,field):String(record?.fields?.[field]??'');
@@ -28542,11 +28571,13 @@
       let cached=queryCache.get(key);
       if(!cached){
         const matched=[],query=String(args.p_query||'').toLowerCase(),filters=Object.entries(args.p_filters||{}).filter(([,value])=>Array.isArray(value)?value.length:Boolean(value));
+        const optionSets=Object.fromEntries([...window.supportTickets.headers,'Stage'].map(field=>[field,new Set()]));
         const metrics={total:0,open:0,closed:0,high:0,unassigned:0,average_age:null},groups=new Map();let ageTotal=0,ageCount=0;
         for(let index=0;index<rows.length;index++){
           if(signal?.aborted)throw new DOMException('Cancelled','AbortError');
           const row=rows[index];
           if(index%500===499)await offline.yieldUi();
+          for(const [field,values]of Object.entries(optionSets)){const value=ticketValue(row,field);if(value&&values.size<100)values.add(value);}
           if(query&&!Object.values(row.fields||{}).some(value=>String(value??'').toLowerCase().includes(query)))continue;
           if(!filters.every(([field,selected])=>(Array.isArray(selected)?selected:[selected]).includes(ticketValue(row,field))))continue;
           matched.push(row);
@@ -28568,29 +28599,27 @@
           const order=leftSort<rightSort?-1:leftSort>rightSort?1:0;
           return (args.p_direction>=0?1:-1)*order||(left.request_id<right.request_id?-1:left.request_id>right.request_id?1:0);
         },signal);
-        cached={rows:sorted,metrics,groups:[...groups.values()].map(group=>({name:group.name,total:group.total,open:group.open,closed:group.closed,average_age:group.ageCount?group.ageTotal/group.ageCount:null})).sort((a,b)=>b.total-a.total||collator.compare(a.name,b.name))};
+        cached={rows:sorted,metrics,options:Object.fromEntries(Object.entries(optionSets).map(([field,values])=>[field,[...values].sort(collator.compare)])),groups:[...groups.values()].map(group=>({name:group.name,total:group.total,open:group.open,closed:group.closed,average_age:group.ageCount?group.ageTotal/group.ageCount:null})).sort((a,b)=>b.total-a.total||collator.compare(a.name,b.name))};
         queryCache.set(key,cached);while(queryCache.size>3)queryCache.delete(queryCache.keys().next().value);
       }
-      return {data:{records:args.p_summary?[]:cached.rows.slice(args.p_offset,args.p_offset+args.p_limit),total:cached.rows.length,groups:args.p_summary?cached.groups.slice(args.p_offset,args.p_offset+args.p_limit):[],group_total:cached.groups.length,metrics:cached.metrics,options:null},error:null};
+      return {data:{records:args.p_summary?[]:cached.rows.slice(args.p_offset,args.p_offset+args.p_limit),total:cached.rows.length,groups:args.p_summary?cached.groups.slice(args.p_offset,args.p_offset+args.p_limit):[],group_total:cached.groups.length,metrics:cached.metrics,options:cached.options},error:null};
     }
     supabaseClient.rpc=function(name,args,options){
       if(name!=='support_ticket_page')return previousRpc(name,args,options);
       let signal;
       const promise=Promise.resolve().then(async()=>{
-        const rows=await sharedTickets();
+        const rows=await loadSupportTicketRows();
         if(signal?.aborted)throw new DOMException('Cancelled','AbortError');
-        if(rows)return localTicketPage(rows,args,signal);
-        const request=previousRpc(name,args,options);if(signal&&request.abortSignal)request.abortSignal(signal);
-        const result=await request;
-        if(!result.error&&navigator.onLine&&offline.reachable&&!supportTicketReadCache.pending)setTimeout(()=>loadSupportTicketRows().catch(error=>console.warn('Support dataset warming deferred:',error)),100);
-        return result;
+        return localTicketPage(rows,args,signal);
       });
       return {then:(resolve,reject)=>promise.then(resolve,reject),abortSignal(value){signal=value;return this;}};
     };
-    const previousOptions=window.supportTickets.filterOptions;
+    const renderTickets=window.supportTickets.render;
+    window.supportTickets.render=function(){const result=renderTickets.apply(this,arguments);renderSupportLoadProgress();return result;};
+    const renderTicketWorkspace=window.renderFlatWorkspacePage;
+    window.renderFlatWorkspacePage=function(){const result=renderTicketWorkspace.apply(this,arguments);renderSupportLoadProgress();return result;};
     window.supportTickets.filterOptions=async function(field,...args){
-      const rows=await sharedTickets();
-      if(!rows)return previousOptions.call(this,field,...args);
+      const rows=await sharedTickets()||await loadSupportTicketRows();
       const values=new Set();
       const query=String(args[0]||'').toLowerCase();
       for(let index=0;index<rows.length;index++){const value=ticketValue(rows[index],field);if(value&&value.toLowerCase().includes(query))values.add(value);if(index%1000===999)await offline.yieldUi();}
@@ -28624,7 +28653,7 @@
       ensureSupportRealtime();
       queryCache.clear();supportAnalyticsSnapshot=null;
       if(currentWorkspaceView==='analytics')refreshSupportAnalyticsData().catch(offline.report);
-      if(currentWorkspaceView==='support'&&!editing())window.supportTickets.load(true).catch(offline.report);
+      if(currentWorkspaceView==='support'&&!offline.activeImport&&!document.querySelector('#support-ticket-dialog')&&!window.supportTickets.state.loading)window.supportTickets.load(true).then(renderSupportLoadProgress).catch(supportRefreshWarning);
     });
     let supportChannel=null,supportUiTimer=0,supportPersistTimer=0,supportPersisting=false;
     function ensureSupportRealtime(){
