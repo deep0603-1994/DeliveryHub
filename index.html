@@ -3688,6 +3688,7 @@
     projects.forEach(project => (project.milestones || []).forEach(normalizeMilestoneDeviationSchedule));
     projects.forEach(applyDerivedMilestoneSequence);
     await synchronizeInitiativeRevisedEndDates();
+    updateDailyTrackerBadge();
 
     populateProgramDropdown();
     if (render) {
@@ -11318,6 +11319,7 @@
 
   function renderProjects() {
     clearMilestoneDragState();
+    updateDailyTrackerBadge();
     const masterContainer =
       document.getElementById(
         'projects-container'
