@@ -75,6 +75,12 @@
       /* Smooth transitions for sidebar toggle */
       #sidebar { transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
       #main-content { transition: margin-left 0.25s cubic-bezier(0.4, 0, 0.2, 1); }
+      #projects-container .delivery-card-heading h2 { max-width:100%; white-space:normal; overflow-wrap:break-word; }
+      @media (min-width: 1025px) {
+        #projects-container .delivery-card-heading { flex:1 1 0%; min-width:0; max-width:100%; }
+        #projects-container .delivery-card-heading > div { flex:1 1 0%; min-width:0; }
+        #projects-container .delivery-card-heading + div { flex-shrink:0; }
+      }
 
       /* Expanded Sidebar State */
       .sidebar-expanded { width: 16rem; }
@@ -83,6 +89,12 @@
       /* Collapsed Sidebar State (Icons Only) */
       .sidebar-collapsed { width: 4.5rem !important; }
       .main-collapsed { margin-left: 4.5rem !important; }
+
+      @media (max-width: 1024px) {
+        #main-content.main-expanded { margin-left:4.5rem; }
+        #main-content { min-width:0; max-width:calc(100% - 4.5rem); height:max-content; min-height:100dvh; }
+        #sidebar { max-width:calc(100vw - 1rem); }
+      }
 
       /* Hide text & badges when collapsed */
       .sidebar-collapsed .sidebar-text,
@@ -2490,7 +2502,7 @@
         node.style.display=mode?'':'none';node.dataset.mode=mode;
         if(!mode){lastMode='';return;}
         if(mode!==lastMode){
-          if(mode==='offline'||mode==='syncing'||mode==='attention'&&!lastMode)node.classList.remove('collapsed');
+          if(mode==='offline'||mode==='syncing'||mode==='attention'&&!lastMode)node.classList.toggle('collapsed',window.matchMedia('(max-width: 640px)').matches);
           if(mode==='summary')node.classList.add('collapsed');
           lastMode=mode;
         }
@@ -2623,8 +2635,22 @@
         const signature=JSON.stringify([options.method,String(url),options.body||'']);
         const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(signature)))].map(n=>n.toString(16).padStart(2,'0')).join('');
         const occurrence=job.seen.get(digest)||0;job.seen.set(digest,occurrence+1);
-        const key=scoped(`${job.key}|${digest}|${occurrence}`,owner),checkpoint=await get('checkpoints',key);
-        if(checkpoint?.status==='confirmed')return new Response(checkpoint.text||null,{status:checkpoint.httpStatus,headers:checkpoint.headers});
+        const key=scoped(`${job.key}|${digest}|${occurrence}`,owner);
+        let checkpoint=await get('checkpoints',key);
+        if(!checkpoint&&job.background&&['POST','PATCH','DELETE'].includes(options.method)){
+          const comparable=text=>{
+            const value=JSON.parse(text||'null');
+            const row=item=>item&&typeof item==='object'?Object.fromEntries(Object.entries(item).filter(([field])=>!['created_at','created_by','updated_at','modified_at','modified_by','archived_at','archived_by'].includes(field))):item;
+            return Array.isArray(value)?value.map(row):row(value);
+          };
+          job.recoveryCheckpoints??=await list('checkpoints',owner);
+          const payload=comparable(options.body);
+          checkpoint=job.recoveryCheckpoints.find(saved=>saved.job===job.key&&saved.url===String(url)&&saved.method===options.method&&['confirmed','sending'].includes(saved.status)&&!job.replayed?.has(saved.key)&&sameValue(comparable(saved.payload),payload));
+        }
+        if(checkpoint?.status==='confirmed'){
+          (job.replayed??=new Set()).add(checkpoint.key);
+          return new Response(checkpoint.text||null,{status:checkpoint.httpStatus,headers:checkpoint.headers});
+        }
         const isRpc=new URL(url).pathname.includes('/rpc/');
         const mutating=!['GET','HEAD'].includes(options.method)&&!(isRpc&&readRpcs.has(new URL(url).pathname.split('/').pop()));
         if(checkpoint?.status==='sending'&&mutating){
@@ -3458,7 +3484,7 @@
           row.initiative_type || '',
 
         crNo:
-          row.cr_no || '',
+          String(row.cr_no ?? row.cr_number ?? '').trim(),
 
         vertical:
           row.vertical || '',
@@ -3665,11 +3691,9 @@
 
     populateProgramDropdown();
     if (render) {
-      const scrollX = window.scrollX, scrollY = window.scrollY;
+      const state=captureDeliveryViewState(document.activeElement,{layoutOnly:true});
       renderProjects();
-      requestAnimationFrame(() => {
-        window.scrollTo(scrollX, scrollY);
-      });
+      restoreDeliveryViewState(state,{restoreFocus:false});
     }
 
     return true;
@@ -3679,13 +3703,13 @@
     for (const initiative of initiatives || []) {
       if (initiative.recordStatus === 'deleted') continue;
       const targetEndDate = String(initiative.targetEndDate || '').slice(0, 10);
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(targetEndDate)) continue;
+      if (targetEndDate && !/^\d{4}-\d{2}-\d{2}$/.test(targetEndDate)) continue;
 
       const deadlines = (initiative.milestones || [])
         .filter(milestone => milestone.recordStatus !== 'deleted')
         .map(milestone => String(milestone.deadline || milestone.endDate || '').slice(0, 10))
         .filter(deadline => /^\d{4}-\d{2}-\d{2}$/.test(deadline));
-      if (!deadlines.some(deadline => deadline > targetEndDate)) continue;
+      if (!deadlines.length || (targetEndDate && !deadlines.some(deadline => deadline > targetEndDate))) continue;
 
       const latestDeadline = deadlines.sort().at(-1);
       if (latestDeadline === initiative.revisedEndDate) continue;
@@ -3754,9 +3778,21 @@
       }
 
       function initSidebar() {
-        const savedState = localStorage.getItem('portal_nav_state') || 'expanded';
+        const savedState = window.matchMedia('(max-width: 1024px)').matches ? 'collapsed' : localStorage.getItem('portal_nav_state') || 'expanded';
         const sidebar = document.getElementById('sidebar');
         const mainContent = document.getElementById('main-content');
+        const header=mainContent.querySelector(':scope > header');
+        sidebar.querySelectorAll('.sidebar-link').forEach(control=>{
+          const label=control.querySelector('.sidebar-text')?.textContent.trim();
+          if(label){if(!control.hasAttribute('aria-label'))control.setAttribute('aria-label',label);if(!control.title)control.title=label;}
+        });
+        if(header&&!header.deliveryHeightObserver&&typeof ResizeObserver!=='undefined'){
+          header.deliveryHeightObserver=new ResizeObserver(()=>{
+            const height=`${Math.ceil(header.getBoundingClientRect().height)}px`;
+            if(mainContent.style.getPropertyValue('--delivery-header-height')!==height)mainContent.style.setProperty('--delivery-header-height',height);
+          });
+          header.deliveryHeightObserver.observe(header);
+        }
         if (savedState === 'collapsed') {
           sidebar.classList.remove('sidebar-expanded');
           sidebar.classList.add('sidebar-collapsed');
@@ -8574,7 +8610,7 @@
         if(enabled('Program')&&includes([program.id,program.sequenceNo,program.name,program.owner,program.assignedTo,program.vertical,program.impactCategory,program.measurableImpact,program.businessBenefit,...assigned(program)]))programMatches.add(key(program.id));
       }
       for(const project of projects){
-        const own=enabled('Initiative')&&includes([project.id,project.sequenceNo,project.name,project.type,project.crNo,project.vertical,project.businessOwner,project.assignedTo,project.impactCategory,project.measurableImpact,project.businessBenefit,project.deliveryMethod,...assigned(project)]);
+        const own=enabled('Initiative')&&includes([project.id,project.sequenceNo,project.name,project.type,project.crNo,project.cr_no,project.cr_number,project.vertical,project.businessOwner,project.assignedTo,project.impactCategory,project.measurableImpact,project.businessBenefit,project.deliveryMethod,...assigned(project)]);
         const tracks=new Set(),ownTracks=new Set(),milestones=new Set(),openTracks=new Set();
         for(const track of getVisibleInitiativeTracks(project))if(enabled('Track')&&includes([track.id,track.sequenceNo,track.name,track.owner,track.assignedTo,track.description])){tracks.add(key(track.id));ownTracks.add(key(track.id));}
         for(const milestone of getVisibleInitiativeMilestones(project))if(enabled('Milestone')&&includes([milestone.id,milestone.sequenceNo,milestone.title,milestone.actions,milestone.owner,milestone.dependency,milestone.remarks,milestone.kpi,milestone.bucket])){
@@ -8788,7 +8824,7 @@
             <!-- Structured Initiative Header (mirrors Program gradient) -->
             <div class="px-5 py-4 ${initiativeTheme.header}" ondblclick="if(event.target.closest('[data-milestone-row=true]')){event.preventDefault();event.stopPropagation();return false;}openProjectModal(${p.id})" title="Double Click to Edit Initiative">
               <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-                <div class="flex items-start gap-3 min-w-0 cursor-pointer" ondblclick="if(event.target.closest('[data-milestone-row=true]')){event.preventDefault();event.stopPropagation();return false;}openProjectModal(${p.id})" title="Double Click to Edit Initiative">
+                <div class="flex items-start gap-3 min-w-0 cursor-pointer delivery-card-heading" ondblclick="if(event.target.closest('[data-milestone-row=true]')){event.preventDefault();event.stopPropagation();return false;}openProjectModal(${p.id})" title="Double Click to Edit Initiative">
                   <button type="button" onclick="toggleProjectCollapse(${p.id})" class="mt-0.5 p-1 rounded-lg hover:bg-white/10 transition" title="Expand or collapse Initiative">
                     <i data-lucide="${p.collapsed ? 'chevron-right' : 'chevron-down'}" class="w-5 h-5"></i>
                   </button>
@@ -10046,7 +10082,7 @@
     const srcIndex = milestones.findIndex(m => Number(m.id) === Number(srcMilestoneId));
     const destIndex = milestones.findIndex(m => Number(m.id) === Number(destMilestoneId));
     if (srcIndex < 0 || destIndex < 0 || srcIndex === destIndex) return;
-    if (Number(milestones[srcIndex].trackId || 0) !== Number(milestones[destIndex].trackId || 0)) {
+    if (shouldRenderInitiativeAsAgile(project) && Number(milestones[srcIndex].trackId || 0) !== Number(milestones[destIndex].trackId || 0)) {
       showToast('Reorder Milestones within the same Track.', 'info');
       return;
     }
@@ -11549,7 +11585,7 @@
               class="flex flex-col lg:flex-row lg:items-center justify-between gap-3"
             >
               <div
-                class="flex items-start gap-3 min-w-0"
+                class="flex items-start gap-3 min-w-0 delivery-card-heading"
               >
                 <button
                   type="button"
@@ -16660,52 +16696,94 @@
   function formatMilestoneTotalOverallDeviation(milestone){return `${getMilestoneTotalOverallDeviation(milestone)} day(s)`;}
 
   function findMilestoneRecord(pid,mid){const project=projects.find(p=>Number(p.id)===Number(pid));return{project,milestone:project?.milestones?.find(m=>Number(m.id)===Number(mid))};}
+  let deliveryViewNavigationVersion=0,deliveryTargetNavigationActive=false;
+  function deliveryStickyOffset(){
+    let bottom=0;
+    for(const element of document.querySelectorAll('#main-content > header,#overview-selection-actions,#overview-control-bar,[data-delivery-filter-page="overview"]')){
+      const style=getComputedStyle(element),rect=element.getBoundingClientRect(),top=parseFloat(style.top);
+      if(['sticky','fixed'].includes(style.position)&&Number.isFinite(top)&&rect.height&&element.getClientRects().length&&!element.closest('.hidden,[hidden]'))bottom=Math.max(bottom,top+rect.height);
+    }
+    return bottom;
+  }
   function deliveryElementSelector(element){
     if(!element||element===document.body)return null;
     if(element.id)return `#${CSS.escape(element.id)}`;
+    if(element.dataset.inlineMilestoneId)return `[data-inline-milestone-id="${CSS.escape(element.dataset.inlineMilestoneId)}"][data-inline-milestone-project-id="${CSS.escape(element.dataset.inlineMilestoneProjectId||'')}"]`;
+    if(element.dataset.milestoneId)return `[data-milestone-id="${CSS.escape(element.dataset.milestoneId)}"]`;
+    if(element.dataset.overviewSearchLevel&&element.dataset.overviewSearchId)return `[data-overview-search-level="${CSS.escape(element.dataset.overviewSearchLevel)}"][data-overview-search-id="${CSS.escape(element.dataset.overviewSearchId)}"]`;
+    if(element.dataset.trackOrderId)return `[data-track-order-id="${CSS.escape(element.dataset.trackOrderId)}"]`;
     const parent=element.parentElement;
     if(!parent)return null;
     const siblings=[...parent.children].filter(sibling=>sibling.tagName===element.tagName);
     return `${deliveryElementSelector(parent)||'body'} > ${element.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(element)+1})`;
   }
-  function captureDeliveryViewState(origin=document.activeElement){
+  function captureDeliveryViewState(origin=document.activeElement,options={}){
     const row=origin?.closest('[data-inline-milestone-id],[data-milestone-id]');
+    const root=document.getElementById('projects-container'),recordSelector='tr[data-inline-milestone-id],tr[data-milestone-id],[data-track-order-id],[data-overview-search-level]';
+    const sticky=deliveryStickyOffset();
+    const visible=element=>element?.getClientRects().length&&!element.closest('.hidden,[hidden]');
+    let record=origin?.closest(recordSelector);
+    if(!root?.contains(record)||!visible(record)||record.getBoundingClientRect().bottom<=sticky||record.getBoundingClientRect().top>=innerHeight)record=null;
+    if(!record&&currentWorkspaceView==='overview'){
+      const left=Math.max(0,root?.getBoundingClientRect().left||0)+100;
+      record=document.elementFromPoint(Math.min(innerWidth-20,left),sticky+32)?.closest(recordSelector);
+      if(!root?.contains(record)||!visible(record))record=null;
+      if(!record)record=[...(root?.querySelectorAll(recordSelector)||[])].find(element=>{const rect=element.getBoundingClientRect();return visible(element)&&rect.bottom>sticky&&rect.top<innerHeight;});
+    }
+    const anchor=record?{selector:deliveryElementSelector(record),top:record.getBoundingClientRect().top,milestoneId:record.dataset.inlineMilestoneId||record.dataset.milestoneId}:null;
+    const neighbors=[];
+    if(record){
+      for(const sibling of [record.nextElementSibling,record.previousElementSibling])if(sibling?.matches(recordSelector)&&visible(sibling))neighbors.push({selector:deliveryElementSelector(sibling),top:anchor.top});
+      const parent=record.parentElement?.closest(recordSelector);
+      if(parent&&visible(parent))neighbors.push({selector:deliveryElementSelector(parent),top:Math.max(sticky+16,parent.getBoundingClientRect().top)});
+    }
     return{
       scrollX:window.scrollX,scrollY:window.scrollY,
+      anchor,neighbors,workspace:currentWorkspaceView,navigationVersion:deliveryViewNavigationVersion,
       focusElement:origin,focusSelector:deliveryElementSelector(origin),
       milestoneId:row?.dataset.inlineMilestoneId||row?.dataset.milestoneId||null,
       scrollContainers:[...document.querySelectorAll('body *')].filter(element=>element.scrollTop||element.scrollLeft).map(element=>({element,selector:deliveryElementSelector(element),top:element.scrollTop,left:element.scrollLeft})),
-      programs:new Map(programs.map(program=>[Number(program.id),program.collapsed])),
-      projects:new Map(projects.map(project=>[Number(project.id),project.collapsed])),
-      tracks:new Map(projects.flatMap(project=>(project.tracks||[]).map(track=>[Number(track.id),track.collapsed])))
+      programs:options.layoutOnly?null:new Map(programs.map(program=>[Number(program.id),program.collapsed])),
+      projects:options.layoutOnly?null:new Map(projects.map(project=>[Number(project.id),project.collapsed])),
+      tracks:options.layoutOnly?null:new Map(projects.flatMap(project=>(project.tracks||[]).map(track=>[Number(track.id),track.collapsed])))
     };
   }
-  function restoreDeliveryViewState(state){
-    if(!state)return;
-    programs.forEach(program=>{if(state.programs.has(Number(program.id)))program.collapsed=state.programs.get(Number(program.id));});
+  function restoreDeliveryViewState(state,options={}){
+    const current=()=>state&&!deliveryTargetNavigationActive&&(state.navigationVersion===undefined||state.navigationVersion===deliveryViewNavigationVersion)&&(!state.workspace||state.workspace===currentWorkspaceView);
+    if(!current())return;
+    programs.forEach(program=>{if(state.programs?.has(Number(program.id)))program.collapsed=state.programs.get(Number(program.id));});
     projects.forEach(project=>{
-      if(state.projects.has(Number(project.id)))project.collapsed=state.projects.get(Number(project.id));
-      (project.tracks||[]).forEach(track=>{if(state.tracks.has(Number(track.id)))track.collapsed=state.tracks.get(Number(track.id));});
+      if(state.projects?.has(Number(project.id)))project.collapsed=state.projects.get(Number(project.id));
+      (project.tracks||[]).forEach(track=>{if(state.tracks?.has(Number(track.id)))track.collapsed=state.tracks.get(Number(track.id));});
     });
     const restorePosition=()=>{
+      if(!current())return;
       let target=state.focusElement?.isConnected?state.focusElement:state.focusSelector?document.querySelector(state.focusSelector):null;
       if(target===document.body||target===document.documentElement)target=null;
       if((!target||!target.getClientRects().length||target.closest('.hidden,[hidden]'))&&state.milestoneId){
         const id=CSS.escape(String(state.milestoneId));
         target=[...document.querySelectorAll(`[data-inline-milestone-id="${id}"],[data-milestone-id="${id}"],tr[ondblclick="startDailyTrackerEdit(${id})"]`)].find(element=>element.getClientRects().length&&!element.closest('.hidden,[hidden]'));
       }
-      if(target&&target.getClientRects().length&&!target.closest('.hidden,[hidden]')){
-        if(!target.matches('input,textarea,select,button,a[href],[tabindex]'))target.tabIndex=-1;
-        target.focus({preventScroll:true});
-      }
       (state.scrollContainers||[]).forEach(saved=>{
         const element=saved.element.isConnected?saved.element:saved.selector?document.querySelector(saved.selector):null;
         element?.scrollTo({left:saved.left,top:saved.top,behavior:'instant'});
       });
-      window.scrollTo({left:state.scrollX,top:state.scrollY,behavior:'instant'});
+      let anchor=state.anchor,element=anchor?.selector?document.querySelector(anchor.selector):null;
+      if(anchor?.milestoneId&&state.milestoneId&&String(state.milestoneId)!==String(anchor.milestoneId))element=document.querySelector(`[data-inline-milestone-id="${CSS.escape(String(state.milestoneId))}"],[data-milestone-id="${CSS.escape(String(state.milestoneId))}"]`);
+      if(!element?.getClientRects().length||element.closest('.hidden,[hidden]')){
+        anchor=(state.neighbors||[]).find(saved=>{const sibling=document.querySelector(saved.selector);return sibling?.getClientRects().length&&!sibling.closest('.hidden,[hidden]');});
+        element=anchor?document.querySelector(anchor.selector):null;
+      }
+      const focus=target?.getClientRects().length&&!target.closest('.hidden,[hidden]')?target:element;
+      if(options.restoreFocus!==false&&focus){
+        if(!focus.matches('input,textarea,select,button,a[href],[tabindex]'))focus.tabIndex=-1;
+        focus.focus({preventScroll:true});
+      }
+      const top=element?window.scrollY+element.getBoundingClientRect().top-anchor.top:state.scrollY;
+      if(Math.abs(window.scrollY-top)>.5||Math.abs(window.scrollX-state.scrollX)>.5)window.scrollTo({left:state.scrollX,top,behavior:'instant'});
     };
     restorePosition();
-    requestAnimationFrame(restorePosition);
+    if(options.defer!==false)requestAnimationFrame(()=>requestAnimationFrame(restorePosition));
   }
   function openMilestoneDeviationModal(pid,mid){const {project,milestone}=findMilestoneRecord(pid,mid);if(!project||!milestone||!canEditInitiative(project))return showToast('Permission denied.','error');const currentStatus=getEffectiveMilestoneStatus(milestone);if(!['WIP','Pending','Deviated','Deviation'].includes(currentStatus))return showToast('Deviation can be recorded only for WIP, Pending, or Deviated Milestones.','error');const end=milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);document.getElementById('deviation-project-id').value=pid;document.getElementById('deviation-milestone-id').value=mid;document.getElementById('milestone-deviation-context').innerText=`${project.name} | ${milestone.actions||milestone.title}`;document.getElementById('deviation-current-start').innerText=formatDate(milestone.startDate);document.getElementById('deviation-current-end').innerText=formatDate(end);document.getElementById('deviation-new-start').value=getNextWorkingDay(end||localToday());document.getElementById('deviation-new-days').value=/^\d+$/.test(String(milestone.days||''))?milestone.days:'';document.getElementById('deviation-dependency').value=milestone.dependency||'';document.getElementById('deviation-remarks').value='';calculateDeviationPreview();const x=document.getElementById('milestone-deviation-modal');x.classList.remove('hidden');x.classList.add('flex');lucide.createIcons();}
   function closeMilestoneDeviationModal(){const x=document.getElementById('milestone-deviation-modal');x.classList.add('hidden');x.classList.remove('flex');}
@@ -20503,6 +20581,7 @@
     const OVERVIEW_FILTER_IDS=['filter-search','filter-type','filter-vertical','filter-impact','filter-status','filter-record-status','filter-critical','filter-reviewed'];
     let pendingNavigation=null;
     let previousOverviewFilters=null;
+    let previousOverviewKpi=null;
     let restoreOverviewFiltersOnNextVisit=false;
     let navigationInProgress=false;
     let retryFrame=0;
@@ -20512,9 +20591,20 @@
 
     function clearRetry(){if(retryFrame){cancelAnimationFrame(retryFrame);retryFrame=0;}if(retryTimer){clearTimeout(retryTimer);retryTimer=0;}}
     function clearHighlight(){if(highlightTimer){clearTimeout(highlightTimer);highlightTimer=0;}if(highlightedRow){highlightedRow.classList.remove('daily-tracker-milestone-target-highlight');highlightedRow=null;}}
-    function clearPending(){pendingNavigation=null;sessionStorage.removeItem(SESSION_KEY);clearRetry();}
-    function snapshotOverviewFilters(){return Object.fromEntries(OVERVIEW_FILTER_IDS.map(id=>[id,document.getElementById(id)?.value]).filter(([,value])=>value!==undefined));}
-    function applyOverviewFilters(values){Object.entries(values||{}).forEach(([id,value])=>{const element=document.getElementById(id);if(element)element.value=value;});}
+    function clearPending(){pendingNavigation=null;deliveryTargetNavigationActive=false;sessionStorage.removeItem(SESSION_KEY);clearRetry();}
+    function snapshotOverviewFilters(){
+      const root=document.querySelector('[data-delivery-filter-page="overview"]')||document.getElementById('overview-filter-row');
+      const ids=new Set([...OVERVIEW_FILTER_IDS,...[...(root?.querySelectorAll('input[id],select[id]')||[])].map(element=>element.id)]);
+      return Object.fromEntries([...ids].map(id=>{
+        const element=document.getElementById(id);return [id,element?{value:element.value,selected:element.tagName==='SELECT'&&currentWorkspaceView==='overview'?window.trackerMultiFilters?.values(id,element.value):null}:null];
+      }).filter(([,value])=>value));
+    }
+    function applyOverviewFilters(values){
+      Object.entries(values||{}).forEach(([id,saved])=>{const element=document.getElementById(id);if(element){element.value=saved.value;if(saved.selected)window.trackerMultiFilters?.set(id,saved.selected);}});
+      activeKpiFilter=previousOverviewKpi;
+      for(const [id,saved]of Object.entries(values||{}))if(id.startsWith('engineer-filter-')&&saved.value)document.getElementById(id)?.dispatchEvent(new Event('change',{bubbles:true}));
+      window.trackerMultiFilters?.refresh();
+    }
     function resolveMilestoneHierarchy(milestoneId){
       const id=Number(milestoneId);
       for(const initiative of projects){
@@ -20533,6 +20623,11 @@
       return {ok:true};
     }
     function adjustBlockingFilters(target){
+      const before=snapshotOverviewFilters();
+      previousOverviewKpi=activeKpiFilter;
+      const hasFilters=Boolean(activeKpiFilter)||Object.entries(before).some(([id,saved])=>saved.selected?.length?saved.selected.some(value=>value!==({'filter-record-status':'active','filter-reviewed':'all'}[id]||'')):saved.value!==({'filter-record-status':'active','filter-reviewed':'all'}[id]||''));
+      if(hasFilters&&typeof window.resetCurrentPageFilters==='function')window.resetCurrentPageFilters();
+      activeKpiFilter=null;
       const adjusted={};
       const assignments={
         'filter-search':'',
@@ -20544,8 +20639,9 @@
         'filter-reviewed':'all',
         'filter-record-status':String(target.milestone.recordStatus||target.initiative.recordStatus||'active').toLowerCase()==='deleted'?'deleted':'active'
       };
-      Object.entries(assignments).forEach(([id,value])=>{const element=document.getElementById(id);if(element&&element.value!==value){adjusted[id]=element.value;element.value=value;}});
-      if(Object.keys(adjusted).length){previousOverviewFilters={...snapshotOverviewFilters(),...adjusted};restoreOverviewFiltersOnNextVisit=true;return true;}
+      Object.entries(assignments).forEach(([id,value])=>{const element=document.getElementById(id);if(element){if(element.value!==value)adjusted[id]=element.value;element.value=value;if(element.tagName==='SELECT')window.trackerMultiFilters?.set(id,['','all'].includes(value)?[]:[value]);}});
+      window.trackerMultiFilters?.refresh();
+      if(hasFilters||Object.keys(adjusted).length){previousOverviewFilters=before;restoreOverviewFiltersOnNextVisit=true;return true;}
       return false;
     }
     function expandTarget(target){
@@ -20553,64 +20649,84 @@
       target.initiative.collapsed=false;
       if(target.track)target.track.collapsed=false;
     }
-    function locateTargetRow(target){return document.querySelector(`tr[data-milestone-row="true"][data-inline-milestone-id="${CSS.escape(String(target.milestoneId))}"]`);}
+    function locateTargetRow(target){return document.querySelector(`#projects-container tr[data-milestone-row="true"][data-inline-milestone-project-id="${CSS.escape(String(target.initiativeId))}"][data-inline-milestone-id="${CSS.escape(String(target.milestoneId))}"]`);}
     function highlightTarget(row){
       clearHighlight();highlightedRow=row;row.classList.add('daily-tracker-milestone-target-highlight');
-      row.scrollIntoView({behavior:'smooth',block:'center',inline:'nearest'});
+      for(let parent=row.parentElement;parent&&parent!==document.body;parent=parent.parentElement){
+        if(parent.scrollHeight>parent.clientHeight+1&&['auto','scroll'].includes(getComputedStyle(parent).overflowY)){
+          const top=parent.getBoundingClientRect().top+(row.closest('table')?.querySelector('thead')?.getBoundingClientRect().height||0)+12;
+          parent.scrollTo({left:parent.scrollLeft,top:parent.scrollTop+row.getBoundingClientRect().top-top,behavior:'instant'});
+        }
+      }
+      const top=window.scrollY+row.getBoundingClientRect().top-deliveryStickyOffset()-20;
+      window.scrollTo({left:window.scrollX,top,behavior:'instant'});
+      if(!row.hasAttribute('tabindex'))row.tabIndex=-1;
+      row.focus({preventScroll:true});
       highlightTimer=setTimeout(()=>{if(highlightedRow===row){row.classList.remove('daily-tracker-milestone-target-highlight');highlightedRow=null;}highlightTimer=0;},4500);
     }
     function failNavigation(message,targetId){
       console.warn('Daily Tracker milestone deep-link could not be resolved.',{milestoneId:Number(targetId)});
       clearPending();navigationInProgress=false;showToast(message,'error');
     }
+    function currentTarget(target){return pendingNavigation?.milestoneId===target.milestoneId&&target.navigationVersion===deliveryViewNavigationVersion&&currentWorkspaceView==='overview';}
     function revealWithBoundedRetry(target,filtersAdjusted){
-      clearRetry();let attempts=0;const maximumAttempts=40;
+      clearRetry();let attempts=0,stable=0,previous=null;const maximumAttempts=180;
       const attempt=()=>{
+        if(!currentTarget(target))return;
         attempts+=1;
         const row=locateTargetRow(target);
-        if(row){
-          highlightTarget(row);clearPending();navigationInProgress=false;
-          if(filtersAdjusted)showToast('Project Overview filters were adjusted to display the selected milestone.','info');
-          return;
+        if(row?.getClientRects().length&&!row.closest('.hidden,[hidden]')){
+          const rect=row.getBoundingClientRect(),geometry=[rect.top+window.scrollY,rect.height,document.documentElement.scrollHeight,deliveryStickyOffset()];
+          stable=previous&&geometry.every((value,index)=>Math.abs(value-previous[index])<.5)?stable+1:0;previous=geometry;
+          const animating=document.getElementById('projects-container')?.getAnimations?.({subtree:true}).some(animation=>animation.playState==='running'&&animation.effect?.getTiming().iterations!==Infinity);
+          if(stable>=2&&!animating){
+            highlightTarget(row);clearPending();navigationInProgress=false;
+            if(filtersAdjusted)showToast('Project Overview filters were adjusted to display the selected milestone.','info');
+            return;
+          }
         }
         if(attempts>=maximumAttempts){failNavigation('The selected milestone could not be located. It may have been archived, deleted, or changed.',target.milestoneId);return;}
-        retryTimer=setTimeout(()=>{retryFrame=requestAnimationFrame(attempt);},75);
+        retryFrame=requestAnimationFrame(attempt);
       };
       retryFrame=requestAnimationFrame(attempt);
     }
     function renderAndReveal(target){
+      if(!currentTarget(target))return;
+      overviewSearch.prepare();
       expandTarget(target);
       if(typeof resetDeliveryPagination==='function')resetDeliveryPagination();else if(typeof renderProjects==='function')renderProjects();
       requestAnimationFrame(()=>{
+        if(!currentTarget(target))return;
         const index=(deliveryFilteredTopLevelItems||[]).findIndex(item=>item.type==='program'?Number(item.program.id)===Number(target.programId):Number(item.project.id)===Number(target.initiativeId));
-        if(index>=0){deliveryCurrentPage=Math.floor(index/DELIVERY_PAGE_SIZE)+1;renderProjects();}
+        if(index>=0){deliveryCurrentPage=Math.floor(index/DELIVERY_PAGE_SIZE)+1;expandTarget(target);renderProjects();}
         revealWithBoundedRetry(target,Boolean(target.filtersAdjusted));
       });
     }
     window.navigateToOverviewMilestone=function(initiativeId,milestoneId,trackId=null){
       clearRetry();clearHighlight();
+      deliveryViewNavigationVersion++;deliveryTargetNavigationActive=true;
       const target=resolveMilestoneHierarchy(milestoneId),access=ensureAccess(target);
       if(!access.ok){
         showWorkspaceView('overview');
         failNavigation(access.reason==='access'?'You do not have access to the selected milestone.':'The selected milestone could not be located. It may have been archived, deleted, or changed.',milestoneId);
         return;
       }
-      target.initiativeId=Number(initiativeId)||target.initiativeId;
-      target.trackId=trackId===null||trackId===undefined?target.trackId:Number(trackId);
+      target.navigationVersion=deliveryViewNavigationVersion;
       previousOverviewFilters=snapshotOverviewFilters();
       pendingNavigation={source:'dailyTracker',milestoneId:target.milestoneId,initiativeId:target.initiativeId,programId:target.programId,trackId:target.trackId};
       sessionStorage.setItem(SESSION_KEY,JSON.stringify(pendingNavigation));
       navigationInProgress=true;
       showWorkspaceView('overview');
-      requestAnimationFrame(()=>{target.filtersAdjusted=adjustBlockingFilters(target);renderAndReveal(target);});
+      requestAnimationFrame(()=>{if(!currentTarget(target))return;target.filtersAdjusted=adjustBlockingFilters(target);renderAndReveal(target);});
     };
 
     const priorShowWorkspaceView=window.showWorkspaceView;
     window.showWorkspaceView=function(view){
-      if(view==='overview'&&!navigationInProgress&&restoreOverviewFiltersOnNextVisit&&previousOverviewFilters){
-        applyOverviewFilters(previousOverviewFilters);restoreOverviewFiltersOnNextVisit=false;previousOverviewFilters=null;
-      }
-      return priorShowWorkspaceView.apply(this,arguments);
+      if(view!=='overview'&&navigationInProgress){clearPending();navigationInProgress=false;}
+      const restore=view==='overview'&&!navigationInProgress&&restoreOverviewFiltersOnNextVisit&&previousOverviewFilters;
+      const result=priorShowWorkspaceView.apply(this,arguments);
+      if(restore){restoreOverviewFiltersOnNextVisit=false;applyOverviewFilters(previousOverviewFilters);previousOverviewFilters=null;renderProjects();}
+      return result;
     };
 
     // Resume a pending target after a same-tab refresh without making it permanent.
@@ -20618,7 +20734,7 @@
       const saved=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');
       if(saved?.source==='dailyTracker'&&saved.milestoneId){
         const target=resolveMilestoneHierarchy(saved.milestoneId),access=ensureAccess(target);
-        if(access.ok){pendingNavigation=saved;navigationInProgress=true;requestAnimationFrame(()=>{showWorkspaceView('overview');requestAnimationFrame(()=>{previousOverviewFilters=snapshotOverviewFilters();target.filtersAdjusted=adjustBlockingFilters(target);renderAndReveal(target);});});}
+        if(access.ok){deliveryViewNavigationVersion++;target.navigationVersion=deliveryViewNavigationVersion;deliveryTargetNavigationActive=true;pendingNavigation=saved;navigationInProgress=true;requestAnimationFrame(()=>{showWorkspaceView('overview');requestAnimationFrame(()=>{if(!currentTarget(target))return;previousOverviewFilters=snapshotOverviewFilters();target.filtersAdjusted=adjustBlockingFilters(target);renderAndReveal(target);});});}
         else clearPending();
       }
     }catch(error){console.warn('Invalid pending Daily Tracker milestone navigation state.',error);clearPending();}
@@ -22791,9 +22907,12 @@
     if(modalOpen){
       const form=document.getElementById("milestone-form");
       if(!form) return;
+      const viewState=captureDeliveryViewState();
+      viewState.milestoneId=document.getElementById('m-id')?.value||viewState.milestoneId;
       saving=true;
       try{
         await saveMilestone({preventDefault(){}});
+        if(modal.classList.contains('hidden'))restoreDeliveryViewState(viewState);
       }finally{setTimeout(()=>saving=false,300);}
       return;
     }
@@ -22802,8 +22921,13 @@
       const pid=Number(row.dataset.inlineMilestoneProjectId);
       const mid=Number(row.dataset.inlineMilestoneId);
       if(Number.isFinite(pid)&&Number.isFinite(mid)){
+        const viewState=captureDeliveryViewState();
+        viewState.milestoneId=mid;
         saving=true;
-        try{ await saveInlineMilestone(pid,mid); }
+        try{
+          const saved=await saveInlineMilestone(pid,mid);
+          if(saved!==false)restoreDeliveryViewState(viewState);
+        }
         finally{ setTimeout(()=>saving=false,300); }
       }
     }
@@ -23593,7 +23717,6 @@
   #daily-multi-actions .daily-multi-primary,#daily-multi-actions .daily-multi-controls{display:flex;align-items:center;flex-wrap:wrap;gap:.5rem}
   #daily-multi-actions .daily-multi-instruction{font-size:.625rem;color:#64748b}
   #daily-multi-actions #daily-multi-count{margin-right:0!important;font-size:.75rem;font-weight:700;color:#4338ca}
-  @media(max-width:640px){#daily-overview-filter-bar{grid-template-columns:repeat(2,minmax(0,1fr))}#daily-overview-filter-bar .daily-search-host,#daily-overview-filter-bar .daily-filter-actions{grid-column:1/-1}}
   @media(max-width:640px){#daily-overview-filter-bar{grid-template-columns:minmax(0,1fr)}#daily-overview-filter-bar .daily-search-host,#daily-overview-filter-bar .daily-filter-actions{grid-column:auto}#daily-overview-filter-bar .daily-filter-actions{justify-content:stretch}#daily-overview-filter-bar .daily-filter-action{flex:1}#daily-overview-filter-bar.is-collapsed{grid-template-columns:minmax(0,1fr)!important}#daily-multi-actions{flex-direction:column;align-items:stretch!important}#daily-multi-actions .daily-multi-primary,#daily-multi-actions .daily-multi-controls{width:100%}#daily-multi-actions .daily-multi-controls{justify-content:flex-start}}
   </style>
   <script id="daily-tracker-project-overview-layout-standardization-js">
@@ -23668,7 +23791,7 @@
       window.lucide?.createIcons();
     }
     const original=window.renderDailyTrackerPage;
-    if(typeof original==='function')window.renderDailyTrackerPage=function(){const x=window.scrollX,y=window.scrollY;const result=original.apply(this,arguments);standardize();requestAnimationFrame(()=>{standardize();window.scrollTo(x,y);});return result;};
+    if(typeof original==='function')window.renderDailyTrackerPage=function(){const x=window.scrollX,y=window.scrollY;const result=original.apply(this,arguments);standardize();requestAnimationFrame(()=>{if(currentWorkspaceView==='daily'){standardize();window.scrollTo(x,y);}});return result;};
     const previousShow=window.showWorkspaceView;
     if(typeof previousShow==='function')window.showWorkspaceView=function(){const result=previousShow.apply(this,arguments);if(window.currentWorkspaceView==='daily')requestAnimationFrame(standardize);return result;};
     document.addEventListener('DOMContentLoaded',()=>requestAnimationFrame(standardize),{once:true});
@@ -23677,7 +23800,7 @@
   </script>
 
   <style id="shared-desktop-laptop-tablet-layout">
-  @media (min-width: 641px) {
+  @media (min-width: 1025px) {
     #main-content { min-width: 0; overflow-x: visible; }
     #main-content > header,
     #main-content > main {
@@ -23856,6 +23979,7 @@
       grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     }
   }
+  @media (min-width: 1025px) {
   @container (max-width: 1100px) {
     #main-content > main > div:first-child { gap: clamp(2px, .6cqi, 12px) !important; }
     #main-content > main .kpi-slicer { padding: clamp(.35rem, .9cqi, 1rem) !important; }
@@ -23908,12 +24032,81 @@
     #analytics-parameter-card #analytics-filters input,
     #analytics-parameter-card #analytics-filters select { font-size: clamp(8px, .9cqi, 12px) !important; padding-inline: clamp(2px, .45cqi, 8px) !important; }
   }
+  }
   </style>
   <style id="mobile-overview-kpi-layout">
+  @media (max-width: 1024px) {
+    #main-content > main,#workspace-flat-page,#analytics-page,#report-builder-page,#system-reports-page,#custom-reports-page { min-width:0; max-width:100%; box-sizing:border-box; }
+    #main-content > main { width:100%; padding-inline:.75rem; }
+    #main-content > header > div { height:auto; min-height:4rem; padding-inline:.75rem; }
+    #main-content > header > div > div { height:auto; min-height:4rem; flex-wrap:wrap; gap:.5rem; padding-block:.5rem; }
+    #main-content > header > div > div > div { min-width:0; max-width:100%; flex-wrap:wrap; }
+    #workspace-page-title { white-space:normal; overflow-wrap:anywhere; }
+    #main-content > main > div:first-child { grid-template-columns:repeat(3,minmax(0,1fr)) !important; }
+    #main-content .kpi-slicer { min-width:0; overflow-wrap:anywhere; }
+    #projects-container,#projects-container > *,#projects-container [data-overview-search-level],#projects-container [data-track-order-id] { min-width:0; max-width:100%; }
+    #projects-container .flex,#projects-container .grid { min-width:0; }
+    #projects-container [class~="lg:flex-row"] { flex-direction:column !important; align-items:stretch !important; }
+    #projects-container [class~="lg:flex-row"] > div,#projects-container .track-card-header > div { min-width:0; max-width:100%; flex-wrap:wrap; }
+    #projects-container [class~="lg:flex-row"] > div:last-child { flex-wrap:wrap; }
+    #projects-container .flex[class~="self-end"] { min-width:0; max-width:100%; flex-wrap:wrap; }
+    #projects-container .track-card-header { flex-wrap:wrap; align-items:flex-start; }
+    #projects-container h2,#projects-container .track-card-title,#projects-container .track-card-summary { overflow-wrap:anywhere; white-space:normal; }
+    #projects-container .mt-4.grid > div,#projects-container .mt-3.grid > div { min-width:0; overflow-wrap:anywhere; }
+    #projects-container .mt-4.grid .truncate,#projects-container .mt-3.grid .truncate { white-space:normal; overflow:visible; text-overflow:clip; }
+    #projects-container [class~="px-5"][class~="py-4"] { padding:.75rem; }
+    #projects-container button[onclick^="toggle"],#overview-control-bar button,#overview-selection-actions button { min-height:32px; flex-shrink:0; }
+    #overview-control-bar,#overview-selection-actions,#overview-bulk-action-toolbar,#bulk-action-toolbar,#flat-multi-control,#daily-multi-actions { max-width:100%; min-width:0; flex-wrap:wrap !important; box-sizing:border-box; }
+    #overview-control-bar > div,#daily-multi-actions > div { min-width:0; max-width:100%; flex-wrap:wrap !important; }
+    #overview-selection-actions,body.daily-tracker-view-active #daily-multi-actions { position:sticky !important; top:var(--delivery-header-height,65px) !important; z-index:29 !important; }
+    #overview-filter-row.unified-filter-container > .delivery-filter-actions { display:none !important; }
+    #main-content .overview-primary-filter-row,#main-content .unified-filter-primary { display:flex !important; flex-wrap:wrap !important; width:100%; min-width:0; overflow:visible; }
+    #main-content .overview-primary-filter-row > select { flex:1 1 140px !important; width:auto !important; min-width:0 !important; max-width:100% !important; }
+    #main-content .overview-primary-filter-row > .unified-search-host { flex:1 1 220px !important; max-width:100%; }
+    .delivery-page-filter-row,.unified-filter-container,.unified-filter-primary,.unified-filter-secondary { min-width:0; max-width:100%; box-sizing:border-box; }
+    .unified-filter-secondary { grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr)) !important; }
+    #daily-overview-filter-bar { grid-template-columns:repeat(auto-fit,minmax(min(160px,100%),1fr)); }
+    #workspace-flat-page .flex:has(> [data-support-sort]) { flex-wrap:wrap; min-width:0; max-width:100%; }
+    #workspace-flat-page [data-support-sort] { min-width:0; max-width:100%; flex:1 1 10rem; }
+    #workspace-flat-page .support-primary { grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr)); }
+    #workspace-flat-page .support-secondary { grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr)); }
+    #support-ticket-dialog .support-details { grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr)); }
+    #main-content :is(div,section):has(> table),#main-content .overflow-x-auto,#main-content .custom-scrollbar,.analytics-row-table { min-width:0; max-width:100%; overflow-x:auto; overscroll-behavior-x:contain; }
+    #analytics-page { padding-inline:0; }
+    #analytics-page > .analytics-dashboard-banner { margin-inline:0 !important; }
+    #analytics-chart-grid { grid-template-columns:minmax(0,1fr) !important; }
+    .analytics-chart-card,.analytics-chart-head,.analytics-chart-head > div { min-width:0; max-width:100%; }
+    .analytics-chart-head { flex-wrap:wrap; }
+    .analytics-canvas canvas { max-width:100%; }
+    #analytics-parameter-card #analytics-filters { grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr)) !important; }
+    .report-layout,.report-toolbar,.report-toolbar > *, .system-report-header,.system-report-controls,.system-report-sections { min-width:0; max-width:100%; }
+    .report-toolbar { flex-wrap:wrap; }
+    body > [role="dialog"],body > [id$="-modal"] { padding:.75rem; box-sizing:border-box; }
+    body > [role="dialog"] > div,body > [role="dialog"] > form,body > [id$="-modal"] > div,body > [id$="-modal"] > form { min-width:0; max-width:100% !important; max-height:calc(100dvh - 1.5rem); overflow-y:auto; box-sizing:border-box; }
+    dialog { max-width:calc(100vw - 1.5rem); max-height:calc(100dvh - 1.5rem); overflow:auto; box-sizing:border-box; }
+    .analytics-row-dialog,.planner-types-panel { min-width:0; max-width:100%; max-height:calc(100dvh - 1.5rem); }
+    #import-modal .import-modal-panel { max-width:100%; max-height:calc(100dvh - 1.5rem); }
+    #import-modal .import-modal-panel :is(input,select,textarea),#milestone-form :is(input,select,textarea),#project-form :is(input,select,textarea) { min-width:0; max-width:100%; box-sizing:border-box; }
+    #delivery-sync-status { right:max(8px,env(safe-area-inset-right)); bottom:max(8px,env(safe-area-inset-bottom)); }
+    #main-content > main { padding-bottom:4rem; }
+  }
   @media (max-width: 640px) {
     #main-content > main > div:first-child {
       grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     }
+    #main-content > header > div > div > div:last-child { gap:.5rem; }
+    #projects-container .track-card-header > div:last-child { width:100%; }
+    #projects-container .track-card-header > div:first-child > div { min-width:0; }
+    #overview-selection-actions > div,#overview-selection-actions > button { max-width:100%; }
+    #overview-filter-row .unified-search-host { flex-basis:100% !important; width:100% !important; }
+    #overview-filter-row select[data-delivery-filter-field] { flex:1 1 calc(50% - .5rem) !important; width:calc(50% - .5rem) !important; }
+    #daily-tracker-controls .daily-controls-primary { grid-template-columns:minmax(0,1fr) !important; }
+    #workspace-flat-page button { overflow-wrap:anywhere; }
+    #workspace-flat-page > .grid button .whitespace-nowrap { white-space:normal; }
+    .analytics-dashboard-banner > .flex { flex-wrap:wrap; }
+    .analytics-chart-card.analytics-fullscreen { inset:.5rem !important; padding:.75rem !important; }
+    #login-screen { padding:.75rem !important; }
+    #toast { min-width:0 !important; max-width:calc(100vw - 1.5rem); }
   }
   </style>
   <style id="milestone-grid-column-contract">
@@ -26765,13 +26958,17 @@
         if(overviewPrimary){const searchControl=query(root,config.search),searchHost=searchControl?.closest('.unified-search-host'),dropdowns=[...overviewPrimary.querySelectorAll('select[data-delivery-filter-field]')],spacer=overviewPrimary.querySelector('.unified-filter-spacer'),actions=overviewPrimary.querySelector('.delivery-page-flat-actions'),reset=overviewPrimary.querySelector('.unified-filter-reset'),toggle=overviewPrimary.querySelector('.unified-filter-toggle');if(searchHost){searchHost.classList.add('unified-search-host');searchHost.style.setProperty('flex',mobile?'1 1 100%':'0 0 220px','important');searchHost.style.setProperty('width',mobile?'100%':'220px','important');searchHost.style.setProperty('min-width',mobile?'0':'180px','important');searchHost.style.setProperty('max-width',mobile?'100%':'220px','important');}if(searchControl){searchControl.style.setProperty('width','100%','important');searchControl.style.setProperty('min-width','0','important');searchControl.style.setProperty('max-width','100%','important');}dropdowns.forEach(control=>{control.style.setProperty('display','block','important');control.style.setProperty('flex',mobile?'1 1 calc(50% - 6px)':'0 0 150px','important');control.style.setProperty('width',mobile?'calc(50% - 6px)':'150px','important');control.style.setProperty('min-width',mobile?'0':'120px','important');control.style.setProperty('max-width',mobile?'none':'170px','important');});if(spacer){spacer.style.setProperty('display',mobile?'none':'block','important');spacer.style.setProperty('flex',mobile?'0 0 0':'1 1 16px','important');}if(actions){actions.style.setProperty('order','7','important');actions.style.setProperty('display','flex','important');actions.style.setProperty('gap','8px','important');}if(reset){reset.style.setProperty('flex','0 0 auto','important');reset.style.setProperty('width','auto','important');reset.style.setProperty('min-width','100px','important');reset.style.setProperty('height','34px','important');reset.style.setProperty('min-height','34px','important');reset.style.setProperty('font-size','11px','important');}if(toggle){toggle.style.setProperty('flex','0 0 30px','important');toggle.style.setProperty('width','30px','important');toggle.style.setProperty('min-width','30px','important');toggle.style.setProperty('max-width','30px','important');toggle.style.setProperty('height','30px','important');toggle.style.setProperty('min-height','30px','important');}}
         if(overviewPrimary){const searchControl=query(root,config.search),searchHost=searchControl?.closest('.unified-search-host'),dropdowns=[...overviewPrimary.querySelectorAll('select[data-delivery-filter-field]')],spacer=overviewPrimary.querySelector('.unified-filter-spacer'),actions=overviewPrimary.querySelector('.delivery-page-flat-actions'),reset=overviewPrimary.querySelector('.unified-filter-reset'),toggle=overviewPrimary.querySelector('.unified-filter-toggle');if(searchHost)searchHost.classList.add('unified-search-host');if(searchControl){searchControl.style.setProperty('width','100%','important');searchControl.style.setProperty('min-width','0','important');searchControl.style.setProperty('max-width','100%','important');}dropdowns.forEach(control=>control.style.setProperty('display','block','important'));if(actions){actions.style.setProperty('display','flex','important');actions.style.setProperty('gap','8px','important');}if(reset){reset.style.setProperty('flex','0 0 auto','important');reset.style.setProperty('width','auto','important');reset.style.setProperty('min-width','100px','important');reset.style.setProperty('height','34px','important');reset.style.setProperty('min-height','34px','important');reset.style.setProperty('font-size','11px','important');}if(toggle){toggle.style.setProperty('flex','0 0 30px','important');toggle.style.setProperty('width','30px','important');toggle.style.setProperty('min-width','30px','important');toggle.style.setProperty('max-width','30px','important');toggle.style.setProperty('height','30px','important');toggle.style.setProperty('min-height','30px','important');}}
         bar.querySelectorAll('.delivery-filter-actions button,.delivery-page-flat-actions button,.unified-filter-reset,.unified-filter-toggle').forEach(button=>{const action=button.classList.contains('delivery-filter-reset')||button.classList.contains('unified-filter-reset')?'reset':button.classList.contains('delivery-filter-toggle')||button.classList.contains('unified-filter-toggle')?'expand':'summary';button.dataset.deliveryControlAction=`${slug(config.key)}:${action}`;});
-            if(overviewPrimary){
+            if(overviewPrimary&&window.matchMedia('(min-width: 1025px)').matches){
               const searchHost=query(root,config.search)?.closest('.unified-search-host'),dropdowns=[...overviewPrimary.querySelectorAll('select[data-delivery-filter-field]')],actions=overviewPrimary.querySelector('.delivery-page-flat-actions'),spacer=overviewPrimary.querySelector('.unified-filter-spacer'),primaryWidth=overviewPrimary.clientWidth,actionWidth=actions?.scrollWidth||130,oneRow=!mobile&&primaryWidth>=748,searchWidth=Math.min(220,Math.max(150,Math.round(primaryWidth*.2))),dropdownWidth=oneRow?Math.min(150,Math.max(78,Math.floor((primaryWidth-searchWidth-actionWidth-68)/5))):0;
               overviewPrimary.style.setProperty('flex-flow',oneRow?'row nowrap':'row wrap','important');
               if(searchHost){searchHost.style.setProperty('order','0','important');searchHost.style.setProperty('flex',oneRow?`0 0 ${searchWidth}px`:'1 1 calc(100% - 146px)','important');searchHost.style.setProperty('width',oneRow?`${searchWidth}px`:'calc(100% - 146px)','important');searchHost.style.setProperty('min-width',oneRow?'150px':'0','important');searchHost.style.setProperty('max-width',oneRow?`${searchWidth}px`:'none','important');}
               dropdowns.forEach((control,index)=>{control.style.setProperty('order',String(oneRow?index+1:index+2),'important');control.style.setProperty('flex',oneRow?`0 0 ${dropdownWidth}px`:'1 1 calc(50% - 6px)','important');control.style.setProperty('width',oneRow?`${dropdownWidth}px`:'calc(50% - 6px)','important');control.style.setProperty('min-width',oneRow?`${dropdownWidth}px`:'0','important');control.style.setProperty('max-width',oneRow?`${dropdownWidth}px`:'none','important');});
               if(spacer){spacer.style.setProperty('order',String(oneRow?6:8),'important');spacer.style.setProperty('flex',oneRow?'1 1 12px':'0 0 0','important');spacer.style.setProperty('display',oneRow?'block':'none','important');}
               if(actions){actions.style.setProperty('order',oneRow?'7':'1','important');actions.style.setProperty('flex','0 0 auto','important');}
+            }else if(overviewPrimary){
+              for(const element of [overviewPrimary,...overviewPrimary.querySelectorAll('.unified-search-host,select[data-delivery-filter-field],.unified-filter-spacer,.delivery-page-flat-actions')]){
+                for(const property of ['flex-flow','flex','width','min-width','max-width','order','display'])element.style.removeProperty(property);
+              }
             }
             bar.querySelectorAll('.delivery-filter-actions button,.delivery-page-flat-actions button,.unified-filter-reset,.unified-filter-toggle').forEach(button=>{const action=button.classList.contains('delivery-filter-reset')||button.classList.contains('unified-filter-reset')?'reset':button.classList.contains('delivery-filter-toggle')||button.classList.contains('unified-filter-toggle')?'expand':'summary';button.dataset.deliveryControlAction=`${slug(config.key)}:${action}`;});
       }
@@ -26921,7 +27118,7 @@
       setStyle(bar,'box-sizing','border-box');
       setStyle(primary,'display','flex');
       setStyle(primary,'flex','0 0 100%');
-      setStyle(primary,'flex-flow','row nowrap');
+      setStyle(primary,'flex-flow',innerWidth<=1024?'row wrap':'row nowrap');
       setStyle(primary,'align-items','center');
       setStyle(primary,'width','100%');
       setStyle(primary,'min-width','0');
@@ -26929,8 +27126,8 @@
       setStyle(primary,'grid-column','1 / -1');
       setStyle(primary,'gap','8px');
       items.forEach((item,index)=>{
-        setStyle(item,'flex','1 1 0');
-        setStyle(item,'width','0');
+        setStyle(item,'flex',innerWidth<=1024?'1 1 140px':'1 1 0');
+        setStyle(item,'width',innerWidth<=1024?'auto':'0');
         setStyle(item,'min-width','0');
         setStyle(item,'max-width','none');
         setStyle(item,'order',String(index));
@@ -27257,10 +27454,10 @@
       const expanded=bar.dataset.dailySharedFilter==='true'?Boolean(window.dailyTrackerControls?.state?.filterOpen):!bar.classList.contains('is-collapsed'),columns=innerWidth<=420?1:innerWidth<=640?2:4;
       bar.classList.toggle('is-collapsed',!expanded);
       [['display','grid'],['grid-template-columns','minmax(0,1fr)'],['gap','8px'],['padding','12px'],['box-sizing','border-box'],['width','100%'],['order','2']].forEach(([k,v])=>setStyle(bar,k,v));
-      [['display','flex'],['flex','0 0 100%'],['flex-flow','row nowrap'],['align-items','center'],['width','100%'],['min-width','0'],['max-width','none'],['grid-column','1 / -1'],['gap','8px']].forEach(([k,v])=>setStyle(primary,k,v));
+      [['display','flex'],['flex','0 0 100%'],['flex-flow',innerWidth<=1024?'row wrap':'row nowrap'],['align-items','center'],['width','100%'],['min-width','0'],['max-width','none'],['grid-column','1 / -1'],['gap','8px']].forEach(([k,v])=>setStyle(primary,k,v));
       const controls=[...(primary?.querySelectorAll('input,select')||[])];
       const items=[...new Set(controls.map(control=>{const label=control.closest('label');return label?.parentElement===primary?label:control;}))];
-      items.forEach((item,index)=>[['display',item.tagName==='LABEL'?'flex':'block'],['flex','1 1 0'],['width','0'],['min-width','0'],['max-width','none'],['order',String(index)]].forEach(([k,v])=>setStyle(item,k,v)));
+      items.forEach((item,index)=>[['display',item.tagName==='LABEL'?'flex':'block'],['flex',innerWidth<=1024?'1 1 140px':'1 1 0'],['width',innerWidth<=1024?'auto':'0'],['min-width','0'],['max-width','none'],['order',String(index)]].forEach(([k,v])=>setStyle(item,k,v)));
       controls.forEach(control=>setStyle(control,'width','100%'));
       setStyle(primary?.querySelector('.unified-filter-spacer'),'display','none');
       [['display','flex'],['flex','0 0 auto'],['width','auto'],['min-width','0'],['max-width','none'],['gap','8px'],['order',String(controls.length+1)]].forEach(([k,v])=>setStyle(actions,k,v));
@@ -28629,9 +28826,20 @@
     }
     const render=window.renderProjects;
     window.renderProjects=function(){
-      const result=render.apply(this,arguments);
-      if(currentWorkspaceView==='overview'){mount();cancelAnimationFrame(highlightFrame);highlightFrame=requestAnimationFrame(highlight);}else closeMenu();
-      return result;
+      const container=currentWorkspaceView==='overview'?document.getElementById('projects-container'):null;
+      const state=container&&!deliveryTargetNavigationActive?captureDeliveryViewState(document.activeElement,{layoutOnly:true}):null;
+      const minHeight=container?.style.minHeight,anchoring=container?.style.overflowAnchor;
+      if(container){container.style.minHeight=`${container.getBoundingClientRect().height}px`;container.style.overflowAnchor='none';}
+      try{
+        const result=render.apply(this,arguments);
+        if(currentWorkspaceView==='overview'){mount();cancelAnimationFrame(highlightFrame);highlightFrame=requestAnimationFrame(highlight);}else closeMenu();
+        return result;
+      }finally{
+        if(container){
+          container.style.minHeight=minHeight;container.style.overflowAnchor=anchoring;
+          if(state)restoreDeliveryViewState(state,{restoreFocus:false,defer:false});
+        }
+      }
     };
     document.addEventListener('focusin',event=>{if(event.target.id==='filter-search')openMenu();else if(menu&&!menu.contains(event.target))closeMenu();});
     document.addEventListener('input',event=>{if(event.target.id==='filter-search')openMenu();},true);
