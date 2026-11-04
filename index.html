@@ -91,9 +91,28 @@
       .main-collapsed { margin-left: 4.5rem !important; }
 
       @media (max-width: 1024px) {
-        #main-content.main-expanded { margin-left:4.5rem; }
-        #main-content { min-width:0; max-width:calc(100% - 4.5rem); height:max-content; min-height:100dvh; }
-        #sidebar { max-width:calc(100vw - 1rem); }
+        #main-content,
+        #main-content.main-expanded,
+        #main-content.main-collapsed { min-width:0; max-width:100%; width:100%; margin-left:0 !important; height:max-content; min-height:100dvh; transition:none; }
+        #sidebar,
+        #sidebar.sidebar-expanded,
+        #sidebar.sidebar-collapsed { width:min(20rem, calc(100vw - 3rem)) !important; max-width:calc(100vw - 3rem); height:100vh; height:100dvh; padding-bottom:env(safe-area-inset-bottom); transform:translateX(-105%); visibility:hidden; transition:transform .22s ease, visibility .22s ease; }
+        #sidebar.sidebar-mobile-open { transform:translateX(0); visibility:visible; }
+        #mobile-sidebar-toggle { display:none !important; }
+        #mobile-sidebar-global-toggle { display:inline-flex !important; position:fixed; top:calc(env(safe-area-inset-top) + .5rem); left:.5rem; z-index:50; }
+        #main-content > header .max-w-7xl { padding-left:3.5rem; }
+        body.analytics-view-active #analytics-page > .analytics-dashboard-banner { padding-left:3.5rem !important; }
+        #mobile-sidebar-backdrop:not(.hidden) { display:block; }
+        #sidebar.sidebar-collapsed .sidebar-text,
+        #sidebar.sidebar-collapsed .sidebar-brand-text,
+        #sidebar.sidebar-collapsed .sidebar-badge,
+        #sidebar.sidebar-collapsed .sidebar-heading { display:initial !important; }
+        #sidebar.sidebar-collapsed .sidebar-link { justify-content:flex-start !important; padding-left:.75rem !important; padding-right:.75rem !important; }
+        button { min-width:44px !important; min-height:44px !important; }
+        input:not([type="checkbox"]):not([type="radio"]), select { min-height:44px; }
+        input[type="checkbox"], input[type="radio"] { min-width:24px; min-height:24px; }
+        textarea { min-height:80px; }
+        .modal-panel, [role="dialog"] > :first-child { max-height:calc(100dvh - 1rem); overflow-y:auto; overscroll-behavior:contain; }
       }
 
       /* Hide text & badges when collapsed */
@@ -226,9 +245,12 @@
   .import-modal-panel{max-width:650px;max-height:calc(100vh - 2rem);overflow:auto;box-shadow:0 24px 70px rgba(15,23,42,.28);animation:importPanelIn .22s cubic-bezier(.2,.8,.2,1) both;}
   .import-progress-track{height:12px;border-radius:999px;background:#e2e8f0;overflow:hidden;}
   .import-progress-bar{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#4f46e5,#06b6d4);transition:width .25s ease;}
+  body.import-progress-active #import-modal-minimize{display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;}
+  #import-progress-restore:not(.hidden){display:inline-flex;}
   @keyframes importBackdropIn{from{opacity:0}to{opacity:1}}
   @keyframes importPanelIn{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
   @media (max-width:640px){.import-modal-panel{max-width:calc(100vw - 1.5rem);max-height:calc(100vh - 1.5rem)}}
+  @media (max-width:640px){#import-progress-restore:not(.hidden){left:.75rem;right:.75rem;bottom:calc(env(safe-area-inset-bottom) + .75rem);justify-content:center;min-height:44px;}}
   @media (prefers-reduced-motion:reduce){.import-modal-backdrop,.import-modal-panel{animation:none}.import-progress-bar{transition:none}}
   </style>
 
@@ -385,6 +407,9 @@
     >
     </div>
   </div>
+
+    <button id="mobile-sidebar-backdrop" type="button" class="hidden fixed inset-0 z-[35] bg-slate-950/45" aria-label="Close navigation menu" onclick="closeMobileSidebar()"></button>
+    <button id="mobile-sidebar-global-toggle" type="button" class="mobile-sidebar-trigger hidden h-11 w-11 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 shadow-sm" aria-label="Open navigation menu" aria-controls="sidebar" aria-expanded="false" onclick="toggleSidebar()"><i data-lucide="menu" class="h-5 w-5"></i></button>
 
     <!-- Left Sidebar Navigation Panel -->
     <aside id="sidebar" class="sidebar-expanded bg-slate-900 text-slate-300 flex flex-col fixed top-0 left-0 h-full z-40 border-r border-slate-800 shadow-xl overflow-hidden select-none">
@@ -627,6 +652,7 @@
 
         <!-- Dynamic Page Title -->
         <div class="flex items-center gap-2 min-w-0">
+          <button id="mobile-sidebar-toggle" type="button" class="mobile-sidebar-trigger hidden h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700" aria-label="Open navigation menu" aria-controls="sidebar" aria-expanded="false" onclick="toggleSidebar()"><i data-lucide="menu" class="h-5 w-5"></i></button>
           <i data-lucide="layout-dashboard" class="w-4 h-4 text-indigo-600 flex-shrink-0"></i>
           <span id="workspace-page-title" class="font-bold text-slate-800 text-sm sm:text-base truncate">Project Overview</span>
         </div>
@@ -1967,6 +1993,7 @@
       </p>
     </div>
 
+    <button id="import-modal-minimize" type="button" onclick="minimizeImportProgress()" class="hidden text-slate-600 hover:text-slate-900" title="Minimize import progress" aria-label="Minimize import progress"><i data-lucide="minus" class="w-5 h-5"></i></button>
     <button
       id="import-modal-close"
       type="button"
@@ -1995,6 +2022,8 @@
     </div>
 
   </div>
+
+  <button id="import-progress-restore" type="button" class="hidden fixed bottom-4 right-4 z-[100000] min-h-11 items-center gap-2 rounded-lg border border-indigo-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-xl" onclick="restoreImportProgress()" aria-label="Restore import progress"><i data-lucide="upload" class="h-4 w-4 text-indigo-600"></i><span id="import-progress-restore-label">Importing</span><strong id="import-progress-restore-percent">0%</strong></button>
 
     <!-- Modal 4: Admin RBAC User & Permission Manager -->
     <div id="admin-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
@@ -3758,9 +3787,37 @@
   }
 
       // --- 2. SIDEBAR TOGGLE & PERSISTENCE ---
+      function closeMobileSidebar() {
+        const sidebar=document.getElementById('sidebar');
+        const backdrop=document.getElementById('mobile-sidebar-backdrop');
+        sidebar?.classList.remove('sidebar-mobile-open');
+        backdrop?.classList.add('hidden');
+        document.body.classList.remove('mobile-sidebar-open');
+        document.querySelectorAll('.mobile-sidebar-trigger').forEach(toggle=>{
+          toggle.setAttribute('aria-expanded','false');
+          toggle.setAttribute('aria-label','Open navigation menu');
+          toggle.innerHTML='<i data-lucide="menu" class="h-5 w-5"></i>';
+          lucide.createIcons({root:toggle});
+        });
+      }
+
       function toggleSidebar() {
         const sidebar = document.getElementById('sidebar');
         const mainContent = document.getElementById('main-content');
+        if(window.matchMedia('(max-width: 1024px)').matches){
+          const opening=!sidebar.classList.contains('sidebar-mobile-open');
+          sidebar.classList.toggle('sidebar-mobile-open',opening);
+          document.getElementById('mobile-sidebar-backdrop')?.classList.toggle('hidden',!opening);
+          document.body.classList.toggle('mobile-sidebar-open',opening);
+          document.querySelectorAll('.mobile-sidebar-trigger').forEach(toggle=>{
+            toggle.setAttribute('aria-expanded',String(opening));
+            toggle.setAttribute('aria-label',opening?'Close navigation menu':'Open navigation menu');
+            toggle.innerHTML=`<i data-lucide="${opening?'x':'menu'}" class="h-5 w-5"></i>`;
+            lucide.createIcons({root:toggle});
+          });
+          return;
+        }
+        closeMobileSidebar();
         const isCurrentlyExpanded = sidebar.classList.contains('sidebar-expanded');
         if (isCurrentlyExpanded) {
           sidebar.classList.remove('sidebar-expanded');
@@ -3775,13 +3832,23 @@
           mainContent.classList.add('main-expanded');
           localStorage.setItem('portal_nav_state', 'expanded');
         }
-        lucide.createIcons();
+          lucide.createIcons();
       }
 
       function initSidebar() {
         const savedState = window.matchMedia('(max-width: 1024px)').matches ? 'collapsed' : localStorage.getItem('portal_nav_state') || 'expanded';
         const sidebar = document.getElementById('sidebar');
         const mainContent = document.getElementById('main-content');
+        if(!sidebar.dataset.mobileDrawerInitialized){
+          sidebar.dataset.mobileDrawerInitialized='true';
+          sidebar.addEventListener('click',event=>{
+            if(!sidebar.classList.contains('sidebar-mobile-open'))return;
+            if(event.target.closest('button[onclick^="toggleSidebarGroup"],button[onclick^="toggleSidebar()"]'))return;
+            if(event.target.closest('button,a'))closeMobileSidebar();
+          });
+          document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMobileSidebar();});
+          window.addEventListener('resize',()=>initSidebar());
+        }
         const header=mainContent.querySelector(':scope > header');
         sidebar.querySelectorAll('.sidebar-link').forEach(control=>{
           const label=control.querySelector('.sidebar-text')?.textContent.trim();
@@ -3794,7 +3861,13 @@
           });
           header.deliveryHeightObserver.observe(header);
         }
-        if (savedState === 'collapsed') {
+        if(window.matchMedia('(max-width: 1024px)').matches){
+          sidebar.classList.remove('sidebar-expanded','sidebar-collapsed','sidebar-mobile-open');
+          mainContent.classList.remove('main-expanded','main-collapsed');
+          document.getElementById('mobile-sidebar-backdrop')?.classList.add('hidden');
+          document.body.classList.remove('mobile-sidebar-open');
+          document.querySelectorAll('.mobile-sidebar-trigger').forEach(toggle=>toggle.setAttribute('aria-expanded','false'));
+        }else if (savedState === 'collapsed') {
           sidebar.classList.remove('sidebar-expanded');
           sidebar.classList.add('sidebar-collapsed');
           mainContent.classList.remove('main-expanded');
@@ -9038,7 +9111,7 @@
         // KPI values are rendered once from renderProjects()
         }
 
-        lucide.createIcons();
+        lucide.createIcons({root:container});
       }
 
     
@@ -9635,7 +9708,7 @@
     const replacement=holder.querySelector('tr[data-inline-milestone-id]');
     if(!replacement)return false;
     current.replaceWith(replacement);
-    lucide.createIcons();
+    lucide.createIcons({root:replacement});
     return true;
   }
 
@@ -9687,6 +9760,10 @@
 
     let referenceDate = getReferenceDate(milestones[sourceIndex]);
     const trackId = milestones[sourceIndex].trackId;
+    const updates = [];
+    const kpiMilestonesById = new Map(
+      kpiMilestoneRows.map(row => [Number(row.id), row])
+    );
 
     // A row without an end or completion date cannot establish a schedule for
     // later rows, so preserve their existing dates until it can.
@@ -9733,9 +9810,7 @@
       });
       if(schedule.hasHistory)Object.assign(milestone,{days:schedule.days,remarks:schedule.remarks});
 
-      const kpiMilestone = kpiMilestoneRows.find(
-        row => Number(row.id) === Number(milestone.id)
-      );
+      const kpiMilestone = kpiMilestonesById.get(Number(milestone.id));
 
       if (kpiMilestone) {
         Object.assign(kpiMilestone, {
@@ -9748,27 +9823,36 @@
         if(schedule.hasHistory)Object.assign(kpiMilestone,{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks});
       }
 
-      const { error } = await supabaseClient
-        .from('milestones')
-        .update({
+      updates.push({ milestone, payload: {
           start_date: startDate || null,
           end_date: endDate || null,
           deadline: deadline || null,
           status,
           deviation_days: deviationDays,
           ...(schedule.hasHistory?{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks}:{})
-        })
-        .eq('id', Number(milestone.id));
-
-      if (error) {
-        showToast(`Unable to update following milestone dates: ${error.message}`, 'error');
-        return false;
-      }
-      refreshMilestoneRowInPlace(project, milestone.id);
+        }});
 
       referenceDate = getReferenceDate(milestone);
     }
 
+    const results = await Promise.allSettled(updates.map(({ milestone, payload }) =>
+      supabaseClient.from('milestones')
+        .update(payload)
+        .eq('id', Number(milestone.id))
+    ));
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled' && !result.value.error) {
+        refreshMilestoneRowInPlace(project, updates[index].milestone.id);
+      }
+    });
+    const failed = results.find(result =>
+      result.status === 'rejected' || result.value.error
+    );
+    if (failed) {
+      const error = failed.status === 'rejected' ? failed.reason : failed.value.error;
+      showToast(`Unable to update following milestone dates: ${error.message}`, 'error');
+      return false;
+    }
     return true;
   }
 
@@ -10473,7 +10557,8 @@
       'hidden'
     );
 
-    lucide.createIcons();
+    if(topContainer)lucide.createIcons({root:topContainer});
+    if(bottomContainer)lucide.createIcons({root:bottomContainer});
   }
 
   function hasMilestoneDeviationHistory(milestone) {
@@ -11111,7 +11196,6 @@
     });
     updateWorkspaceHeaderActions();
     overview ? renderProjects() : currentWorkspaceView === 'daily' ? renderDailyTrackerPage() : currentWorkspaceView === 'support' ? window.supportTickets.render() : renderFlatWorkspacePage();
-    lucide.createIcons();
   }
 
 
@@ -12077,7 +12161,7 @@
 
     renderDeliveryPagination();
 
-    lucide.createIcons();
+    lucide.createIcons({root:masterContainer});
   }
 
   function openProjectModal(
@@ -15643,8 +15727,10 @@
   }
 
       let importModalProcessing = false;
+  let importModalMinimized = false;
   function setImportModalProcessing(active) {
     importModalProcessing = Boolean(active);
+    document.body.classList.toggle('import-progress-active',importModalProcessing);
     const closeButton = document.getElementById('import-modal-close');
     if (closeButton) closeButton.disabled = importModalProcessing;
   }
@@ -15656,12 +15742,31 @@
   }
   function openImportModal() {
     if(deliveryOffline.activeImport?.background)return;
+    importModalMinimized=false;
+    document.getElementById('import-progress-restore')?.classList.add('hidden');
     resetImportModalView();
     document.getElementById('import-modal').classList.remove('hidden');
   }
   function closeImportModal() {
     if (importModalProcessing) return;
+    importModalMinimized=false;
+    document.getElementById('import-progress-restore')?.classList.add('hidden');
     document.getElementById('import-modal').classList.add('hidden');
+  }
+  function minimizeImportProgress(){
+    if(!importModalProcessing)return;
+    importModalMinimized=true;
+    document.getElementById('import-modal')?.classList.add('hidden');
+    document.getElementById('import-progress-restore')?.classList.remove('hidden');
+    document.getElementById('import-progress-restore')?.classList.add('inline-flex');
+  }
+  function restoreImportProgress(){
+    if(!importModalMinimized)return;
+    importModalMinimized=false;
+    document.getElementById('import-progress-restore')?.classList.add('hidden');
+    document.getElementById('import-progress-restore')?.classList.remove('inline-flex');
+    document.getElementById('import-modal')?.classList.remove('hidden');
+    document.getElementById('import-modal-close')?.focus();
   }
   function showImportProgress(totalRows, title = 'Importing Initiatives & Milestones') {
     openImportModal();
@@ -15676,16 +15781,21 @@
     const {total:safeTotal,processed:safeProcessed,percent}=deliveryImportCommon.progress(processed,total);
     const bar=document.getElementById('import-progress-bar'), pct=document.getElementById('import-progress-percent'), detail=document.getElementById('import-progress-detail');
     if(bar) bar.style.width=`${percent}%`; if(pct) pct.textContent=`${percent}%`; if(detail) detail.textContent=`${label} ${safeProcessed} of ${safeTotal} rows`;
+    const restoreLabel=document.getElementById('import-progress-restore-label'),restorePercent=document.getElementById('import-progress-restore-percent');
+    if(restoreLabel)restoreLabel.textContent=label;
+    if(restorePercent)restorePercent.textContent=`${percent}%`;
   }
   function yieldImportUi(){return deliveryImportCommon.yieldUi();}
   function showImportSuccess(summary) {
     setImportModalProcessing(false);
+    if(importModalMinimized){const label=document.getElementById('import-progress-restore-label');if(label)label.textContent='Import complete';}
     const status=document.getElementById('import-modal-status'); status.classList.remove('hidden');
     const items=[['Imported Records',summary.total],['Initiatives Created',summary.initiatives],['Tracks Created',summary.tracks],['Milestones Created',summary.milestones]].filter(([,v])=>Number.isFinite(Number(v)));
     status.innerHTML=`<div class="text-center space-y-5"><div class="mx-auto w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-3xl">✓</div><div><h3 class="text-xl font-bold text-slate-800">Import Completed Successfully</h3><p class="text-sm text-slate-500 mt-1">All records have been processed.</p></div><div class="rounded-xl border border-slate-200 divide-y divide-slate-100 text-sm">${items.map(([k,v])=>`<div class="flex justify-between p-3"><span class="text-slate-600">${k}</span><strong class="text-slate-800">${v}</strong></div>`).join('')}</div><button type="button" onclick="closeImportModal()" class="w-full px-4 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold">Close</button></div>`;
   }
   function showImportError(error,processed,total) {
     setImportModalProcessing(false);
+    if(importModalMinimized){const label=document.getElementById('import-progress-restore-label');if(label)label.textContent='Import needs attention';}
     const status=document.getElementById('import-modal-status'); status.classList.remove('hidden');
     const message=escapeHtml(deliveryImportCommon.errorMessage(error));
     status.innerHTML=`<div class="space-y-5"><div class="text-center"><div class="mx-auto w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center text-3xl">!</div><h3 class="text-xl font-bold text-slate-800 mt-3">Import Failed</h3></div><div class="rounded-xl bg-red-50 border border-red-200 p-4"><p class="text-xs font-semibold text-red-700">Reason</p><p class="text-sm text-red-800 mt-1 break-words">${message}</p></div><p class="text-sm text-slate-600">Records Processed: <strong>${processed} of ${total}</strong></p><button type="button" onclick="closeImportModal()" class="w-full px-4 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold">Close</button></div>`;
@@ -16825,6 +16935,7 @@
       <form onsubmit="saveBulkEdit(event)" class="space-y-4 p-6 text-xs">
         <label class="block font-semibold text-slate-700">Field to update<select id="bulk-edit-field" onchange="renderBulkEditValueInput()" class="mt-1 w-full rounded-lg border bg-white px-3 py-2"></select></label>
         <div id="bulk-edit-value-area"></div>
+        <label id="bulk-edit-clear-option" class="hidden flex items-center gap-2 font-semibold text-slate-700"><input id="bulk-edit-clear-value" type="checkbox" onchange="toggleBulkEditClearValue(this.checked)" class="h-5 w-5"><span>Clear this value for selected Milestones</span></label>
         <p class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-800">The selected value will be applied to every selected record. Existing values in other fields remain unchanged.</p>
         <div class="flex justify-end gap-2 border-t pt-4"><button type="button" onclick="closeBulkEditModal()" class="rounded-lg border px-4 py-2">Cancel</button><button id="bulk-edit-save" type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 font-semibold text-white">Update Selected</button></div>
       </form>
@@ -16932,10 +17043,18 @@
   }
   function openBulkEditModal(){const ids=selectedBulkIds();if(!ids.length)return showToast('Select at least one record.','error');bulkEditEntity=currentWorkspaceView==='overview'?overviewBulkEntity:currentWorkspaceView;const fields=bulkEditFields(bulkEditEntity),select=document.getElementById('bulk-edit-field');select.innerHTML=fields.map(f=>`<option value="${f.value}" data-type="${f.type}">${f.label}</option>`).join('');document.getElementById('bulk-edit-context').innerText=`${ids.length} ${bulkEditEntity} selected`;renderBulkEditValueInput();const modal=document.getElementById('bulk-edit-modal');modal.classList.remove('hidden');modal.classList.add('flex');lucide.createIcons();}
   function renderBulkEditValueInput(){const select=document.getElementById('bulk-edit-field'),type=select.selectedOptions[0]?.dataset.type||'text',area=document.getElementById('bulk-edit-value-area');let control='';if(type==='remarks')control='<textarea id="bulk-edit-value" rows="5" maxlength="10000" class="mt-1 w-full rounded-lg border px-3 py-2 whitespace-pre-wrap break-words" placeholder="Leave empty to clear Remarks"></textarea>';else if(type==='user')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="">-- Select User --</option>${userMaster.map(u=>`<option value="${escapeHtml(u.name)}">${escapeHtml(u.name)}</option>`).join('')}</select>`;else if(type==='vertical')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${['Retail commercial','Finance','Merchandising'].map(v=>`<option>${v}</option>`).join('')}</select>`;else if(type==='initiativeType')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2">${getMasterValues('INITIATIVE_TYPE').map(v=>`<option value="${escapeHtml(v.value_name)}">${escapeHtml(v.value_name)}</option>`).join('')}</select>`;else if(type==='status')control=`<select id="bulk-edit-value" required class="mt-1 w-full rounded-lg border bg-white px-3 py-2"><option value="Pending">Pending</option><option value="In Progress">In Progress</option><option value="On-Hold">On Hold</option><option value="Delayed">Delayed</option><option value="Critical">Critical</option><option value="Done">Done</option><option value="In-Queue">In-Queue</option><option value="WIP">WIP</option><option value="Deviated">Deviated</option></select>`;else control=`<input id="bulk-edit-value" type="${type}" ${type==='number'?'min="1" step="1"':''} ${type==='date'?'':'required'} class="mt-1 w-full rounded-lg border px-3 py-2">`;area.innerHTML=`<label class="block font-semibold text-slate-700">New value${control}</label>`+(bulkEditEntity==='milestones'&&['days','start_date','end_date','deadline','completion_date'].includes(select.value)?milestoneScheduleImpactControl('bulk-edit-impact-below'):'');}
+  let bulkEditClearField='';
+  function updateBulkEditClearOption(){const field=document.getElementById('bulk-edit-field')?.value,option=document.getElementById('bulk-edit-clear-option'),checkbox=document.getElementById('bulk-edit-clear-value'),value=document.getElementById('bulk-edit-value'),available=bulkEditEntity==='milestones'&&['dependency','milestone_remarks','start_date','end_date','deadline','completion_date'].includes(field);if(!option||!checkbox)return;if(field!==bulkEditClearField){checkbox.checked=false;bulkEditClearField=field;}option.classList.toggle('hidden',!available);if(!available)checkbox.checked=false;if(value){value.disabled=checkbox.checked;if(checkbox.checked)value.value='';}}
+  function toggleBulkEditClearValue(checked){const value=document.getElementById('bulk-edit-value');if(!value)return;if(checked){value.dataset.valueBeforeClear=value.value;value.value='';value.disabled=true;}else{value.disabled=false;if(Object.hasOwn(value.dataset,'valueBeforeClear')){value.value=value.dataset.valueBeforeClear;delete value.dataset.valueBeforeClear;}}}
+  const renderBulkEditValueInputBeforeClear=renderBulkEditValueInput;
+  renderBulkEditValueInput=function(){const result=renderBulkEditValueInputBeforeClear.apply(this,arguments);updateBulkEditClearOption();return result;};
+  const openBulkEditModalBeforeClear=openBulkEditModal;
+  openBulkEditModal=function(){const result=openBulkEditModalBeforeClear.apply(this,arguments);updateBulkEditClearOption();return result;};
   function closeBulkEditModal(){const modal=document.getElementById('bulk-edit-modal');modal.classList.add('hidden');modal.classList.remove('flex');bulkEditEntity='';}
   async function saveBulkEdit(event){
     event.preventDefault();
     const ids=selectedBulkIds(),field=document.getElementById('bulk-edit-field').value,value=document.getElementById('bulk-edit-value').value;
+    const clearSelectedValue=document.getElementById('bulk-edit-clear-value')?.checked===true;
     const engineerField=engineerAssignments.fields.includes(field),clearEngineer=document.getElementById('bulk-engineer-clear')?.checked===true;
     if(engineerField){
       if(!value&&!clearEngineer)return showToast('Choose an engineer or explicitly select Clear assignment.','error');
@@ -16943,7 +17062,9 @@
       if(bulkEditEntity==='programs'?!canCreateInitiative():ids.some(id=>!canEditInitiative(projects.find(item=>Number(item.id)===Number(id)))))return showToast('Permission denied.','error');
     }
     const clearableDate=bulkEditEntity==='milestones'&&['start_date','end_date','deadline','completion_date'].includes(field);
-    if(!ids.length||!field||(value===''&&field!=='milestone_remarks'&&!engineerField&&!clearableDate))return;
+    const clearableMilestoneValue=bulkEditEntity==='milestones'&&['dependency','milestone_remarks','start_date','end_date','deadline','completion_date'].includes(field);
+    if(clearSelectedValue&&!clearableMilestoneValue)return;
+    if(!ids.length||!field||(value===''&&field!=='milestone_remarks'&&!engineerField&&!clearableDate&&!clearSelectedValue))return;
     if(bulkEditEntity==='milestones'&&['start_date','end_date','deadline'].includes(field)&&ids.some(id=>projects.some(project=>(project.milestones||[]).some(milestone=>Number(milestone.id)===Number(id)&&milestone.scheduleMode==='parallel')))){showToast('Bulk date changes cannot override a dynamically referenced Milestone. Switch it to Sequential in the Milestone editor first.','error');return;}
     if(field==='milestone_remarks'&&value.length>MAX_MILESTONE_REMARKS_LENGTH){showToast(`Remarks cannot exceed ${MAX_MILESTONE_REMARKS_LENGTH.toLocaleString()} characters.`,'error');return;}
     const impactBelow=document.getElementById('bulk-edit-impact-below')?.checked===true;
@@ -16961,7 +17082,7 @@
           const milestone=project?.milestones?.find(item=>Number(item.id)===Number(id));if(!milestone)continue;
           const recalculate=field==='days'||field==='start_date';
           const schedule=calculateMilestoneSchedule(milestone,field==='days'?{days:value}:field==='start_date'?{startDate:value}:{});
-          const days=schedule.days,start=field==='start_date'?(value||''):schedule.startDate,completion=field==='completion_date'?(value||''):milestone.completionDate||'',end=field==='end_date'?(value||''):recalculate?schedule.endDate:milestone.endDate||'',deadline=field==='deadline'?(value||''):recalculate?schedule.deadline:milestone.deadline||'',status=completion?'Done':(hasMilestoneDeviationHistory(milestone)||milestone.status==='Deviated'?'Deviated':evaluateMilestoneStatus(milestone.title,days,start,end,deadline,''));
+          const days=schedule.days,start=field==='start_date'?(value||''):schedule.startDate,completion=field==='completion_date'?(value||''):milestone.completionDate||'',end=field==='end_date'?(value||''):recalculate?schedule.endDate:milestone.endDate||'',deadline=field==='deadline'?(value||''):recalculate?schedule.deadline:milestone.deadline||'',status=completion?'Done':(hasMilestoneDeviationHistory(milestone)||milestone.status==='Deviated'?'Deviated':evaluateMilestoneStatus(milestone.actions||milestone.title,days,start,end,deadline,''));
           if(field==='start_date'&&completion&&value&&completion<value)throw new Error('Completion Date cannot be before Start Date.');
           const payload={[field]:field==='days'?normalizeMilestoneDays(value):(value||null),status,deviation_days:calculateDeviation(deadline,start,completion)||null};
           if(recalculate)Object.assign(payload,{start_date:start||null,days:normalizeMilestoneDays(days),end_date:end||null,deadline:deadline||null});
@@ -16984,7 +17105,7 @@
           Object.assign(milestone,{remarks:payload.remarks,milestoneRemarks:normalizeMilestoneRemarks(value)});
         }
       }else{
-        const table=bulkEditEntity==='programs'?'programs':bulkEditEntity==='initiatives'?'initiatives':'milestones',payload={[field]:engineerField?(clearEngineer?null:Number(value)):value};if(table!=='milestones')payload.updated_at=new Date().toISOString();
+        const table=bulkEditEntity==='programs'?'programs':bulkEditEntity==='initiatives'?'initiatives':'milestones',payload={[field]:engineerField?(clearEngineer?null:Number(value)):clearSelectedValue?null:value};if(table!=='milestones')payload.updated_at=new Date().toISOString();
         const {error}=await supabaseClient.from(table).update(payload).in('id',ids);if(error)throw error;
       }
       finishHierarchyBulkEdit();
@@ -17620,14 +17741,17 @@
   }
   function getDailyTrackerTaskRows(){
     const today=localToday();
-    return projects.flatMap(initiative=>(initiative.milestones||[]).map(milestone=>{
+    return projects.flatMap(initiative=>{
       const program=flatProgram(initiative);
-      const track=(initiative.tracks||[]).find(item=>Number(item.id)===Number(milestone.trackId))||null;
-      const end=milestone.revisedEndDate||milestone.deadline||milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);
-      const status=getEffectiveMilestoneStatus(milestone);
-      const countdown=calculateWorkdayCountdown(end,milestone.completionDate,today);
-      return {p:program,i:initiative,t:track,m:milestone,end,status,late:countdown.overdueDays,countdown:countdown.label,bucket:getDailyTaskBucket(end,today)};
-    })).filter(row=>
+      const tracksById=new Map((initiative.tracks||[]).map(track=>[Number(track.id),track]));
+      return (initiative.milestones||[]).map(milestone=>{
+        const track=tracksById.get(Number(milestone.trackId))||null;
+        const end=milestone.revisedEndDate||milestone.deadline||milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);
+        const status=getEffectiveMilestoneStatus(milestone);
+        const countdown=calculateWorkdayCountdown(end,milestone.completionDate,today);
+        return {p:program,i:initiative,t:track,m:milestone,end,status,late:countdown.overdueDays,countdown:countdown.label,bucket:getDailyTaskBucket(end,today)};
+      });
+    }).filter(row=>
       row.m.recordStatus!=='deleted' &&
       !row.m.completionDate &&
       Boolean(row.end) &&
@@ -17639,9 +17763,25 @@
     activeDailyTaskBucket=bucket;
     renderDailyTrackerPage();
   }
-  function updateDailyTrackerBadge(){
+  function updateDailyTrackerBadge(pendingCount){
     const badge=document.getElementById('daily-tracker-badge');
-    if(badge&&currentUser)badge.innerText=getDailyTrackerTaskRows().filter(row=>row.bucket==='Pending Tasks').length;
+    if(!badge||!currentUser)return;
+    if(Number.isFinite(pendingCount)){
+      badge.innerText=pendingCount;
+      return;
+    }
+    const today=localToday();
+    let count=0;
+    for(const initiative of projects){
+      if(!isVerticalAllowed(initiative.vertical))continue;
+      for(const milestone of initiative.milestones||[]){
+        if(milestone.recordStatus==='deleted'||milestone.completionDate)continue;
+        const end=milestone.revisedEndDate||milestone.deadline||milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);
+        if(!end||end>=today||['Done','On-Hold','TBD'].includes(getEffectiveMilestoneStatus(milestone)))continue;
+        count++;
+      }
+    }
+    badge.innerText=count;
   }
   function renderDailyTrackerPage(){
     const container=document.getElementById('workspace-flat-page');
@@ -17649,7 +17789,8 @@
     const searchValue=document.getElementById('daily-search')?.value||'';
     const ownerValue=document.getElementById('daily-owner-filter')?.value||'';
     const all=getDailyTrackerTaskRows();
-    const counts=Object.fromEntries(DAILY_TASK_BUCKETS.map(item=>[item.key,all.filter(row=>row.bucket===item.key).length]));
+    const counts=Object.fromEntries(DAILY_TASK_BUCKETS.map(item=>[item.key,0]));
+    all.forEach(row=>{counts[row.bucket]++;});
     const owners=[...new Set(all.map(row=>row.m.owner).filter(Boolean))].sort();
     const query=searchValue.toLowerCase();
     const rows=all.filter(row=>
@@ -17675,8 +17816,8 @@
         <div class="overflow-x-auto custom-scrollbar"><table class="min-w-full text-xs"><thead class="bg-slate-100"><tr>${['Program','Initiative','Track','Milestone','Milestone Owner','Dependency','Status','Due Date','Overdue','Actual End Date'].map(header=>`<th class="px-3 py-3 text-left uppercase whitespace-nowrap">${header}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(dailyRow).join(''):`<tr><td colspan="10" class="p-12 text-center text-slate-500 font-semibold">No ${escapeHtml(activeDailyTaskBucket)}.</td></tr>`}</tbody></table></div>
         <div class="px-4 py-3 border-t text-xs text-slate-500">Showing ${rows.length} ${activeDailyTaskBucket}. Reference date: ${formatDate(today)}.</div>
       </div>`;
-    updateDailyTrackerBadge();
-    lucide.createIcons();
+    updateDailyTrackerBadge(counts['Pending Tasks']);
+    lucide.createIcons({root:container});
   }
   </script>
 
@@ -21619,7 +21760,7 @@
   .unified-filter-secondary input,.unified-filter-secondary select,.unified-filter-secondary button{width:100%!important;min-width:0!important;max-width:none!important;height:38px!important;margin:0!important;box-sizing:border-box}
   .unified-filter-secondary .delivery-date-range-control{display:flex!important;flex-direction:column!important;gap:3px!important}
   .shared-overview-filter-bar-hidden{display:none!important;height:0!important;min-height:0!important;max-height:0!important;margin:0!important;padding:0!important;border:0!important;overflow:hidden!important}
-  @media(max-width:640px){.unified-filter-container{padding:10px!important}.unified-filter-primary{gap:6px}.unified-filter-primary .unified-search-host{flex:1 1 auto;min-width:100px;max-width:none}.unified-filter-primary .unified-primary-filter-host{display:none}.unified-filter-reset{width:38px!important;min-width:38px!important;padding:0!important;font-size:0}.unified-filter-reset svg{width:16px;height:16px}.unified-filter-count{padding:5px 7px;font-size:10px}.unified-filter-secondary{grid-template-columns:minmax(0,1fr)}}
+  @media(max-width:640px){.unified-filter-container{padding:10px!important}.unified-filter-primary{flex-wrap:wrap;gap:6px}.unified-filter-primary .unified-search-host{flex:1 1 calc(100% - 100px);min-width:100px;max-width:none}.unified-filter-primary .unified-primary-filter-host{display:block!important;flex:1 1 100%;min-width:0;max-width:none}.unified-filter-reset{width:44px!important;min-width:44px!important;height:44px!important;min-height:44px!important;padding:0!important;font-size:0}.unified-filter-toggle{width:44px!important;min-width:44px!important;max-width:44px!important;height:44px!important;min-height:44px!important}.unified-filter-reset svg{width:16px;height:16px}.unified-filter-count{padding:5px 7px;font-size:10px}.unified-filter-secondary{grid-template-columns:minmax(0,1fr)}.unified-filter-container input:not([type="checkbox"]):not([type="radio"]),.unified-filter-container select,.unified-filter-container button{height:44px!important;min-height:44px!important}}
   </style>
   <script id="robust-unified-filter-bar-js">
   (function robustUnifiedFilterBars(){
@@ -21645,7 +21786,7 @@
     function choosePrimary(key,controls){const search=controls.find(el=>/search/i.test(el.id||''));const preferred={overview:['filter-status','filter-record-status'],flat:['flat-status-filter','flat-record-status'],daily:['daily-status-filter','daily-owner-filter'],analytics:['analytics-status','analytics-record-status'],todo:[]}[key]||[];const important=preferred.map(id=>document.getElementById(id)).find(Boolean);return{search,important};}
     function enhanceBar(bar,key){if(!bar)return;bar.dataset.deliveryFilterPage=key;bar.classList.add('unified-filter-container');bar.classList.remove('delivery-filter-bar','uniformStandardFilterPositioning','strict-one-row','compact-collapsed-width','filter-collapse-ready');bar.style.removeProperty('display');bar.style.removeProperty('height');bar.style.removeProperty('max-height');bar.querySelectorAll('.delivery-filter-actions,.analytics-parameter-header').forEach(node=>node.remove());let primary=bar.querySelector(':scope > .unified-filter-primary'),secondary=bar.querySelector(':scope > .unified-filter-secondary');if(!primary){primary=document.createElement('div');primary.className='unified-filter-primary';secondary=document.createElement('div');secondary.className='unified-filter-secondary';const controls=[...bar.querySelectorAll('input,select')].filter(el=>!el.closest('.unified-filter-primary,.unified-filter-secondary'));const hosts=[...new Set(controls.map(el=>directHost(el,bar)))];const selected=choosePrimary(key,controls);const searchHost=selected.search?directHost(selected.search,bar):null;const importantHost=selected.important?directHost(selected.important,bar):null;if(searchHost){searchHost.classList.add('unified-search-host');primary.appendChild(searchHost);}if(importantHost&&importantHost!==searchHost){importantHost.classList.add('unified-primary-filter-host');primary.appendChild(importantHost);}const spacer=document.createElement('span');spacer.className='unified-filter-spacer';primary.appendChild(spacer);const indicator=document.createElement('button');indicator.type='button';indicator.className='unified-filter-count';indicator.onclick=()=>{state[key]=true;sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));update(bar,key);};indicator.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();indicator.click();}};primary.appendChild(indicator);let reset=[...bar.querySelectorAll('button')].find(button=>/reset filters/i.test(button.textContent||'')||button.classList.contains('delivery-filter-reset')||button.classList.contains('analytics-parameter-reset'));if(!reset){reset=document.createElement('button');reset.type='button';reset.innerHTML='<i data-lucide="rotate-ccw" class="w-4 h-4"></i><span>Reset Filters</span>';}reset.className='unified-filter-reset';reset.onclick=()=>resetPage(key);primary.appendChild(reset);let toggle=[...bar.querySelectorAll('button')].find(button=>button.classList.contains('delivery-filter-toggle')||button.classList.contains('analytics-parameter-toggle'));if(!toggle){toggle=document.createElement('button');toggle.type='button';}toggle.className='unified-filter-toggle';toggle.onclick=()=>{state[key]=!Boolean(state[key]);sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));update(bar,key);};primary.appendChild(toggle);hosts.forEach(host=>{if(host!==searchHost&&host!==importantHost&&!host.contains(reset)&&!host.contains(toggle))secondary.appendChild(host);});bar.replaceChildren(primary,secondary);initialized.add(bar);}else{allControlHosts(bar).forEach(host=>{if(!host.closest('.unified-filter-primary,.unified-filter-secondary'))secondary.appendChild(host);});}update(bar,key);}
     function placeBars(){const shared=document.getElementById('filter-search')?.closest('.bg-white');if(shared){const overview=pageKey()==='overview';shared.classList.toggle('shared-overview-filter-bar-hidden',!overview);shared.toggleAttribute('inert',!overview);shared.setAttribute('aria-hidden',String(!overview));}const analytics=document.getElementById('analytics-parameter-card'),kpis=document.getElementById('analytics-kpis');if(analytics&&kpis&&analytics.previousElementSibling!==kpis)kpis.insertAdjacentElement('afterend',analytics);}
-    function enhanceCurrent(){placeBars();const key=pageKey(),configKey=key==='flat'?currentWorkspaceView:key,config=window.deliveryPageControlConfigs?.[configKey];if(config&&window.deliveryPageControlLayout){window.deliveryPageControlLayout.prepare(config);return;}const bar=findBar(key);if(bar)enhanceBar(bar,key);}
+    function enhanceCurrent(){placeBars();const key=pageKey(),configKey=key==='flat'?currentWorkspaceView:key,config=window.deliveryPageControlConfigs?.[configKey];if(matchMedia('(max-width: 640px)').matches&&key){state[key]=true;sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));}if(config&&window.deliveryPageControlLayout){window.deliveryPageControlLayout.prepare(config);return;}const bar=findBar(key);if(bar)enhanceBar(bar,key);}
     function schedule(){if(frame)cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{frame=0;enhanceCurrent();});}
     ['showWorkspaceView','showAnalyticsView','showTodoListView'].forEach(name=>{const previous=window[name];if(typeof previous!=='function')return;window[name]=function(){const result=previous.apply(this,arguments);requestAnimationFrame(schedule);return result;};});
     ['renderProjects','renderFlatWorkspacePage','renderDailyTrackerPage','renderAnalyticsDashboard','renderTodoListPage'].forEach(name=>{const previous=window[name];if(typeof previous!=='function')return;window[name]=function(){const result=previous.apply(this,arguments);requestAnimationFrame(schedule);return result;};});
@@ -27039,6 +27180,33 @@
         }
         if(legacyActions&&legacyActions.children.length){legacyActions.classList.add('delivery-page-selection-row');legacyActions.dataset.deliveryControlPage=config.key;if(filters&&legacyActions.previousElementSibling!==filters)filters.insertAdjacentElement('afterend',legacyActions);}
         if(header)header.querySelector('.analytics-parameter-actions')?.remove();
+      }
+      if(window.matchMedia('(max-width: 640px)').matches&&bar){
+        bar.classList.remove('is-collapsed');
+        bar.classList.add('is-expanded');
+        bar.querySelectorAll('.strict-filter-hidden,.delivery-secondary-control').forEach(node=>node.classList.remove('strict-filter-hidden','delivery-secondary-control'));
+        bar.querySelectorAll('.unified-filter-secondary').forEach(node=>node.style.setProperty('display','grid','important'));
+        bar.querySelectorAll('[inert]').forEach(node=>node.removeAttribute('inert'));
+        bar.querySelectorAll('[aria-hidden="true"]').forEach(node=>node.setAttribute('aria-hidden','false'));
+        bar.querySelectorAll('[data-strict-old-tabindex],[data-filter-old-tabindex],[data-unified-tabindex],[data-shared-filter-tabindex],[data-daily-old-tabindex]').forEach(control=>{
+          for(const attribute of ['data-strict-old-tabindex','data-filter-old-tabindex','data-unified-tabindex','data-shared-filter-tabindex','data-daily-old-tabindex']){
+            if(!control.hasAttribute(attribute))continue;
+            const previous=control.getAttribute(attribute);
+            previous===''?control.removeAttribute('tabindex'):control.setAttribute('tabindex',previous);
+            control.removeAttribute(attribute);
+          }
+        });
+        bar.querySelectorAll('input:not([type="checkbox"]):not([type="radio"]),select,button').forEach(control=>{
+          control.style.setProperty('min-height','44px','important');
+          control.style.setProperty('height','44px','important');
+        });
+        bar.querySelectorAll('button').forEach(button=>button.style.setProperty('min-width','44px','important'));
+        bar.querySelectorAll('.delivery-filter-toggle,.unified-filter-toggle').forEach(button=>{
+          button.style.setProperty('width','44px','important');
+          button.style.setProperty('min-width','44px','important');
+          button.style.setProperty('max-width','44px','important');
+          button.style.setProperty('flex','0 0 44px','important');
+        });
       }
     }
     function registerContainer(config){
