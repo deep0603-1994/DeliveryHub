@@ -16729,7 +16729,7 @@
   // REALTIME PORTAL SYNCHRONIZATION
   let deliveryRealtimeChannel=null,deliveryRealtimeRefreshTimer=null,deliveryRealtimeRefreshInProgress=false,deliveryRealtimeRefreshPending=false;
   function renderActiveDeliveryWorkspace(){updateDailyTrackerBadge();if(currentWorkspaceView==='daily')renderDailyTrackerPage();else if(currentWorkspaceView==='overview')renderProjects();else renderFlatWorkspacePage();}
-  async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
+  async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size||window.deliveryPlannerFetch?.busy){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
   function queueDeliveryRealtimeRefresh(){clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
   function initializeDeliveryRealtime(){if(deliveryRealtimeChannel||!currentUser||!supabaseClient?.channel)return;deliveryRealtimeChannel=supabaseClient.channel('delivery-hub-live').on('postgres_changes',{event:'*',schema:'public',table:'programs'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'initiatives'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestone_tracks'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestones'},queueDeliveryRealtimeRefresh).subscribe(status=>{if(status==='CHANNEL_ERROR')console.error('Delivery Hub realtime channel failed.');});}
   const existingLoadInitiativesFromSupabase=loadInitiativesFromSupabase;
@@ -22116,6 +22116,17 @@
         if(!cell||cell.querySelector('.audit-action-menu'))return;
         const acts=[...cell.querySelectorAll('button,a')].filter(a=>!a.closest('.audit-action-menu'));
         if(!acts.length)return;
+        if(currentWorkspaceView==='overview'&&row.closest('#projects-container')){
+          const projectId=row.dataset.inlineMilestoneProjectId,milestoneId=row.dataset.inlineMilestoneId;
+          const project=projects.find(item=>String(item.id)===String(projectId));
+          if(project&&canEditInitiative(project)&&milestoneId){
+            const fetch=document.createElement('button');fetch.type='button';
+            fetch.title='Fetch Planner Type';fetch.dataset.overviewFetchPlanner='true';
+            fetch.innerHTML='<i data-lucide="list-tree" class="h-4 w-4" aria-hidden="true"></i><span>Fetch Planner Type</span>';
+            fetch.addEventListener('click',()=>window.deliveryPlannerFetch?.open(projectId,milestoneId,fetch));
+            acts.push(fetch);
+          }
+        }
         const box=document.createElement('div');box.className='audit-action-menu';
         const trigger=document.createElement('button');trigger.type='button';trigger.className='audit-action-trigger';trigger.setAttribute('aria-haspopup','menu');trigger.setAttribute('aria-expanded','false');trigger.innerHTML='<span aria-hidden="true">&#8942;</span><span>Actions</span><span aria-hidden="true">&#9662;</span>';
         const list=document.createElement('div');list.className='audit-action-list';list.setAttribute('role','menu');
@@ -24734,7 +24745,48 @@
       const types=milestonePlannerTypes.active('').filter(type=>!used.has(key(type.id))||key(type.id)===key(currentId)),current=milestonePlannerTypes.state.values.find(type=>key(type.id)===key(currentId));if(current&&!types.some(type=>key(type.id)===key(currentId)))types.push(current);
       return '<option value="">Not Mapped</option>'+types.map(type=>`<option value="${escapeHtml(key(type.id))}" ${key(type.id)===key(currentId)?'selected':''} ${type.is_active===false?'disabled':''}>${escapeHtml(type.value_name)}${type.is_active===false?' (Inactive)':''}</option>`).join('');
     }
-    return {duplicateMessage,active,normalizeName,conflicts,validate,options};
+    function plannerMappingPreview(milestones,assignments,rules,types){
+      const normalize=value=>key(value).trim().replace(/\s+/g,' ').toLowerCase();
+      const typeById=new Map(types.map(type=>[key(type.id),type]));
+      const assignmentById=new Map(assignments.map(row=>[key(row.id),row]));
+      const byDefault=new Map(),byType=new Map(),used=new Map();
+      for(const row of assignments){
+        if(!row.planner_type_id)continue;
+        const typeId=key(row.planner_type_id);
+        if(!used.has(typeId))used.set(typeId,new Set());
+        used.get(typeId).add(key(row.id));
+      }
+      for(const rule of rules){
+        const type=typeById.get(key(rule.planner_type_id));
+        if(rule.is_active===false||!type)continue;
+        for(const [lookup,name] of [[byDefault,rule.milestone_action],[byType,type.value_name]]){
+          const normalized=normalize(name);if(!normalized)continue;
+          if(!lookup.has(normalized))lookup.set(normalized,new Map());
+          lookup.get(normalized).set(key(type.id),type);
+        }
+      }
+      return milestones.map(milestone=>{
+        const id=key(milestone.id),current=assignmentById.get(id)?.planner_type_id||null;
+        if(current)return {milestone,current,candidates:[],source:'',typeId:null,status:'Already Mapped',reason:''};
+        const name=normalize(milestone.actions||milestone.title||milestone.milestone_title);
+        const source=byDefault.has(name)?'Project Default Milestone':'Milestone Planner Type';
+        const candidates=[...(byDefault.get(name)||byType.get(name)||new Map()).values()];
+        const row={milestone,current,candidates,source:candidates.length?source:'',typeId:null,status:'No Match',reason:''};
+        if(!active(milestone)||Number(milestone.id)<=0){row.status='Skipped';return row;}
+        const type=candidates.length===1?candidates[0]:null;
+        if(!type){if(candidates.length>1)row.reason='Multiple exact Planner Types; left blank';return row;}
+        row.typeId=type.id;
+        if(key(current)===key(type.id)){row.status='Already Mapped';return row;}
+        if([...(used.get(key(type.id))||[])].some(other=>other!==id)){
+          row.status='Duplicate Planner Type';row.reason='Planner Type already used in this Initiative';return row;
+        }
+        row.status='Ready';
+        if(!used.has(key(type.id)))used.set(key(type.id),new Set());
+        used.get(key(type.id)).add(id);
+        return row;
+      });
+    }
+    return {duplicateMessage,active,normalizeName,conflicts,validate,options,plannerMappingPreview};
   })();
   </script>
   <script id="delivery-report-provenance">
@@ -25996,9 +26048,9 @@
       if(!id){for(const element of row.querySelectorAll('[onclick],[ondblclick]')){const text=element.getAttribute('onclick')||element.getAttribute('ondblclick')||'',pair=text.match(/(?:saveInlineMilestone|startInlineMilestoneEdit|openMilestoneModal|navigateToOverviewMilestone)\(\s*\d+\s*,\s*(-?\d+)/),single=text.match(/(?:startDailyTrackerEdit|openDailyMilestoneActionMenu)\(\s*(-?\d+)/);if(pair||single){id=(pair||single)[1];break;}}}
       return id?locate(id):null;
     }
-    function decorate(){
+    function decorate(root=document){
       if(decorating)return;decorating=true;
-      try{for(const table of document.querySelectorAll('#projects-container table,#workspace-flat-page table')){
+      try{for(const table of root.querySelectorAll(root===document?'#projects-container table,#workspace-flat-page table':'table')){
         const head=table.querySelector('thead tr');if(!head)continue;const records=[...table.querySelectorAll('tbody tr')].map(row=>({row,record:rowRecord(row)}));if(!records.some(item=>item.record))continue;
         let header=head.querySelector('[data-milestone-type-column]');if(!header){header=document.createElement('th');header.dataset.milestoneTypeColumn='true';header.textContent='Milestone Planner Type';header.className='milestone-type-column py-2.5 px-3 text-left';head.appendChild(header);const group=table.querySelector('colgroup');if(group){const col=document.createElement('col');col.style.width='180px';group.appendChild(col);}}
         for(const {row,record} of records){if(!record){const empty=row.querySelector('td[colspan]');if(empty)empty.colSpan=head.children.length;continue;}let cell=row.querySelector('[data-milestone-type-cell]');if(!cell){cell=document.createElement('td');cell.dataset.milestoneTypeCell='true';cell.className='milestone-type-column px-3 py-2.5 align-top';row.appendChild(cell);}const {project,milestone}=record,current=milestone.plannerTypeId||null,editing=row.dataset.inlineEditing==='true'||!!row.querySelector('[id^="inline-actions-"]');cell.dataset.typeInitiativeId=project.id;cell.dataset.typeMilestoneId=milestone.id;
@@ -26091,6 +26143,7 @@
     milestonePlannerTypes.load().then(schedule);
   })();
   </script>
+  <script src="milestone-planner-fetch.js"></script>
   <script id="milestone-type-duplicate-detection-sql" type="text/plain">
   select m.initiative_id, i.title as initiative, m.planner_type_id, t.value_name,
         count(*) as active_mapping_count, array_agg(m.id order by m.sequence_no,m.id) as milestone_ids
@@ -28740,7 +28793,7 @@
       if(!cached){
         const matched=[],query=String(args.p_query||'').toLowerCase(),filters=Object.entries(args.p_filters||{}).filter(([,value])=>Array.isArray(value)?value.length:Boolean(value));
         const optionSets=Object.fromEntries([...window.supportTickets.headers,'Stage'].map(field=>[field,new Set()]));
-        const metrics={total:0,open:0,closed:0,high:0,unassigned:0,average_age:null},groups=new Map();let ageTotal=0,ageCount=0;
+        const metrics={total:0,open:0,on_hold:0,closed:0,high:0,unassigned:0,average_age:null},groups=new Map();let ageTotal=0,ageCount=0;
         for(let index=0;index<rows.length;index++){
           if(signal?.aborted)throw new DOMException('Cancelled','AbortError');
           const row=rows[index];
@@ -28749,14 +28802,14 @@
           if(query&&!Object.values(row.fields||{}).some(value=>String(value??'').toLowerCase().includes(query)))continue;
           if(!filters.every(([field,selected])=>(Array.isArray(selected)?selected:[selected]).includes(ticketValue(row,field))))continue;
           matched.push(row);
-          const derived=supportTicketDerived(row,day),isClosed=derived.stage==='Closed',age=derived.age;
-          metrics.total++;metrics[isClosed?'closed':'open']++;
+          const derived=supportTicketDerived(row,day),stage=derived.stage,age=derived.age;
+          metrics.total++;metrics[stage==='Closed'?'closed':stage==='On Hold'?'on_hold':'open']++;
           if(/high|critical|urgent/i.test(ticketValue(row,'Priority')))metrics.high++;
           if(!ticketValue(row,'Technician'))metrics.unassigned++;
           if(Number.isFinite(age)){ageTotal+=age;ageCount++;}
           if(args.p_summary){
-            const name=ticketValue(row,args.p_summary)||'(Not specified)',group=groups.get(name)||{name,total:0,open:0,closed:0,ageTotal:0,ageCount:0};
-            group.total++;group[isClosed?'closed':'open']++;if(Number.isFinite(age)){group.ageTotal+=age;group.ageCount++;}groups.set(name,group);
+            const name=ticketValue(row,args.p_summary)||'(Not specified)',group=groups.get(name)||{name,total:0,open:0,on_hold:0,closed:0,ageTotal:0,ageCount:0};
+            group.total++;group[stage==='Closed'?'closed':stage==='On Hold'?'on_hold':'open']++;if(Number.isFinite(age)){group.ageTotal+=age;group.ageCount++;}groups.set(name,group);
           }
         }
         metrics.average_age=ageCount?ageTotal/ageCount:null;
@@ -28767,7 +28820,7 @@
           const order=leftSort<rightSort?-1:leftSort>rightSort?1:0;
           return (args.p_direction>=0?1:-1)*order||(left.request_id<right.request_id?-1:left.request_id>right.request_id?1:0);
         },signal);
-        cached={rows:sorted,metrics,options:Object.fromEntries(Object.entries(optionSets).map(([field,values])=>[field,[...values].sort(collator.compare)])),groups:[...groups.values()].map(group=>({name:group.name,total:group.total,open:group.open,closed:group.closed,average_age:group.ageCount?group.ageTotal/group.ageCount:null})).sort((a,b)=>b.total-a.total||collator.compare(a.name,b.name))};
+        cached={rows:sorted,metrics,options:Object.fromEntries(Object.entries(optionSets).map(([field,values])=>[field,[...values].sort(collator.compare)])),groups:[...groups.values()].map(group=>({name:group.name,total:group.total,open:group.open,on_hold:group.on_hold,closed:group.closed,average_age:group.ageCount?group.ageTotal/group.ageCount:null})).sort((a,b)=>b.total-a.total||collator.compare(a.name,b.name))};
         queryCache.set(key,cached);while(queryCache.size>3)queryCache.delete(queryCache.keys().next().value);
       }
       return {data:{records:args.p_summary?[]:cached.rows.slice(args.p_offset,args.p_offset+args.p_limit),total:cached.rows.length,groups:args.p_summary?cached.groups.slice(args.p_offset,args.p_offset+args.p_limit):[],group_total:cached.groups.length,metrics:cached.metrics,options:cached.options},error:null};
@@ -28794,7 +28847,7 @@
       return [...values].sort(collator.compare).slice(0,100);
     };
     function editing(){
-      return Boolean(offline.activeImport||window._draggingMilestone||window._draggingTrack||inlineMilestoneEditId!=null||document.activeElement?.matches('input,textarea,select,[contenteditable="true"]')||document.querySelector('#milestone-modal:not(.hidden),#project-modal:not(.hidden),#support-ticket-dialog[data-busy="true"]'));
+      return Boolean(offline.activeImport||window._draggingMilestone||window._draggingTrack||inlineMilestoneEditId!=null||document.activeElement?.matches('input,textarea,select,[contenteditable="true"]')||document.querySelector('#milestone-modal:not(.hidden),#project-modal:not(.hidden),#fetch-planner-modal:not(.hidden),#support-ticket-dialog[data-busy="true"]'));
     }
     async function refreshVisible(){
       if(!currentUser||refreshing)return;
