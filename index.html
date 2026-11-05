@@ -3961,6 +3961,16 @@
         return "Pending";
       }
 
+      function evaluateInitiativeStatus(initiative) {
+        const status = evaluateProjectStatus(initiative.name, initiative.revisedStartDate || initiative.startDate, getEffectiveEndDate(initiative.targetEndDate, initiative.revisedEndDate), initiative.actualEndDate);
+        if (status !== 'WIP') return status;
+        const hasPendingAction = (initiative.milestones || []).some(milestone =>
+          !['deleted', 'archived'].includes(String(milestone.recordStatus || milestone.record_status || 'active').trim().toLowerCase()) &&
+          getEffectiveMilestoneStatus(milestone) === 'Pending'
+        );
+        return hasPendingAction ? 'Pending' : status;
+      }
+
       function addWorkingDays(startDateStr, days) {
         const date = new Date(`${startDateStr}T00:00:00`);
         if (!startDateStr || Number.isNaN(date.getTime()) || !Number.isFinite(days) || days < 1) {
@@ -4546,6 +4556,32 @@
       if (endDateField) endDateField.value = calculatedDate || '';
     }
     if (deadlineField) deadlineField.value = getMilestoneDeadline(startDate, endDateField?.value) || '';
+    const doneField = document.getElementById(`inline-done-${milestoneId}`);
+    const completionField = document.getElementById(`inline-completion-date-${milestoneId}`);
+    if (doneField?.checked && doneField.dataset.autoCompletion === 'true' && completionField) completionField.value = endDateField?.value || '';
+    const statusField = completionField?.closest('tr')?.querySelector('[data-inline-milestone-status]');
+    if (statusField) statusField.innerHTML = getStatusBadge(getEffectiveMilestoneStatus({...configuredMilestone,days,startDate,endDate:endDateField?.value || '',deadline:deadlineField?.value || '',completionDate:completionField?.value || ''}) || '-');
+  }
+
+  function toggleInlineMilestoneDone(milestoneId) {
+    const doneField = document.getElementById(`inline-done-${milestoneId}`);
+    const completionField = document.getElementById(`inline-completion-date-${milestoneId}`);
+    if (!doneField || !completionField) return;
+    if (doneField.checked) {
+      if (!document.getElementById(`inline-end-date-${milestoneId}`)?.value) updateInlineMilestoneRuntimeDates(milestoneId, true);
+      if (!document.getElementById(`inline-end-date-${milestoneId}`)?.value) {
+        doneField.checked = false;
+        showToast('Set a valid Start Date and Days or End Date before marking this milestone Done.', 'info');
+        return;
+      }
+      doneField.dataset.previousCompletion = completionField.value;
+      doneField.dataset.autoCompletion = 'true';
+    } else {
+      completionField.value = doneField.dataset.previousCompletion || '';
+      delete doneField.dataset.autoCompletion;
+      delete doneField.dataset.previousCompletion;
+    }
+    updateInlineMilestoneRuntimeDates(milestoneId, false);
   }
 
   function getMilestoneScheduleStartDate(project,milestone,fallbackStartDate=''){
@@ -8727,6 +8763,7 @@
         return;
       }
       capture();
+      const revealDescendants=term.length>1;
       document.body.classList.remove(...[...document.body.classList].filter(name=>name.startsWith('overview-progressive-level-')||name==='overview-hierarchy-stage-3'));
       for(const program of programs){
         if(enabled('Program')&&includes([program.id,program.sequenceNo,program.name,program.owner,program.assignedTo,program.vertical,program.impactCategory,program.measurableImpact,program.businessBenefit,...assigned(program)]))programMatches.add(key(program.id));
@@ -8741,8 +8778,8 @@
         }
         const descendants=Boolean(tracks.size||milestones.size),found=own||descendants;
         matches.set(key(project.id),{own,found,tracks,ownTracks,milestones});
-        project.collapsed=manualProjects.get(key(project.id))??!descendants;
-        for(const track of project.tracks||[])track.collapsed=manualTracks.get(`${project.id}:${track.id}`)??!openTracks.has(key(track.id));
+        project.collapsed=manualProjects.get(key(project.id))??(!revealDescendants||!descendants);
+        for(const track of project.tracks||[])track.collapsed=manualTracks.get(`${project.id}:${track.id}`)??(!revealDescendants||!openTracks.has(key(track.id)));
         if(projectMatch(project)&&isVerticalAllowed(project.vertical)&&matchesRecordStatusFilter(project.recordStatus))programPaths.add(key(project.programId));
       }
       for(const program of programs)program.collapsed=manualPrograms.get(key(program.id))??!programPaths.has(key(program.id));
@@ -8793,7 +8830,7 @@
           // Enforce Level 2 Vertical Scoping
           if (!isVerticalAllowed(p.vertical)) return;
 
-          const pStatus = evaluateProjectStatus(p.name, p.revisedStartDate || p.startDate, getEffectiveEndDate(p.targetEndDate, p.revisedEndDate), p.actualEndDate);
+          const pStatus = evaluateInitiativeStatus(p);
           const pAge = calculateProjectAge(p.revisedStartDate || p.startDate, getEffectiveEndDate(p.targetEndDate, p.revisedEndDate));
           const pCountdown = calculateWorkdayCountdown(getEffectiveEndDate(p.targetEndDate, p.revisedEndDate), p.actualEndDate);
 
@@ -9018,7 +9055,7 @@
                       <!-- Child Milestones Table -->  
             <div class="${p.collapsed ? 'hidden' : 'block'} mt-3">
             ${
-  renderAsAgile
+  p.collapsed ? '' : renderAsAgile
     ? renderAgileTracks(
         p,
         matchingMilestones,
@@ -9963,6 +10000,10 @@
     if (!project || !milestone) return false;
     const el = name => document.getElementById(`${name}-${milestoneId}`);
     const val = name => el(name)?.value.trim() || '';
+    if (el('inline-done')?.checked && el('inline-done').dataset.autoCompletion === 'true') {
+      updateInlineMilestoneRuntimeDates(milestoneId, false);
+      if (!val('inline-completion-date')) { showToast('Set a valid End Date before saving this milestone as Done.', 'error'); return false; }
+    }
     const actions=val('inline-actions'), owner=val('inline-owner'), dependency=val('inline-dependency'), remarks=val('inline-remarks'), days=val('inline-days'), completionDate=val('inline-completion-date');
     const scheduleMode=milestone.scheduleMode==='parallel'?'parallel':'sequential';
     const referenceMilestoneId=Number(milestone.referenceMilestoneId)||null;
@@ -10325,22 +10366,20 @@
     return `
           <tr class="bg-indigo-50 border-y border-indigo-200">  
         <td class="px-2 text-center">
-          ${isDraft ? `
             <button
               type="button"
               onclick="cancelInlineMilestoneEdit()"
               class="p-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 rounded"
-              title="Discard draft milestone"
-              aria-label="Discard draft milestone"
+              title="${isDraft ? 'Discard draft milestone' : 'Close milestone edit'}"
+              aria-label="${isDraft ? 'Discard draft milestone' : 'Close milestone edit'}"
             >
               <i data-lucide="minus" class="w-4 h-4"></i>
             </button>
-          ` : ''}
         </td>
         <td class="py-2 px-3 milestone-action-text"><textarea id="inline-actions-${id}" rows="2" class="milestone-cell-control milestone-action-input w-full px-2 py-1 border rounded">${escapeHtml(milestone.actions || '')}</textarea></td>
         <td class="py-2 px-3"><select id="inline-owner-${id}" class="milestone-cell-control w-full px-2 py-1 border rounded bg-white">${getMilestoneUserOptions(milestone.owner || '')}</select></td>
         <td class="py-2 px-3"><select id="inline-dependency-${id}" class="milestone-cell-control w-full px-2 py-1 border rounded bg-white">${getMilestoneUserOptions(milestone.dependency || '')}</select></td>
-        <td class="py-2 px-3 text-center">${getStatusBadge(status || '-')}</td>
+        <td data-inline-milestone-status class="py-2 px-3 text-center">${getStatusBadge(status || '-')}</td>
         <td class="py-2 px-3"><input id="inline-days-${id}" value="${escapeHtml(days)}" placeholder="5 / TBD / -" oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control w-full px-2 py-1 border rounded"></td>
         <td class="milestone-date-column py-2 px-3"><input id="inline-start-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.startDate))}" ${milestone.scheduleMode==='parallel'?'readonly':''} oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded">${milestoneScheduleImpactControl(`inline-impact-below-${id}`)}</td>
         <td class="milestone-date-column py-2 px-3"><input id="inline-end-date-${id}" type="date" value="${escapeHtml(endDate)}" ${milestone.scheduleMode==='parallel'?'readonly':''} oninput="updateInlineMilestoneRuntimeDates(${id}, false)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
@@ -11398,10 +11437,10 @@
   function flatRecords(){
   const rs=document.getElementById('flat-record-status')?.value||'active',q=(document.getElementById('flat-search')?.value||'').trim().toLowerCase(),pf=document.getElementById('flat-program-filter')?.value||'',inf=document.getElementById('flat-initiative-filter')?.value||'',tf=document.getElementById('flat-track-filter')?.value||'',type=document.getElementById('flat-type-filter')?.value||'',vert=document.getElementById('flat-vertical-filter')?.value||'',impact=document.getElementById('flat-impact-filter')?.value||'',sf=document.getElementById('flat-status-filter')?.value||'';
   let rows=[];if(currentWorkspaceView==='programs')rows=programs.map(program=>({program}));if(currentWorkspaceView==='initiatives')rows=projects.map(initiative=>({program:flatProgram(initiative),initiative}));if(currentWorkspaceView==='tracks')rows=projects.flatMap(initiative=>(initiative.tracks||[]).map(track=>({program:flatProgram(initiative),initiative,track})));if(currentWorkspaceView==='milestones')rows=projects.flatMap(initiative=>(initiative.milestones||[]).map(milestone=>({program:flatProgram(initiative),initiative,track:(initiative.tracks||[]).find(t=>Number(t.id)===Number(milestone.trackId))||null,milestone})));
-  return rows.filter(r=>{const e=r.milestone||r.track||r.initiative||r.program,statusRec=String(e?.recordStatus||'active');if(rs==='active'&&statusRec==='deleted'||rs==='deleted'&&statusRec!=='deleted')return false;if(pf&&Number(r.program?.id)!==Number(pf)||inf&&Number(r.initiative?.id)!==Number(inf)||tf&&Number(r.track?.id)!==Number(tf))return false;const summary=!r.milestone&&r.track&&r.initiative?getTrackSummary(r.initiative,r.track):null,st=r.milestone?getEffectiveMilestoneStatus(r.milestone):summary?summary.status:r.initiative?evaluateProjectStatus(r.initiative.name,r.initiative.revisedStartDate||r.initiative.startDate,getEffectiveEndDate(r.initiative.targetEndDate,r.initiative.revisedEndDate),r.initiative.actualEndDate):evaluateProjectStatus(r.program?.name,r.program?.revisedStartDate||r.program?.startDate,getEffectiveEndDate(r.program?.targetEndDate,r.program?.revisedEndDate),r.program?.actualEndDate),et=r.initiative?.type||'',ev=r.initiative?.vertical||r.program?.vertical||'',ei=r.initiative?.impactCategory||r.program?.impactCategory||'';if(type&&et!==type||vert&&ev!==vert||impact&&ei!==impact||sf&&st!==sf)return false;if(activeFlatKpiFilter==='wip'&&['Done','On-Hold','In-Queue'].includes(st)||activeFlatKpiFilter==='onhold'&&st!=='On-Hold'||activeFlatKpiFilter==='delay'&&!['Delay','Pending','Deviation'].includes(st)||activeFlatKpiFilter==='completed'&&st!=='Done')return false;const x=[r.program?.sequenceNo,r.program?.name,r.program?.owner,r.initiative?.sequenceNo,r.initiative?.name,r.initiative?.type,r.initiative?.crNo,r.initiative?.businessOwner,r.track?.sequenceNo,r.track?.name,r.milestone?.sequenceNo,r.milestone?.actions,r.milestone?.owner].filter(Boolean).join(' ').toLowerCase();return !q||x.includes(q);});
+  return rows.filter(r=>{const e=r.milestone||r.track||r.initiative||r.program,statusRec=String(e?.recordStatus||'active');if(rs==='active'&&statusRec==='deleted'||rs==='deleted'&&statusRec!=='deleted')return false;if(pf&&Number(r.program?.id)!==Number(pf)||inf&&Number(r.initiative?.id)!==Number(inf)||tf&&Number(r.track?.id)!==Number(tf))return false;const summary=!r.milestone&&r.track&&r.initiative?getTrackSummary(r.initiative,r.track):null,st=r.milestone?getEffectiveMilestoneStatus(r.milestone):summary?summary.status:r.initiative?evaluateInitiativeStatus(r.initiative):evaluateProjectStatus(r.program?.name,r.program?.revisedStartDate||r.program?.startDate,getEffectiveEndDate(r.program?.targetEndDate,r.program?.revisedEndDate),r.program?.actualEndDate),et=r.initiative?.type||'',ev=r.initiative?.vertical||r.program?.vertical||'',ei=r.initiative?.impactCategory||r.program?.impactCategory||'';if(type&&et!==type||vert&&ev!==vert||impact&&ei!==impact||sf&&st!==sf)return false;if(activeFlatKpiFilter==='wip'&&['Done','On-Hold','In-Queue'].includes(st)||activeFlatKpiFilter==='onhold'&&st!=='On-Hold'||activeFlatKpiFilter==='delay'&&!['Delay','Pending','Deviation'].includes(st)||activeFlatKpiFilter==='completed'&&st!=='Done')return false;const x=[r.program?.sequenceNo,r.program?.name,r.program?.owner,r.initiative?.sequenceNo,r.initiative?.name,r.initiative?.type,r.initiative?.crNo,r.initiative?.businessOwner,r.track?.sequenceNo,r.track?.name,r.milestone?.sequenceNo,r.milestone?.actions,r.milestone?.owner].filter(Boolean).join(' ').toLowerCase();return !q||x.includes(q);});
   }
 
-  function flatConfig(){const rel=r=>[r.program?`Program ${r.program.sequenceNo}`:'-',escapeHtml(r.program?.name||'Unmapped'),r.initiative?`Initiative ${r.initiative.sequenceNo}`:'-',escapeHtml(r.initiative?.name||'-'),r.track?`Track ${r.track.sequenceNo}`:'-',escapeHtml(r.track?.name||'-')];if(currentWorkspaceView==='programs')return{title:'Programs',sub:'Flat list of all Programs without child hierarchy.',heads:['Program No.','Program Name','Owner','Assigned To','Vertical','Status','Start Date','Target End','Countdown','Initiatives','Milestones','Progress','Actions'],row:r=>{const p=r.program,i=projects.filter(x=>Number(x.programId)===Number(p.id)),m=i.flatMap(x=>x.milestones||[]),d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateProjectStatus(p.name,p.revisedStartDate||p.startDate,getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.actualEndDate),cd=calculateCountdown(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.revisedStartDate||p.startDate,p.actualEndDate);return[`Program ${p.sequenceNo}`,escapeHtml(p.name),escapeHtml(p.owner||'-'),escapeHtml(p.assignedTo||'-'),escapeHtml(p.vertical||'-'),getStatusBadge(st),formatDate(p.revisedStartDate||p.startDate),formatDate(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate)),getCountdownDisplay(cd),i.length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProgramModal(${p.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='initiatives')return{title:'Initiatives',sub:'Flat list of Initiatives with linked Program information.',heads:['Initiative No.','Initiative Name','Program No.','Program Name','Type','CR No.','Vertical','Delivery Method','Business Owner','Assigned To','Status','Countdown','Tracks','Milestones','Progress','Actions'],row:r=>{const i=r.initiative,a=rel(r),m=i.milestones||[],d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateProjectStatus(i.name,i.revisedStartDate||i.startDate,getEffectiveEndDate(i.targetEndDate,i.revisedEndDate),i.actualEndDate),cd=calculateCountdown(getEffectiveEndDate(i.targetEndDate,i.revisedEndDate),i.revisedStartDate||i.startDate,i.actualEndDate);return[`Initiative ${i.sequenceNo}`,escapeHtml(i.name),a[0],a[1],escapeHtml(i.type||'-'),escapeHtml(i.crNo||'-'),escapeHtml(i.vertical||'-'),escapeHtml(i.deliveryMethod||'-'),escapeHtml(i.businessOwner||'-'),escapeHtml(i.assignedTo||'-'),getStatusBadge(st),getCountdownDisplay(cd),(i.tracks||[]).length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProjectModal(${i.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='tracks')return{title:'Tracks',sub:'Flat list of Tracks linked to Initiatives and Programs.',heads:['Track No.','Track Name','Initiative No.','Initiative Name','Program No.','Program Name','Vertical','Milestones','Completed','Progress','Start Date','End Date','Status','Actions'],row:r=>{const a=rel(r),x=getTrackSummary(r.initiative,r.track);return[a[4],a[5],a[2],a[3],a[0],a[1],escapeHtml(r.initiative.vertical||'-'),x.milestoneCount,x.completedCount,`${x.progressPercentage}%`,formatDate(x.startDate),formatDate(x.endDate),getStatusBadge(x.status),`<button onclick="openTrackModal(${r.initiative.id},${r.track.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};return{title:'Milestones',sub:'Flat list of Milestones with Program, Initiative, and Track relationships.',heads:['Milestone No.','Action / Deliverable','Program No.','Program Name','Initiative No.','Initiative Name','Track No.','Track Name','Vertical','Owner','Dependency','Days','Start Date','End Date','Completion','Status','Deviation','Day Status','Actions'],row:r=>{const m=r.milestone,a=rel(r),end=calculateMilestoneEndDate(m.days,m.startDate),st=getEffectiveMilestoneStatus(m);return[`Milestone ${m.sequenceNo||m.id}`,escapeHtml(m.actions||m.title||'-'),a[0],a[1],a[2],a[3],a[4],a[5],escapeHtml(r.initiative.vertical||'-'),escapeHtml(m.owner||'-'),escapeHtml(m.dependency||'-'),escapeHtml(m.days||'-'),formatDate(m.startDate),formatDate(end),formatDate(m.completionDate),getStatusBadge(st),calculateDeviation(end,m.startDate,m.completionDate)||'-',calculateMilestoneDayStatus(end,m.completionDate)||'-',`<button onclick="openMilestoneModal(${r.initiative.id},${m.id},${m.trackId||'null'})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};}
+  function flatConfig(){const rel=r=>[r.program?`Program ${r.program.sequenceNo}`:'-',escapeHtml(r.program?.name||'Unmapped'),r.initiative?`Initiative ${r.initiative.sequenceNo}`:'-',escapeHtml(r.initiative?.name||'-'),r.track?`Track ${r.track.sequenceNo}`:'-',escapeHtml(r.track?.name||'-')];if(currentWorkspaceView==='programs')return{title:'Programs',sub:'Flat list of all Programs without child hierarchy.',heads:['Program No.','Program Name','Owner','Assigned To','Vertical','Status','Start Date','Target End','Countdown','Initiatives','Milestones','Progress','Actions'],row:r=>{const p=r.program,i=projects.filter(x=>Number(x.programId)===Number(p.id)),m=i.flatMap(x=>x.milestones||[]),d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateProjectStatus(p.name,p.revisedStartDate||p.startDate,getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.actualEndDate),cd=calculateCountdown(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.revisedStartDate||p.startDate,p.actualEndDate);return[`Program ${p.sequenceNo}`,escapeHtml(p.name),escapeHtml(p.owner||'-'),escapeHtml(p.assignedTo||'-'),escapeHtml(p.vertical||'-'),getStatusBadge(st),formatDate(p.revisedStartDate||p.startDate),formatDate(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate)),getCountdownDisplay(cd),i.length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProgramModal(${p.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='initiatives')return{title:'Initiatives',sub:'Flat list of Initiatives with linked Program information.',heads:['Initiative No.','Initiative Name','Program No.','Program Name','Type','CR No.','Vertical','Delivery Method','Business Owner','Assigned To','Status','Countdown','Tracks','Milestones','Progress','Actions'],row:r=>{const i=r.initiative,a=rel(r),m=i.milestones||[],d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateInitiativeStatus(i),cd=calculateCountdown(getEffectiveEndDate(i.targetEndDate,i.revisedEndDate),i.revisedStartDate||i.startDate,i.actualEndDate);return[`Initiative ${i.sequenceNo}`,escapeHtml(i.name),a[0],a[1],escapeHtml(i.type||'-'),escapeHtml(i.crNo||'-'),escapeHtml(i.vertical||'-'),escapeHtml(i.deliveryMethod||'-'),escapeHtml(i.businessOwner||'-'),escapeHtml(i.assignedTo||'-'),getStatusBadge(st),getCountdownDisplay(cd),(i.tracks||[]).length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProjectModal(${i.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='tracks')return{title:'Tracks',sub:'Flat list of Tracks linked to Initiatives and Programs.',heads:['Track No.','Track Name','Initiative No.','Initiative Name','Program No.','Program Name','Vertical','Milestones','Completed','Progress','Start Date','End Date','Status','Actions'],row:r=>{const a=rel(r),x=getTrackSummary(r.initiative,r.track);return[a[4],a[5],a[2],a[3],a[0],a[1],escapeHtml(r.initiative.vertical||'-'),x.milestoneCount,x.completedCount,`${x.progressPercentage}%`,formatDate(x.startDate),formatDate(x.endDate),getStatusBadge(x.status),`<button onclick="openTrackModal(${r.initiative.id},${r.track.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};return{title:'Milestones',sub:'Flat list of Milestones with Program, Initiative, and Track relationships.',heads:['Milestone No.','Action / Deliverable','Program No.','Program Name','Initiative No.','Initiative Name','Track No.','Track Name','Vertical','Owner','Dependency','Days','Start Date','End Date','Completion','Status','Deviation','Day Status','Actions'],row:r=>{const m=r.milestone,a=rel(r),end=calculateMilestoneEndDate(m.days,m.startDate),st=getEffectiveMilestoneStatus(m);return[`Milestone ${m.sequenceNo||m.id}`,escapeHtml(m.actions||m.title||'-'),a[0],a[1],a[2],a[3],a[4],a[5],escapeHtml(r.initiative.vertical||'-'),escapeHtml(m.owner||'-'),escapeHtml(m.dependency||'-'),escapeHtml(m.days||'-'),formatDate(m.startDate),formatDate(end),formatDate(m.completionDate),getStatusBadge(st),calculateDeviation(end,m.startDate,m.completionDate)||'-',calculateMilestoneDayStatus(end,m.completionDate)||'-',`<button onclick="openMilestoneModal(${r.initiative.id},${m.id},${m.trackId||'null'})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};}
   const flatConfigBeforeEndDateColumns = flatConfig;
   flatConfig = function endDateColumnsConfig() {
     const config = flatConfigBeforeEndDateColumns();
@@ -11422,7 +11461,7 @@
   function flatFilterOptions(){const ps=document.getElementById('flat-program-filter'),is=document.getElementById('flat-initiative-filter'),ts=document.getElementById('flat-track-filter');if(!ps||!is||!ts)return;const pv=ps.value,iv=is.value,tv=ts.value,ins=projects.filter(i=>!pv||Number(i.programId)===Number(pv)),trs=ins.flatMap(i=>(i.tracks||[]).map(t=>({i,t}))).filter(x=>!iv||Number(x.i.id)===Number(iv));is.innerHTML='<option value="">All Initiatives</option>'+ins.map(i=>`<option value="${i.id}">Initiative ${i.sequenceNo} - ${escapeHtml(i.name)}</option>`).join('');if([...is.options].some(o=>o.value===iv))is.value=iv;ts.innerHTML='<option value="">All Tracks</option>'+trs.map(x=>`<option value="${x.t.id}">Track ${x.t.sequenceNo} - ${escapeHtml(x.t.name)}</option>`).join('');if([...ts.options].some(o=>o.value===tv))ts.value=tv;}
   function changeFlatListPage(p){flatListCurrentPage=Math.max(1,Number(p)||1);renderFlatWorkspacePage();window.scrollTo({top:0,behavior:'smooth'});}
   function setFlatKpiFilter(v){activeFlatKpiFilter=activeFlatKpiFilter===v?null:v;flatListCurrentPage=1;renderFlatWorkspacePage();}
-  function flatStatus(r){if(r.milestone)return getEffectiveMilestoneStatus(r.milestone);if(r.track)return getTrackSummary(r.initiative,r.track).status;if(r.initiative)return evaluateProjectStatus(r.initiative.name,r.initiative.revisedStartDate||r.initiative.startDate,getEffectiveEndDate(r.initiative.targetEndDate,r.initiative.revisedEndDate),r.initiative.actualEndDate);return evaluateProjectStatus(r.program?.name,r.program?.revisedStartDate||r.program?.startDate,getEffectiveEndDate(r.program?.targetEndDate,r.program?.revisedEndDate),r.program?.actualEndDate);}
+  function flatStatus(r){if(r.milestone)return getEffectiveMilestoneStatus(r.milestone);if(r.track)return getTrackSummary(r.initiative,r.track).status;if(r.initiative)return evaluateInitiativeStatus(r.initiative);return evaluateProjectStatus(r.program?.name,r.program?.revisedStartDate||r.program?.startDate,getEffectiveEndDate(r.program?.targetEndDate,r.program?.revisedEndDate),r.program?.actualEndDate);}
   let flatRowsForRender=null;
   function flatMetrics(){const rows=flatRecords();flatRowsForRender=rows;const st=rows.map(flatStatus),programIds=new Set(rows.map(row=>Number(row.program?.id)).filter(Number.isFinite));return{total:rows.length,related:currentWorkspaceView==='programs'?projects.filter(project=>programIds.has(Number(project.programId))).length:currentWorkspaceView==='initiatives'?rows.reduce((a,r)=>a+(r.initiative?.milestones||[]).length,0):currentWorkspaceView==='tracks'?rows.reduce((a,r)=>a+getTrackSummary(r.initiative,r.track).milestoneCount,0):new Set(rows.map(r=>r.initiative?.id).filter(Boolean)).size,wip:st.filter(x=>!['Done','On-Hold','In-Queue'].includes(x)).length,onhold:st.filter(x=>x==='On-Hold').length,delay:st.filter(x=>['Delay','Pending','Deviation'].includes(x)).length,done:st.filter(x=>x==='Done').length};}
   // DAILY PENDING MILESTONE TRACKER
@@ -16756,12 +16795,14 @@
       enhanceAllMilestoneTables();
       const observer = new MutationObserver(mutations => {
         if (stopDailyResize && (currentWorkspaceView !== 'daily' || mutations.some(mutation => [...mutation.removedNodes].some(node => node.nodeType === Node.ELEMENT_NODE && (node.matches?.('table') || node.querySelector?.('table')))))) stopDailyResize();
+        const tables = new Set();
         mutations.forEach(mutation => mutation.addedNodes.forEach(node => {
-          if (node.nodeType !== Node.ELEMENT_NODE) return;
+          if (node.nodeType !== Node.ELEMENT_NODE || node.matches('mark[data-overview-search-hit],svg,[data-lucide]')) return;
           const owningTable = node.matches?.('table') ? node : node.closest?.('table');
-          if (owningTable) enhanceMilestoneTable(owningTable);
-          enhanceAllMilestoneTables(node);
+          if (owningTable) tables.add(owningTable);
+          node.querySelectorAll('table').forEach(table => tables.add(table));
         }));
+        for (const table of tables) if (table.isConnected) enhanceMilestoneTable(table);
       });
       observer.observe(document.body, { childList: true, subtree: true });
     }
@@ -18079,6 +18120,7 @@
       if(!table?.tHead)return;
       const headers=[...table.querySelectorAll(':scope > thead > tr:first-child > th')];
       if(headers.length<2)return;
+      if(table.dataset.deliveryColumnReorderReady==='true'&&headers.every(header=>header.dataset.deliveryColumnDragReady==='true'))return;
       table.dataset.deliveryColumnReorderReady='true';
       table.dataset.deliveryColumnCount=String(headers.length);
       const duplicateCount={};
@@ -18123,12 +18165,16 @@
     }
     function start(){
       enhanceAll(document);
-      const observer=new MutationObserver(mutations=>mutations.forEach(mutation=>mutation.addedNodes.forEach(node=>{
-        if(node.nodeType!==Node.ELEMENT_NODE)return;
-        const owningTable=node.matches?.('table')?node:node.closest?.('table');
-        if(owningTable)enhanceTable(owningTable);
-        enhanceAll(node);
-      })));
+      const observer=new MutationObserver(mutations=>{
+        const tables=new Set();
+        mutations.forEach(mutation=>mutation.addedNodes.forEach(node=>{
+          if(node.nodeType!==Node.ELEMENT_NODE||node.matches('mark[data-overview-search-hit],svg,[data-lucide]'))return;
+          const owningTable=node.matches('table')?node:node.closest('table');
+          if(owningTable)tables.add(owningTable);
+          node.querySelectorAll('table').forEach(table=>tables.add(table));
+        }));
+        for(const table of tables)if(table.isConnected)enhanceTable(table);
+      });
       observer.observe(document.body,{childList:true,subtree:true});
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
@@ -20555,7 +20601,7 @@
     }
     const priorOpen=openMilestoneModal;openMilestoneModal=function(pid,mid,tid){const r=priorOpen.apply(this,arguments);addCriticalControl();const c=document.getElementById('m-critical');if(c)c.checked=mid?isCritical(mid):false;return r;};
     const priorSave=saveMilestone;saveMilestone=async function(e){const critical=document.getElementById('m-critical')?.checked,pid=Number(document.getElementById('m-project-id')?.value),mid=Number(document.getElementById('m-id')?.value||0),actions=document.getElementById('m-actions')?.value.trim();await priorSave.apply(this,arguments);const p=projects.find(x=>Number(x.id)===pid),m=mid?p?.milestones?.find(x=>Number(x.id)===mid):[...(p?.milestones||[])].reverse().find(x=>(x.actions||x.title)===actions);if(m){const set=loadSet(criticalKey());critical&&isOpenMilestone(m)?set.add(Number(m.id)):set.delete(Number(m.id));saveSet(criticalKey(),set);renderProjects();}};
-    const priorInline=renderInlineMilestoneRow;renderInlineMilestoneRow=function(project,m,canEdit){const html=priorInline.apply(this,arguments);criticalDrafts.set(Number(m.id),isCritical(m.id));return html.replace('id="inline-actions-',`data-critical-row="${m.id}" id="inline-actions-`).replace('</textarea></td>',`</textarea><label class="mt-1 flex items-center gap-1 text-[10px] font-semibold text-red-700"><input type="checkbox" id="inline-critical-${m.id}" ${criticalDrafts.get(Number(m.id))?'checked':''}> Critical</label></td>`);};
+    const priorInline=renderInlineMilestoneRow;renderInlineMilestoneRow=function(project,m,canEdit){const html=priorInline.apply(this,arguments);criticalDrafts.set(Number(m.id),isCritical(m.id));return html.replace('id="inline-actions-',`data-critical-row="${m.id}" id="inline-actions-`).replace('</textarea></td>',`</textarea><div class="mt-1 flex flex-wrap items-center gap-3 text-[10px] font-semibold"><label class="flex items-center gap-1 text-red-700"><input type="checkbox" id="inline-critical-${m.id}" ${criticalDrafts.get(Number(m.id))?'checked':''}> Critical</label><label class="flex items-center gap-1 text-emerald-700"><input type="checkbox" id="inline-done-${m.id}" ${hasMilestoneCompletion(m)?'checked':''} onchange="toggleInlineMilestoneDone(${m.id})"> Done</label></div></td>`);};
     const priorInlineSave=saveInlineMilestone;saveInlineMilestone=async function(pid,mid){const viewState=captureDeliveryViewState();viewState.milestoneId=mid;const checked=document.getElementById(`inline-critical-${mid}`)?.checked,actions=document.getElementById(`inline-actions-${mid}`)?.value.trim();const result=await priorInlineSave.apply(this,arguments);if(result===false)return result;const p=projects.find(x=>Number(x.id)===Number(pid)),m=Number(mid)>0?p?.milestones?.find(x=>Number(x.id)===Number(mid)):[...(p?.milestones||[])].reverse().find(x=>(x.actions||x.title)===actions);if(m){const set=loadSet(criticalKey());checked&&isOpenMilestone(m)?set.add(Number(m.id)):set.delete(Number(m.id));saveSet(criticalKey(),set);renderProjects();if(!arguments[2]?.addNextRow){viewState.milestoneId=m.id;restoreDeliveryViewState(viewState);}}return result;};
     document.addEventListener('DOMContentLoaded',()=>requestAnimationFrame(decorate));
   })();
@@ -27487,7 +27533,7 @@
     let frame=0;
     function schedule(){if(frame)cancelAnimationFrame(frame);frame=requestAnimationFrame(()=>{frame=0;apply();});}
     const bar=document.querySelector('#overview-filter-row');
-    if(bar)new MutationObserver(schedule).observe(bar,{attributes:true,subtree:true,attributeFilter:['class','style']});
+    if(bar)new MutationObserver(records=>{if(records.some(record=>record.oldValue!==bar.className))schedule();}).observe(bar,{attributes:true,attributeFilter:['class'],attributeOldValue:true});
     document.addEventListener('change',schedule,true);
     window.addEventListener('resize',schedule,{passive:true});
     window.addEventListener('pageshow',schedule);
@@ -28064,12 +28110,17 @@
     function observeOverview(bar){
       if(!bar||bar===observedOverview)return;
       overviewObserver?.disconnect();observedOverview=bar;
-      overviewObserver=new MutationObserver(schedule);
-      overviewObserver.observe(bar,{attributes:true,subtree:true,attributeFilter:['class','style']});
+      overviewObserver=new MutationObserver(records=>{if(records.some(record=>record.oldValue!==observedOverview?.className))schedule();});
+      overviewObserver.observe(bar,{attributes:true,attributeFilter:['class'],attributeOldValue:true});
     }
     function apply(){
       frame=0;
-      if(currentWorkspaceView==='overview'){const bar=document.getElementById('overview-filter-row');observeOverview(bar);window.applySharedOverviewFilterLayout?.(bar);}
+      if(currentWorkspaceView==='overview'){
+        const bar=document.getElementById('overview-filter-row');observeOverview(bar);
+        overviewObserver?.disconnect();
+        try{window.applySharedOverviewFilterLayout?.(bar);}
+        finally{if(bar)overviewObserver?.observe(bar,{attributes:true,attributeFilter:['class'],attributeOldValue:true});}
+      }
       else if(currentWorkspaceView==='daily')window.dailySharedOverviewFilterBannerRefresh?.();
       else if(['programs','initiatives','tracks','milestones'].includes(currentWorkspaceView))window.flatSharedOverviewFilterBannerRefresh?.();
     }
@@ -29081,10 +29132,25 @@
   .overview-search-scope-host{position:relative}
   #overview-search-scopes{position:fixed;z-index:60;display:flex;flex-wrap:wrap;gap:4px;padding:5px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;box-shadow:0 4px 12px rgba(15,23,42,.12)}#overview-search-scopes[hidden]{display:none!important}#overview-search-scopes button{flex:1 0 auto;padding:5px 7px;border-radius:4px;font-size:11px;color:#475569}#overview-search-scopes button[aria-checked="true"]{background:#e0e7ff;color:#3730a3;font-weight:600}#overview-search-scopes button:focus-visible{outline:2px solid #6366f1;outline-offset:1px}
   #projects-container mark[data-overview-search-hit]{padding:0;background:#fde047;color:#1f2937;border-radius:1px}
+  ::highlight(delivery-overview-search){background:#fde047;color:#1f2937}
   </style>
   <script id="overview-scoped-search-ui">
   (()=>{
     let input,menu,highlightFrame=0;
+    const createIcons=lucide.createIcons;
+    lucide.createIcons=function(options={}){
+      if(currentWorkspaceView!=='overview'||options.icons||options.attrs||options.nameAttr||options.inTemplates)return createIcons.apply(this,arguments);
+      const root=options.root||document;
+      return createIcons.call(this,{...options,root:{querySelectorAll(selector){
+        const nodes=root.querySelectorAll(selector);
+        if(selector!=='[data-lucide]')return nodes;
+        return [...nodes].filter(node=>{
+          if(node.localName!=='svg')return true;
+          const name=String(node.getAttribute('data-lucide')||'').replace(/([a-z0-9])([A-Z])/g,'$1-$2').toLowerCase();
+          return !node.classList.contains(`lucide-${name}`);
+        });
+      }}});
+    };
     function positionMenu(){
       if(!input||!menu||menu.hidden)return;
       const rect=input.getBoundingClientRect();
@@ -29122,6 +29188,8 @@
       updateScope();positionMenu();return true;
     }
     function highlight(){
+      const nativeHighlight=typeof Highlight==='function'&&Boolean(window.CSS?.highlights);
+      if(nativeHighlight)CSS.highlights.delete('delivery-overview-search');
       const root=document.getElementById('projects-container');if(!root)return;
       for(const mark of root.querySelectorAll('mark[data-overview-search-hit]')){const parent=mark.parentNode;mark.replaceWith(...mark.childNodes);parent.normalize();}
       if(!overviewSearch.active())return;
@@ -29137,11 +29205,17 @@
         const level=record.dataset.inlineMilestoneId?'Milestone':record.dataset.overviewSearchLevel,id=record.dataset.inlineMilestoneId||record.dataset.overviewSearchId,projectId=record.dataset.inlineMilestoneProjectId||record.dataset.overviewSearchProject;
         if(overviewSearch.own(level,id,projectId))nodes.push(node);
       }
+      const highlights=nativeHighlight?new Highlight():null;
       for(const node of nodes){
         const value=node.nodeValue,lower=value.toLowerCase(),fragment=document.createDocumentFragment();let from=0,index;
-        while((index=lower.indexOf(term,from))!==-1){fragment.append(document.createTextNode(value.slice(from,index)));const mark=document.createElement('mark');mark.dataset.overviewSearchHit='';mark.textContent=value.slice(index,index+term.length);fragment.append(mark);from=index+term.length;}
-        fragment.append(document.createTextNode(value.slice(from)));node.replaceWith(fragment);
+        while((index=lower.indexOf(term,from))!==-1){
+          if(highlights){const range=document.createRange();range.setStart(node,index);range.setEnd(node,index+term.length);highlights.add(range);}
+          else{fragment.append(document.createTextNode(value.slice(from,index)));const mark=document.createElement('mark');mark.dataset.overviewSearchHit='';mark.textContent=value.slice(index,index+term.length);fragment.append(mark);}
+          from=index+term.length;
+        }
+        if(!highlights){fragment.append(document.createTextNode(value.slice(from)));node.replaceWith(fragment);}
       }
+      if(highlights)CSS.highlights.set('delivery-overview-search',highlights);
     }
     const render=window.renderProjects;
     window.renderProjects=function(){
@@ -29151,7 +29225,7 @@
       if(container){container.style.minHeight=`${container.getBoundingClientRect().height}px`;container.style.overflowAnchor='none';}
       try{
         const result=render.apply(this,arguments);
-        if(currentWorkspaceView==='overview'){mount();cancelAnimationFrame(highlightFrame);highlightFrame=requestAnimationFrame(highlight);}else closeMenu();
+        if(currentWorkspaceView==='overview'){mount();cancelAnimationFrame(highlightFrame);highlightFrame=requestAnimationFrame(highlight);}else{cancelAnimationFrame(highlightFrame);window.CSS?.highlights?.delete('delivery-overview-search');closeMenu();}
         return result;
       }finally{
         if(container){
