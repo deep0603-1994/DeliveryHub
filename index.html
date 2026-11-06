@@ -9995,6 +9995,12 @@
     renderProjects();
   }
 
+  function isMilestoneScheduleImpactProtected(milestone) {
+    const storedStatus = normalizeMilestoneStatus(milestone?.persistedStatus ?? milestone?.rawStatus ?? milestone?.status);
+    const effectiveStatus = getEffectiveMilestoneStatus(milestone);
+    return [storedStatus, effectiveStatus].some(status => status === 'Done' || status === 'On-Hold');
+  }
+
   async function cascadeTrackMilestoneSchedule(project, milestoneId, options = {}) {
     const milestones = project.milestones || [];
     const sourceIndex = milestones.findIndex(
@@ -10032,8 +10038,11 @@
       const milestone = milestones[index];
 
       if (!isSameTrack(milestone.trackId, trackId)) continue;
-      if (['on hold', 'done', 'closed'].includes(String(milestone.status || '').trim().toLowerCase().replace(/[-_]+/g, ' ')) ||
-        ['deleted', 'archived'].includes(String(milestone.recordStatus || '').trim().toLowerCase())) continue;
+      if (['deleted', 'archived'].includes(String(milestone.recordStatus || '').trim().toLowerCase())) continue;
+      if (isMilestoneScheduleImpactProtected(milestone)) {
+        referenceDate = getReferenceDate(milestone) || referenceDate;
+        continue;
+      }
       if (options.preserveMilestoneIds?.has(Number(milestone.id))) {
         referenceDate = getReferenceDate(milestone) || referenceDate;
         continue;
@@ -10043,9 +10052,17 @@
       const reference=milestone.referenceMilestoneId
         ? milestones.find(item=>Number(item.id)===Number(milestone.referenceMilestoneId))
         : null;
-      const scheduledStart=scheduleMode==='parallel'
+      const scheduledStart=scheduleMode==='parallel'&&!options.impactBelow
         ? (reference&&reference.recordStatus!=='deleted'?getMilestoneScheduleStartDate(project,milestone,milestone.startDate||''):milestone.startDate||'')
         : getNextWorkingDay(referenceDate);
+      let referenceOffsetDays=Number(milestone.referenceOffsetDays)||0;
+      if(options.impactBelow&&scheduleMode==='parallel'){
+        const referenceDateType=milestone.referenceDateType||'start_date';
+        const referenceField=({start_date:'startDate',end_date:'endDate',deadline:'deadline',completion_date:'completionDate'})[referenceDateType];
+        if(!reference||!referenceField)throw new Error(`Unable to update the Planner reference for ${milestone.actions||'Milestone'}.`);
+        referenceOffsetDays=getWorkingDayOffset(reference[referenceField],scheduledStart);
+        if(referenceOffsetDays===null)throw new Error(`Unable to map the new date to the Planner reference for ${milestone.actions||'Milestone'}.`);
+      }
       const schedule = calculateMilestoneSchedule(milestone,{startDate:scheduledStart},{baseSchedule:true});
       const {startDate,endDate,deadline} = schedule;
       const status = getEffectiveMilestoneStatus({
@@ -10065,7 +10082,8 @@
         endDate,
         deadline,
         status,
-        deviationDays
+        deviationDays,
+        ...(options.impactBelow&&scheduleMode==='parallel'?{referenceOffsetDays}:{})
       });
       if(schedule.hasHistory)Object.assign(milestone,{days:schedule.days,remarks:schedule.remarks});
 
@@ -10077,7 +10095,8 @@
           end_date: endDate || null,
           deadline: deadline || null,
           status,
-          deviation_days: deviationDays
+          deviation_days: deviationDays,
+          ...(options.impactBelow&&scheduleMode==='parallel'?{reference_offset_days:referenceOffsetDays}:{})
         });
         if(schedule.hasHistory)Object.assign(kpiMilestone,{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks});
       }
@@ -10088,6 +10107,7 @@
           deadline: deadline || null,
           status,
           deviation_days: deviationDays,
+          ...(options.impactBelow&&scheduleMode==='parallel'?{reference_offset_days:referenceOffsetDays}:{}),
           ...(schedule.hasHistory?{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks}:{})
         }});
 
@@ -10163,7 +10183,7 @@
       const dependents=milestones.filter(item=>Number(item.referenceMilestoneId)===changedId&&item.scheduleMode==='parallel'&&!['deleted','archived'].includes(String(item.recordStatus||'').toLowerCase())).sort((a,b)=>Number(a.sequenceNo||0)-Number(b.sequenceNo||0));
       for(const milestone of dependents){
         const id=Number(milestone.id);if(visited.has(id))continue;visited.add(id);
-        if(['on hold','done','closed'].includes(String(milestone.status||'').trim().toLowerCase().replace(/[-_]+/g,' ')))continue;
+        if(isMilestoneScheduleImpactProtected(milestone))continue;
         const startDate=getMilestoneScheduleStartDate(project,milestone,'');if(!startDate)continue;
         const schedule=calculateMilestoneSchedule(milestone,{startDate},{baseSchedule:true}),endDate=schedule.endDate||'',deadline=getMilestoneDeadline(startDate,endDate),status=getEffectiveMilestoneStatus({...milestone,startDate,endDate,deadline}),deviationDays=schedule.hasHistory?schedule.deviationDays:calculateDeviation(deadline,startDate,milestone.completionDate)||null;
         const payload={start_date:startDate,end_date:endDate||null,deadline:deadline||null,status,deviation_days:deviationDays,...(schedule.hasHistory?{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks}:{})};
@@ -10198,7 +10218,7 @@
       const trackKey = `${project.id}:${record.milestone.trackId || 0}`;
       if (affectedTracks.has(trackKey)) continue;
       affectedTracks.add(trackKey);
-      if (!await cascadeTrackMilestoneSchedule(project, record.milestone.id, {preserveMilestoneIds})) {
+      if (!await cascadeTrackMilestoneSchedule(project, record.milestone.id, {preserveMilestoneIds,impactBelow:true})) {
         throw new Error('The edited Milestone was saved, but its downstream schedule could not be fully updated.');
       }
     }
@@ -10271,7 +10291,7 @@
       if(schedule.hasHistory)Object.assign(milestone,{startDate:data?.start_date??schedule.startDate,days:data?.days??schedule.days,deviationDays:data?.deviation_days??schedule.deviationDays});
       if(isDraft)kpiMilestoneRows.push({...data});else{const ri=kpiMilestoneRows.findIndex(r=>Number(r.id)===Number(milestone.id));if(ri>=0)kpiMilestoneRows[ri]={...kpiMilestoneRows[ri],...data};}
       inlineMilestoneEditId=null;
-      if(impactBelow && !await cascadeTrackMilestoneSchedule(project,milestone.id))return false;
+      if(impactBelow && !await cascadeTrackMilestoneSchedule(project,milestone.id,{impactBelow:true}))return false;
       if(!await cascadeReferencedMilestoneSchedule(project,milestone.id))return false;
       await synchronizeInitiativeRevisedEndDates([project]);
       if(addNextRow){const savedId=milestone.id,savedTrackId=milestone.trackId||null;addMilestoneInline(projectId,savedTrackId,null,savedId);requestAnimationFrame(()=>{window.scrollTo(scrollX,scrollY);requestAnimationFrame(()=>{const input=document.getElementById(`inline-actions-${inlineMilestoneEditId}`);input?.focus({preventScroll:true});input?.scrollIntoView({block:'nearest',inline:'nearest'});});});}
@@ -22544,8 +22564,8 @@
             fetch.addEventListener('click',()=>window.deliveryPlannerFetch?.open(projectId,milestoneId,fetch));
             acts.push(fetch);
             if(milestone&&!['deleted','archived'].includes(String(milestone.recordStatus||'').trim().toLowerCase())){
-              const dependency=document.createElement('button');dependency.type='button';dependency.title='Set Dependency';
-              dependency.innerHTML='<i data-lucide="link-2" class="h-4 w-4" aria-hidden="true"></i><span>Set Dependency</span>';
+              const hasDependency=Boolean(milestone.dependencyType),dependency=document.createElement('button');dependency.type='button';dependency.title=hasDependency?'View Dependency':'Set Dependency';
+              dependency.innerHTML=`<i data-lucide="${hasDependency?'eye':'link-2'}" class="h-4 w-4" aria-hidden="true"></i><span>${dependency.title}</span>`;
               dependency.addEventListener('click',()=>window.deliveryMilestoneDependency?.open(projectId,milestoneId,dependency));
               acts.push(dependency);
             }
