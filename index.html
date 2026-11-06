@@ -2368,19 +2368,66 @@
         });
         changed(table);
       }
+      async function confirmDependencyRpc(url,options,owner){
+        const request=JSON.parse(options.body||'{}'),changes=request.p_changes;
+        if(!Array.isArray(changes)||!changes.length||owner!==scope)return null;
+        const ids=changes.map(change=>Number(change.id));
+        if(ids.some(id=>!Number.isSafeInteger(id)||id<=0)||new Set(ids).size!==ids.length)return null;
+        const columns=new Set(['id','dependency_type','dependency_milestone_id','dependency_track_id']);
+        for(const change of changes)for(const key of Object.keys(change)){
+          if(!/^[a-z_]+$/.test(key))return null;
+          columns.add(key);
+        }
+        const check=new URL(url);
+        check.pathname=check.pathname.replace(/\/rpc\/delivery_set_milestone_dependency$/,'/milestones');
+        check.search='';
+        check.searchParams.set('id',`in.(${ids.join(',')})`);
+        check.searchParams.set('select',[...columns].join(','));
+        const headers=new Headers(options.headers);
+        headers.delete('prefer');
+        headers.set('accept','application/json');
+        headers.set('range',`0-${ids.length-1}`);
+        const confirmation=await boundedFetch(check,{method:'GET',headers},15000);
+        if(!confirmation.ok)return null;
+        const rows=await confirmation.json();
+        if(!Array.isArray(rows)||rows.length!==ids.length)return null;
+        const byId=new Map(rows.map(row=>[Number(row.id),row]));
+        if(byId.size!==ids.length)return null;
+        for(const change of changes){
+          const row=byId.get(Number(change.id));
+          if(!row||Object.entries(change).some(([key,value])=>key!=='id'&&!sameValue(row[key],value)))return null;
+          if(Number(change.id)===Number(request.p_milestone_id)&&(
+            !sameValue(row.dependency_type,request.p_type)||
+            !sameValue(row.dependency_milestone_id,request.p_type==='milestone'?Number(request.p_target_id):null)||
+            !sameValue(row.dependency_track_id,request.p_type==='track'?Number(request.p_target_id):null)
+          ))return null;
+        }
+        return rows;
+      }
       async function write(url,options,owner){
         if(activeImport&&options.importKey===activeImport.key)return importRequest(url,options,owner);
         if(!navigator.onLine||!reachable)return queueWrite(url,options,owner);
+        const requestUrl=new URL(url);
+        const dependencyRpc=options.method==='POST'&&requestUrl.pathname.endsWith('/rpc/delivery_set_milestone_dependency');
         try{
-          const milestoneUpdate=options.method==='PATCH'&&new URL(url).pathname.endsWith('/milestones');
-          const response=await boundedFetch(url,options,milestoneUpdate?60000:12000);
-          if(response.ok){try{await invalidate(new URL(url).pathname.split('/').pop(),owner);await markSynced(owner);}catch(error){report(error);}return response;}
+          const milestoneUpdate=options.method==='PATCH'&&requestUrl.pathname.endsWith('/milestones');
+          const response=await boundedFetch(url,options,milestoneUpdate||dependencyRpc?60000:12000);
+          if(response.ok){try{await invalidate(dependencyRpc?'milestones':requestUrl.pathname.split('/').pop(),owner);await markSynced(owner);}catch(error){report(error);}return response;}
           if(transient(response)&&!await probe())return queueWrite(url,options,owner,true);
           return response;
         }catch(error){
           if(options.signal?.aborted)throw error;
           console.warn('Supabase save confirmation was interrupted:',error);
           if(!await probe())return queueWrite(url,options,owner,true);
+          if(dependencyRpc&&owner===scope){
+            try{
+              const rows=await confirmDependencyRpc(url,options,owner);
+              if(rows){
+                try{await invalidate('milestones',owner);await markSynced(owner);}catch(storageFailure){report(storageFailure);}
+                return new Response(JSON.stringify(rows),{status:200,headers:{'content-type':'application/json'}});
+              }
+            }catch(confirmationError){console.warn('Milestone dependency save could not be verified:',confirmationError);}
+          }
           const parsed=new URL(url),table=parsed.pathname.split('/').pop(),identity=exactIdentity(parsed,table);
           if(table==='milestones'&&options.method==='PATCH'&&identity&&owner===scope){
             try{
@@ -3668,6 +3715,9 @@
                 milestone.reference_milestone_id
                   ? Number(milestone.reference_milestone_id)
                   : null,
+              dependencyType: milestone.dependency_type || '',
+              dependencyMilestoneId: Number(milestone.dependency_milestone_id) || null,
+              dependencyTrackId: Number(milestone.dependency_track_id) || null,
               referenceDateType: milestone.reference_date_type || 'start_date',
               referenceOffsetDays: Number(milestone.reference_offset_days) || 0,
               plannerTypeId: milestone.planner_type_id || null,
@@ -3735,7 +3785,7 @@
 
     projects.forEach(project => (project.milestones || []).forEach(normalizeMilestoneDeviationSchedule));
     projects.forEach(applyDerivedMilestoneSequence);
-    await synchronizeInitiativeRevisedEndDates();
+    await synchronizeInitiativeRevisedEndDates(projects, {deferDependencyRender:true});
     updateDailyTrackerBadge();
 
     populateProgramDropdown();
@@ -3748,32 +3798,39 @@
     return true;
   }
 
-  async function synchronizeInitiativeRevisedEndDates(initiatives = projects) {
+  async function synchronizeInitiativeRevisedEndDates(initiatives = projects, options = {}) {
+    const dependencyChanges=[];
     for (const initiative of initiatives || []) {
       if (initiative.recordStatus === 'deleted') continue;
+      if(window.deliveryMilestoneDependency && !window.deliveryMilestoneDependency.busy && (initiative.milestones||[]).some(milestone=>milestone.dependencyType)){
+        try{if(await window.deliveryMilestoneDependency.propagate(initiative,{render:false}))dependencyChanges.push(initiative);}
+        catch(error){console.error('Unable to propagate Milestone dependencies:',error);showToast(`Unable to update dependent Milestones: ${error.message}`,'error');}
+      }
       const targetEndDate = String(initiative.targetEndDate || '').slice(0, 10);
       if (targetEndDate && !/^\d{4}-\d{2}-\d{2}$/.test(targetEndDate)) continue;
 
       const deadlines = (initiative.milestones || [])
         .filter(milestone => milestone.recordStatus !== 'deleted')
-        .map(milestone => String(milestone.deadline || milestone.endDate || '').slice(0, 10))
+        .map(milestone => String(getEffectiveEndDate(milestone.deadline || milestone.endDate, milestone.revisedEndDate) || '').slice(0, 10))
         .filter(deadline => /^\d{4}-\d{2}-\d{2}$/.test(deadline));
-      if (!deadlines.length || (targetEndDate && !deadlines.some(deadline => deadline > targetEndDate))) continue;
+      if (!deadlines.length) continue;
 
       const latestDeadline = deadlines.sort().at(-1);
-      if (latestDeadline === initiative.revisedEndDate) continue;
+      const revisedEndDate = targetEndDate && latestDeadline <= targetEndDate ? null : latestDeadline;
+      if (revisedEndDate === (initiative.revisedEndDate || null)) continue;
 
       const { error } = await supabaseClient
         .from('initiatives')
-        .update({ revised_end_date: latestDeadline })
+        .update({ revised_end_date: revisedEndDate })
         .eq('id', Number(initiative.id));
       if (error) {
         console.error(`Unable to synchronize Revised End Date for Initiative ${initiative.id}:`, error);
         continue;
       }
-      initiative.revisedEndDate = latestDeadline;
+      initiative.revisedEndDate = revisedEndDate || '';
     }
     await synchronizeProgramRevisedEndDates(initiatives===projects?programs.map(program=>program.id):(initiatives||[]).map(initiative=>initiative.programId));
+    if(!options.deferDependencyRender&&currentWorkspaceView==='overview')dependencyChanges.forEach(initiative=>window.deliveryMilestoneDependency?.renderAffected(initiative,null));
   }
 
   function calculateProgramRevisedEndDate(program,initiatives){
@@ -4005,12 +4062,15 @@
 
       function evaluateInitiativeStatus(initiative) {
         const status = evaluateProjectStatus(initiative.name, initiative.revisedStartDate || initiative.startDate, getEffectiveEndDate(initiative.targetEndDate, initiative.revisedEndDate), initiative.actualEndDate);
-        if (status !== 'WIP') return status;
+        if (!status) return status;
         const hasPendingAction = (initiative.milestones || []).some(milestone =>
           !['deleted', 'archived'].includes(String(milestone.recordStatus || milestone.record_status || 'active').trim().toLowerCase()) &&
           getEffectiveMilestoneStatus(milestone) === 'Pending'
         );
-        return hasPendingAction ? 'Pending' : status;
+        if (hasPendingAction) return 'Pending';
+        if (status !== 'Pending') return status;
+        const startDate = initiative.revisedStartDate || initiative.startDate || '';
+        return /^\d{4}-\d{2}-\d{2}$/.test(startDate) && startDate <= new Date().toISOString().slice(0, 10) ? 'WIP' : 'In-Queue';
       }
 
       function addWorkingDays(startDateStr, days) {
@@ -4404,7 +4464,12 @@
 
     let status = 'Pending';
 
-    if (
+    if (trackMilestones.some((milestone, index) =>
+      !['deleted', 'archived'].includes(String(milestone.recordStatus || milestone.record_status || 'active').trim().toLowerCase()) &&
+      milestoneStatuses[index] === 'Pending'
+    )) {
+      status = 'Pending';
+    } else if (
       eligibleMilestoneStatuses.length > 0 &&
       completedCount ===
       eligibleMilestoneStatuses.length
@@ -4647,6 +4712,44 @@
       return referenceDate?getNextWorkingDay(referenceDate):fallbackStartDate||'';
     }
     return fallbackStartDate||'';
+  }
+
+  function validateMilestoneDependency(project,milestoneId,type,targetId){
+    const active=item=>!['deleted','archived'].includes(String(item?.recordStatus||item?.record_status||'active').trim().toLowerCase());
+    const tracks=(project?.tracks||[]).filter(active),trackIds=new Set(tracks.map(track=>Number(track.id)));
+    const milestones=(project?.milestones||[]).filter(item=>active(item)&&(!item.trackId||trackIds.has(Number(item.trackId))));
+    const byId=new Map(milestones.map(item=>[Number(item.id),item])),current=byId.get(Number(milestoneId)),target=Number(targetId);
+    if(!current)return 'The Milestone is unavailable or archived.';
+    if(!['milestone','track'].includes(type)||!Number.isSafeInteger(target)||target<=0)return 'Choose a valid dependency.';
+    if(current.scheduleMode==='parallel')return 'Remove the existing Planner parallel reference before setting a dependency.';
+    if(type==='milestone'&&(!byId.has(target)||target===Number(current.id)))return 'Choose another active Milestone in the same Initiative.';
+    if(type==='track'&&(!trackIds.has(target)||target===Number(current.trackId)))return 'Choose another active Track in the same Initiative.';
+    const prior=new Map(),last=new Map();
+    const orderedMilestones=[...milestones].sort((first,second)=>
+      Number(first.sequenceNo||0)-Number(second.sequenceNo||0)||Number(first.id)-Number(second.id));
+    for(const item of orderedMilestones){
+      const key=String(item.trackId||'');prior.set(Number(item.id),last.get(key)||0);
+      const status=String(item.persistedStatus||item.status||'').trim().toLowerCase().replace(/[-_]+/g,' ');
+      if(!['on hold','done','closed'].includes(status))last.set(key,Number(item.id));
+    }
+    const references=item=>{
+      const proposed=Number(item.id)===Number(current.id),kind=proposed?type:item.dependencyType;
+      const milestoneTarget=proposed?target:Number(item.dependencyMilestoneId),trackTarget=proposed?target:Number(item.dependencyTrackId);
+      if(kind==='milestone')return [milestoneTarget];
+      if(kind==='track')return milestones.filter(row=>Number(row.trackId)===trackTarget).map(row=>Number(row.id));
+      if(item.scheduleMode==='parallel')return [Number(item.referenceMilestoneId)||0];
+      return [prior.get(Number(item.id))||0];
+    };
+    const visiting=new Set(),visited=new Set();
+    function cyclic(id){
+      if(!id||!byId.has(id))return false;
+      if(visiting.has(id))return true;
+      if(visited.has(id))return false;
+      visiting.add(id);
+      for(const parent of references(byId.get(id)))if(cyclic(parent))return true;
+      visiting.delete(id);visited.add(id);return false;
+    }
+    return cyclic(Number(current.id))?'This dependency would create a circular schedule.':'';
   }
 
   function milestoneReferenceCycle(project,currentId,candidateId){
@@ -8475,7 +8578,7 @@
             done: ['bg-emerald-50 rounded-2xl border-2 border-emerald-300 shadow-sm overflow-hidden','bg-gradient-to-r from-emerald-500 to-green-600 text-white'],
             'on-hold': ['bg-gray-50 rounded-2xl border-2 border-gray-300 shadow-sm overflow-hidden','bg-gradient-to-r from-gray-500 to-slate-600 text-white'],
             pending: ['bg-red-50 rounded-2xl border-2 border-red-300 shadow-sm overflow-hidden','bg-gradient-to-r from-red-500 to-rose-600 text-white'],
-            deviated: ['bg-rose-50 rounded-2xl border-2 border-rose-400 shadow-sm overflow-hidden','bg-gradient-to-r from-rose-600 to-red-700 text-white'],
+            deviated: ['bg-violet-50 rounded-2xl border-2 border-violet-300 shadow-sm overflow-hidden','bg-gradient-to-r from-violet-700 to-indigo-700 text-white'],
             critical: ['bg-red-100 rounded-2xl border-2 border-red-700 shadow-sm overflow-hidden','bg-gradient-to-r from-red-800 to-red-950 text-white'],
             wip: ['bg-amber-50 rounded-2xl border-2 border-orange-300 shadow-sm overflow-hidden','bg-gradient-to-r from-amber-500 to-orange-600 text-white'],
             'in-progress': ['bg-amber-50 rounded-2xl border-2 border-orange-300 shadow-sm overflow-hidden','bg-gradient-to-r from-amber-500 to-orange-600 text-white'],
@@ -9870,7 +9973,7 @@
       milestone => Number(milestone.id) === Number(milestoneId)
     );
 
-    if (sourceIndex < 0) return true;
+    if (sourceIndex < 0) return options.calculateOnly ? [] : true;
 
     const isSameTrack = (firstTrackId, secondTrackId) =>
       firstTrackId == null
@@ -9890,12 +9993,12 @@
     const trackId = milestones[sourceIndex].trackId;
     const updates = [];
     const kpiMilestonesById = new Map(
-      kpiMilestoneRows.map(row => [Number(row.id), row])
+      options.calculateOnly ? [] : kpiMilestoneRows.map(row => [Number(row.id), row])
     );
 
     // A row without an end or completion date cannot establish a schedule for
     // later rows, so preserve their existing dates until it can.
-    if (!referenceDate) return true;
+    if (!referenceDate) return options.calculateOnly ? [] : true;
 
     for (let index = sourceIndex + 1; index < milestones.length; index++) {
       const milestone = milestones[index];
@@ -9963,6 +10066,8 @@
       referenceDate = getReferenceDate(milestone);
     }
 
+    if (options.calculateOnly) return updates;
+
     const results = await Promise.allSettled(updates.map(({ milestone, payload }) =>
       supabaseClient.from('milestones')
         .update(payload)
@@ -9982,6 +10087,45 @@
       return false;
     }
     return true;
+  }
+
+  async function planMilestoneDependencyChanges(project,sourceIds){
+    const staged={...project,milestones:(project.milestones||[]).map(item=>({...item}))};
+    const active=item=>!['deleted','archived'].includes(String(item?.recordStatus||item?.record_status||'active').trim().toLowerCase());
+    const trackIds=new Set((project.tracks||[]).filter(active).map(track=>Number(track.id)));
+    const rows=staged.milestones.filter(item=>active(item)&&(!item.trackId||trackIds.has(Number(item.trackId)))),byId=new Map(rows.map(item=>[Number(item.id),item]));
+    const byMilestone=new Map(),byTrack=new Map();
+    for(const item of rows){
+      const key=Number(item.dependencyType==='milestone'?item.dependencyMilestoneId:item.dependencyType==='track'?item.dependencyTrackId:0),map=item.dependencyType==='milestone'?byMilestone:byTrack;
+      if(!key)continue;if(!map.has(key))map.set(key,[]);map.get(key).push(item);
+    }
+    const preserved=new Set(rows.filter(item=>item.dependencyType||hasMilestoneCompletion(item)).map(item=>Number(item.id)));
+    const sourceDate=item=>String(item?.revisedEndDate||item?.deadline||item?.endDate||'').slice(0,10);
+    const queue=[...new Set((Array.isArray(sourceIds)?sourceIds:[sourceIds]).map(Number))],changes=new Map();
+    let cursor=0;const maximum=Math.max(100,rows.length*rows.length*2);
+    while(cursor<queue.length){
+      if(cursor>=maximum)throw new Error('Dependency scheduling did not converge. Check for a circular dependency.');
+      const source=byId.get(queue[cursor++]);if(!source)continue;
+      const dependents=new Set([...(byMilestone.get(Number(source.id))||[]),...(byTrack.get(Number(source.trackId))||[])]);
+      for(const milestone of dependents){
+        if(hasMilestoneCompletion(milestone))continue;
+        const statusKey=String(milestone.persistedStatus||milestone.status||'').trim().toLowerCase().replace(/[-_]+/g,' ');
+        if(['done','closed','on hold'].includes(statusKey))continue;
+        const dates=milestone.dependencyType==='milestone'?[sourceDate(byId.get(Number(milestone.dependencyMilestoneId)))]:rows.filter(item=>Number(item.trackId)===Number(milestone.dependencyTrackId)).map(sourceDate);
+        const date=dates.filter(value=>/^\d{4}-\d{2}-\d{2}$/.test(value)).sort().at(-1);
+        if(!date)continue;
+        const requestedStart=getNextWorkingDay(date);
+        if(!requestedStart||requestedStart===milestone.startDate)continue;
+        const schedule=calculateMilestoneSchedule(milestone,{startDate:requestedStart});
+        const startDate=schedule.startDate||'',endDate=schedule.endDate||'',deadline=schedule.deadline||getMilestoneDeadline(startDate,endDate),status=getEffectiveMilestoneStatus({...milestone,startDate,endDate,deadline}),deviationDays=schedule.hasHistory?schedule.deviationDays:calculateDeviation(deadline,startDate,milestone.completionDate)||null;
+        Object.assign(milestone,{startDate,endDate,deadline,status,deviationDays,...(schedule.hasHistory?{days:schedule.days,remarks:schedule.remarks}:{})});
+        changes.set(Number(milestone.id),{milestone,payload:{start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,status,deviation_days:deviationDays,...(schedule.hasHistory?{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks}:{})}});
+        queue.push(Number(milestone.id));
+        const below=await cascadeTrackMilestoneSchedule(staged,milestone.id,{calculateOnly:true,preserveMilestoneIds:preserved});
+        for(const update of below){if(hasMilestoneCompletion(update.milestone))continue;changes.set(Number(update.milestone.id),update);queue.push(Number(update.milestone.id));}
+      }
+    }
+    return {project:staged,changes:[...changes.values()]};
   }
 
   async function cascadeReferencedMilestoneSchedule(project,sourceMilestoneId){
@@ -16888,8 +17032,8 @@
   // REALTIME PORTAL SYNCHRONIZATION
   let deliveryRealtimeChannel=null,deliveryRealtimeRefreshTimer=null,deliveryRealtimeRefreshInProgress=false,deliveryRealtimeRefreshPending=false;
   function renderActiveDeliveryWorkspace(){updateDailyTrackerBadge();if(currentWorkspaceView==='daily')renderDailyTrackerPage();else if(currentWorkspaceView==='overview')renderProjects();else renderFlatWorkspacePage();}
-  async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._draggingInitiative||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size||window._programSequenceSaveLocks?.size||window.deliveryPlannerFetch?.busy){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
-  function queueDeliveryRealtimeRefresh(payload){if(window.deliveryInitiativeReorder?.acceptRealtime(payload))return;clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
+  async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._draggingInitiative||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size||window._programSequenceSaveLocks?.size||window.deliveryPlannerFetch?.busy||window.deliveryMilestoneDependency?.busy){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
+  function queueDeliveryRealtimeRefresh(payload){if(window.deliveryInitiativeReorder?.acceptRealtime(payload)||window.deliveryMilestoneDependency?.acceptRealtime(payload))return;clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
   function initializeDeliveryRealtime(){if(deliveryRealtimeChannel||!currentUser||!supabaseClient?.channel)return;deliveryRealtimeChannel=supabaseClient.channel('delivery-hub-live').on('postgres_changes',{event:'*',schema:'public',table:'programs'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'initiatives'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestone_tracks'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestones'},queueDeliveryRealtimeRefresh).subscribe(status=>{if(status==='CHANNEL_ERROR')console.error('Delivery Hub realtime channel failed.');});}
   const existingLoadInitiativesFromSupabase=loadInitiativesFromSupabase;
   loadInitiativesFromSupabase=async function(...args){const loaded=await existingLoadInitiativesFromSupabase.apply(this,args);if(loaded&&currentUser)initializeDeliveryRealtime();return loaded;};
@@ -22284,8 +22428,9 @@
         if(currentWorkspaceView==='overview'&&row.closest('#projects-container')){
           const projectId=row.dataset.inlineMilestoneProjectId,milestoneId=row.dataset.inlineMilestoneId;
           const project=projects.find(item=>String(item.id)===String(projectId));
+          const milestone=project?.milestones?.find(item=>String(item.id)===String(milestoneId));
+          if(project&&milestone)window.deliveryMilestoneDependency?.decorate(row,project,milestone);
           if(project&&canEditInitiative(project)&&milestoneId){
-            const milestone=(project.milestones||[]).find(item=>String(item.id)===String(milestoneId));
             const status=milestone?normalizeMilestoneStatus(getEffectiveMilestoneStatus(milestone)):'';
             if(milestone&&status!=='Done'&&!['deleted','archived'].includes(String(milestone.recordStatus||'').trim().toLowerCase())){
               const held=status==='On-Hold',hold=document.createElement('button');hold.type='button';
@@ -22299,6 +22444,12 @@
             fetch.innerHTML='<i data-lucide="list-tree" class="h-4 w-4" aria-hidden="true"></i><span>Fetch Planner Type</span>';
             fetch.addEventListener('click',()=>window.deliveryPlannerFetch?.open(projectId,milestoneId,fetch));
             acts.push(fetch);
+            if(milestone&&!['deleted','archived'].includes(String(milestone.recordStatus||'').trim().toLowerCase())){
+              const dependency=document.createElement('button');dependency.type='button';dependency.title='Set Dependency';
+              dependency.innerHTML='<i data-lucide="link-2" class="h-4 w-4" aria-hidden="true"></i><span>Set Dependency</span>';
+              dependency.addEventListener('click',()=>window.deliveryMilestoneDependency?.open(projectId,milestoneId,dependency));
+              acts.push(dependency);
+            }
           }
         }
         const box=document.createElement('div');box.className='audit-action-menu';
@@ -29398,6 +29549,7 @@
     updateDeliveryThemeCharts();
   </script>
   <script src="initiative-resequence.js?v=20261105-drag-preview-2"></script>
+  <script src="milestone-dependency.js"></script>
   </body>
   </html>
   
