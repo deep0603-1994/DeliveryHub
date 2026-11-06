@@ -4625,6 +4625,32 @@
     return [validDate(startDate), validDate(endDate)].filter(Boolean).sort().pop() || '';
   }
 
+  function isPendingMilestone(milestone) {
+    return normalizeMilestoneStatus(milestone?.persistedStatus ?? milestone?.rawStatus ?? milestone?.status) === 'Pending';
+  }
+
+  function getWorkingDayOffset(referenceDate, targetDate) {
+    const normalizeDate = value => {
+      const date = milestoneDateInputValue(value);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return '';
+      const parsed = new Date(`${date}T00:00:00Z`);
+      return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date ? '' : date;
+    };
+    const reference = normalizeDate(referenceDate), target = normalizeDate(targetDate);
+    if (!reference || !target) return null;
+    if (reference === target) return 0;
+
+    const direction = target > reference ? 1 : -1;
+    const cursor = new Date(`${reference}T00:00:00Z`);
+    let offset = 0, steps = 0;
+    while (cursor.toISOString().slice(0, 10) !== target) {
+      cursor.setUTCDate(cursor.getUTCDate() + direction);
+      if (cursor.getUTCDay() !== 0 && cursor.getUTCDay() !== 6) offset += direction;
+      if (++steps > 10000) return null;
+    }
+    return addWorkingDayOffset(reference, offset) === target ? offset : null;
+  }
+
   function updateMilestoneRuntimeDates(recalculateDates = false) {
     const days = document.getElementById('m-days')?.value || '';
     const startField = document.getElementById('m-start-date');
@@ -4654,8 +4680,10 @@
     const project=projects.find(item=>(item.milestones||[]).some(milestone=>Number(milestone.id)===Number(milestoneId)));
     const milestone=project?.milestones?.find(item=>Number(item.id)===Number(milestoneId));
     const configuredMilestone=milestone||{};
-    const startDate=project&&configuredMilestone.scheduleMode==='parallel'?getMilestoneScheduleStartDate(project,configuredMilestone,startField?.value||''):startField?.value||'';
-    if(startField){startField.readOnly=configuredMilestone.scheduleMode==='parallel';startField.value=startDate;}
+    const parallel=configuredMilestone.scheduleMode==='parallel';
+    const editablePendingParallelStart=parallel&&isPendingMilestone(configuredMilestone);
+    const startDate=project&&parallel&&!editablePendingParallelStart?getMilestoneScheduleStartDate(project,configuredMilestone,startField?.value||''):startField?.value||'';
+    if(startField){startField.readOnly=parallel&&!editablePendingParallelStart;if(!parallel||!editablePendingParallelStart)startField.value=startDate;}
     const endDateField = document.getElementById(`inline-end-date-${milestoneId}`);
     const deadlineField = document.getElementById(`inline-deadline-${milestoneId}`);
     if (recalculateDates) {
@@ -10194,10 +10222,17 @@
     const scheduleMode=milestone.scheduleMode==='parallel'?'parallel':'sequential';
     const referenceMilestoneId=Number(milestone.referenceMilestoneId)||null;
     const referenceDateType=milestone.referenceDateType||'start_date';
-    const referenceOffsetDays=Number(milestone.referenceOffsetDays)||0;
+    let referenceOffsetDays=Number(milestone.referenceOffsetDays)||0;
     if(scheduleMode==='parallel'&&(!referenceMilestoneId||!['start_date','end_date','deadline','completion_date'].includes(referenceDateType)||!Number.isInteger(referenceOffsetDays)||!(project.milestones||[]).some(item=>Number(item.id)===referenceMilestoneId&&!['deleted','archived'].includes(String(item.recordStatus||'').toLowerCase()))||milestoneReferenceCycle(project,milestoneId,referenceMilestoneId))){showToast('The milestone reference is invalid. Correct its Reference Milestone, Reference Date, or whole-day offset in Project Planner.','error');return false;}
-    const scheduledMilestone={...milestone,scheduleMode,referenceMilestoneId,referenceDateType,referenceOffsetDays};
+    const editablePendingParallelStart=scheduleMode==='parallel'&&isPendingMilestone(milestone);
     const enteredStartDate=val('inline-start-date');
+    if(editablePendingParallelStart){
+      const reference=project.milestones.find(item=>Number(item.id)===referenceMilestoneId);
+      const referenceField=({start_date:'startDate',end_date:'endDate',deadline:'deadline',completion_date:'completionDate'})[referenceDateType];
+      referenceOffsetDays=getWorkingDayOffset(reference?.[referenceField],enteredStartDate);
+      if(referenceOffsetDays===null){showToast('Choose a working-day Start Date that can be represented from the reference milestone.','error');el('inline-start-date')?.focus();return false;}
+    }
+    const scheduledMilestone={...milestone,scheduleMode,referenceMilestoneId,referenceDateType,referenceOffsetDays};
     const startDate=scheduleMode==='parallel'?getMilestoneScheduleStartDate(project,scheduledMilestone,''):enteredStartDate;
     if(scheduleMode==='parallel'&&!startDate){showToast('The Reference Date has no date. Correct the reference in Project Planner.','error');return false;}
     const endDate=val('inline-end-date'),deadline=getMilestoneDeadline(startDate,endDate);
@@ -10211,6 +10246,7 @@
     const schedule=calculateMilestoneSchedule(scheduledMilestone,{days,startDate});
     const status=getEffectiveMilestoneStatus({...milestone,days,startDate,endDate,deadline,completionDate});
     const milestoneRecord={actions,owner,dependency:dependency||null,days:normalizeMilestoneDays(days),start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,completion_date:completionDate||null,status,deviation_days:calculateDeviation(deadline,startDate,completionDate)||null,record_status:milestone.recordStatus||'active'};
+    if(editablePendingParallelStart)milestoneRecord.reference_offset_days=referenceOffsetDays;
     const plannerTypeControl=el('inline-planner-type');if(plannerTypeControl)milestoneRecord.planner_type_id=plannerTypeControl.value||null;
     if(schedule.hasHistory)Object.assign(milestoneRecord,{start_date:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),deviation_days:schedule.deviationDays,remarks:schedule.remarks});
     Object.assign(milestoneRecord,milestoneRemarksRecord(remarks,milestoneRecord.remarks??milestone.remarks));
@@ -10568,7 +10604,7 @@
         <td class="py-2 px-3"><select id="inline-dependency-${id}" class="milestone-cell-control w-full px-2 py-1 border rounded bg-white">${getMilestoneUserOptions(milestone.dependency || '')}</select></td>
         <td data-inline-milestone-status class="py-2 px-3 text-center">${getStatusBadge(status || '-')}</td>
         <td class="py-2 px-3"><input id="inline-days-${id}" value="${escapeHtml(days)}" placeholder="5 / TBD / -" oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control w-full px-2 py-1 border rounded"></td>
-        <td class="milestone-date-column py-2 px-3"><input id="inline-start-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.startDate))}" ${milestone.scheduleMode==='parallel'?'readonly':''} oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded">${milestoneScheduleImpactControl(`inline-impact-below-${id}`)}</td>
+        <td class="milestone-date-column py-2 px-3"><input id="inline-start-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.startDate))}" ${milestone.scheduleMode==='parallel'&&!isPendingMilestone(milestone)?'readonly':''} oninput="updateInlineMilestoneRuntimeDates(${id}, true)" onchange="updateInlineMilestoneRuntimeDates(${id}, true)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded">${milestoneScheduleImpactControl(`inline-impact-below-${id}`)}</td>
         <td class="milestone-date-column py-2 px-3"><input id="inline-end-date-${id}" type="date" value="${escapeHtml(endDate)}" ${milestone.scheduleMode==='parallel'?'readonly':''} oninput="updateInlineMilestoneRuntimeDates(${id}, false)" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
         <td class="milestone-date-column py-2 px-3"><input id="inline-deadline-${id}" type="date" value="${escapeHtml(deadline)}" readonly aria-readonly="true" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded bg-slate-100"></td>
         <td class="milestone-date-column py-2 px-3"><input id="inline-completion-date-${id}" type="date" value="${escapeHtml(milestoneDateInputValue(milestone.completionDate))}" class="milestone-cell-control milestone-date-control w-full px-2 py-1 border rounded"></td>
