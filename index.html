@@ -12696,6 +12696,53 @@
     openProjectModal(projectId);
   }
 
+  async function syncInitiativeTemplateMilestoneOwners(project, previous, next) {
+    const changedRules = new Set();
+    if (String(previous.businessOwner || '') !== String(next.business_owner || '')) {
+      changedRules.add('INITIATIVE_BUSINESS_OWNER');
+    }
+    if (String(previous.assignedTo || '') !== String(next.assigned_to || '')) {
+      changedRules.add('INITIATIVE_ASSIGNED_TO');
+    }
+    if (!changedRules.size) return 0;
+
+    const milestones = (project.milestones || []).filter(milestone =>
+      !['deleted', 'archived'].includes(String(milestone.recordStatus || '').trim().toLowerCase()) &&
+      milestone.templateId && milestone.templateMilestoneId
+    );
+    if (!milestones.length) return 0;
+
+    const templateResult = await supabaseClient.from('project_planner_milestones')
+      .select('id,template_id,owner_mode,owner_rule')
+      .in('id', [...new Set(milestones.map(milestone => milestone.templateMilestoneId))]);
+    if (templateResult.error) throw new Error(templateResult.error.message);
+
+    const templatesByKey = new Map((templateResult.data || []).map(template =>
+      [`${String(template.template_id)}:${String(template.id)}`, template]
+    ));
+    const program = programs.find(item => Number(item.id) === Number(project.programId));
+    const updatedProject = {...project, businessOwner: next.business_owner || '', assignedTo: next.assigned_to || ''};
+    let updatedCount = 0;
+
+    for (const rule of changedRules) {
+      const owner = resolvePlannerRule('DYNAMIC', rule, '', updatedProject, program, true);
+      if (!owner) throw new Error(`The new ${rule === 'INITIATIVE_BUSINESS_OWNER' ? 'Business Owner' : 'Assigned To'} must be an active User Master person.`);
+      const ids = milestones.filter(milestone => {
+        const template = templatesByKey.get(`${String(milestone.templateId)}:${String(milestone.templateMilestoneId)}`);
+        return template?.owner_mode === 'DYNAMIC' && template.owner_rule === rule && String(milestone.owner || '') !== owner;
+      }).map(milestone => Number(milestone.id));
+      if (!ids.length) continue;
+
+      const result = await supabaseClient.from('milestones').update({owner})
+        .eq('initiative_id', Number(project.id)).in('id', ids).select('id,owner');
+      if (result.error) throw new Error(result.error.message);
+      const confirmed = new Map((result.data || []).map(row => [Number(row.id), row.owner]));
+      if (ids.some(id => confirmed.get(id) !== owner)) throw new Error('Some template-linked Milestone owners could not be confirmed.');
+      updatedCount += ids.length;
+    }
+    return updatedCount;
+  }
+
       async function saveProject(e) {
     e.preventDefault();
 
@@ -12910,6 +12957,7 @@
     };
 
     let result;
+    let ownerSyncError = null;
 
   if (!projectId) {
     try {
@@ -12973,9 +13021,23 @@
       return;
     }
 
+    if (existingProject) {
+      try {
+        await syncInitiativeTemplateMilestoneOwners(existingProject, existingProject, databaseRecord);
+      } catch (error) {
+        ownerSyncError = error;
+        console.error('Template-linked Milestone owner synchronization failed:', error);
+      }
+    }
+
     closeProjectModal();
 
     await loadInitiativesFromSupabase();
+
+    if (ownerSyncError) {
+      showToast(`Initiative saved, but template-linked Milestone owners were not fully updated: ${ownerSyncError.message}`, 'error');
+      return;
+    }
 
     showToast(
       projectId
