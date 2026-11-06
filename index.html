@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Project Milestone Delivery Hub</title>
+    <script>
+      try { if (localStorage.getItem('deliveryHubTheme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (error) {}
+    </script>
     <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
 
@@ -113,6 +116,18 @@
         input[type="checkbox"], input[type="radio"] { min-width:24px; min-height:24px; }
         textarea { min-height:80px; }
         .modal-panel, [role="dialog"] > :first-child { max-height:calc(100dvh - 1rem); overflow-y:auto; overscroll-behavior:contain; }
+      }
+
+      @media (max-width: 640px) {
+        html { scrollbar-gutter:stable; }
+        #mobile-sidebar-global-toggle { display:none !important; }
+        #mobile-sidebar-backdrop { z-index:10000; width:100vw; max-width:none; }
+        #sidebar.sidebar-mobile-open { z-index:10001; }
+        #sidebar:not(.sidebar-mobile-open) { width:0 !important; max-width:0 !important; min-width:0 !important; border:0 !important; }
+        #sidebar-brand-toggle { position:fixed; top:calc(env(safe-area-inset-top) + .5rem); left:1rem; z-index:10002; display:inline-flex; align-items:center; justify-content:center; }
+        #sidebar .sidebar-brand-box { padding-left:4.5rem; }
+        #sidebar nav { -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+        html.mobile-sidebar-open, html.mobile-sidebar-open body { overflow:hidden; overscroll-behavior:none; }
       }
 
       /* Hide text & badges when collapsed */
@@ -416,7 +431,7 @@
       
       <!-- Brand Header: Click Layers Icon to Collapse / Expand -->
       <div class="sidebar-brand-box flex items-center gap-3 h-16 px-4 border-b border-slate-800 bg-slate-950/60 flex-shrink-0">
-        <button onclick="toggleSidebar()" class="p-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-inner flex-shrink-0 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer" title="Click to Collapse / Expand Sidebar">
+        <button id="sidebar-brand-toggle" onclick="toggleSidebar()" class="p-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-inner flex-shrink-0 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer" title="Click to Collapse / Expand Sidebar">
           <i data-lucide="layers" class="w-5 h-5 text-white"></i>
         </button>
         <div class="sidebar-brand-text min-w-0">
@@ -658,6 +673,8 @@
         </div>
         <!-- Right Buttons Start -->
   <div class="flex items-center gap-2 sm:gap-3">
+
+            <button id="delivery-theme-toggle" type="button" class="delivery-theme-toggle" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false" onclick="toggleDeliveryTheme()"><i data-lucide="moon" class="w-4 h-4" aria-hidden="true"></i></button>
 
   <!-- Admin User Management -->
             
@@ -3841,9 +3858,11 @@
         sidebar?.classList.remove('sidebar-mobile-open');
         backdrop?.classList.add('hidden');
         document.body.classList.remove('mobile-sidebar-open');
+        document.documentElement.classList.remove('mobile-sidebar-open');
         document.querySelectorAll('.mobile-sidebar-trigger').forEach(toggle=>{
           toggle.setAttribute('aria-expanded','false');
           toggle.setAttribute('aria-label','Open navigation menu');
+          if(toggle.id==='sidebar-brand-toggle')return;
           toggle.innerHTML='<i data-lucide="menu" class="h-5 w-5"></i>';
           lucide.createIcons({root:toggle});
         });
@@ -3857,9 +3876,11 @@
           sidebar.classList.toggle('sidebar-mobile-open',opening);
           document.getElementById('mobile-sidebar-backdrop')?.classList.toggle('hidden',!opening);
           document.body.classList.toggle('mobile-sidebar-open',opening);
+          if(window.matchMedia('(max-width: 640px)').matches)document.documentElement.classList.toggle('mobile-sidebar-open',opening);
           document.querySelectorAll('.mobile-sidebar-trigger').forEach(toggle=>{
             toggle.setAttribute('aria-expanded',String(opening));
             toggle.setAttribute('aria-label',opening?'Close navigation menu':'Open navigation menu');
+            if(toggle.id==='sidebar-brand-toggle')return;
             toggle.innerHTML=`<i data-lucide="${opening?'x':'menu'}" class="h-5 w-5"></i>`;
             lucide.createIcons({root:toggle});
           });
@@ -3887,6 +3908,20 @@
         const savedState = window.matchMedia('(max-width: 1024px)').matches ? 'collapsed' : localStorage.getItem('portal_nav_state') || 'expanded';
         const sidebar = document.getElementById('sidebar');
         const mainContent = document.getElementById('main-content');
+        const brand= document.getElementById('sidebar-brand-toggle');
+        const brandBox=sidebar.querySelector('.sidebar-brand-box');
+        const phone=window.matchMedia('(max-width: 640px)').matches;
+        if(phone&&brand.parentElement!==document.body){
+          document.body.appendChild(brand);
+          brand.classList.add('mobile-sidebar-trigger');
+          brand.setAttribute('aria-controls','sidebar');
+          brand.setAttribute('aria-label','Open navigation menu');
+          brand.setAttribute('aria-expanded','false');
+        }else if(!phone&&brand.parentElement!==brandBox){
+          brandBox.prepend(brand);
+          brand.classList.remove('mobile-sidebar-trigger');
+          brand.removeAttribute('aria-controls');brand.removeAttribute('aria-label');brand.removeAttribute('aria-expanded');
+        }
         if(!sidebar.dataset.mobileDrawerInitialized){
           sidebar.dataset.mobileDrawerInitialized='true';
           sidebar.addEventListener('click',event=>{
@@ -3895,7 +3930,13 @@
             if(event.target.closest('button,a'))closeMobileSidebar();
           });
           document.addEventListener('keydown',event=>{if(event.key==='Escape')closeMobileSidebar();});
-          window.addEventListener('resize',()=>initSidebar());
+          document.addEventListener('touchmove',event=>{if(window.matchMedia('(max-width: 640px)').matches&&sidebar.classList.contains('sidebar-mobile-open')&&!sidebar.contains(event.target))event.preventDefault();},{passive:false});
+          let wasPhone=phone;
+          window.addEventListener('resize',()=>{
+            const isPhone=window.matchMedia('(max-width: 640px)').matches;
+            if(!isPhone||!wasPhone)initSidebar();
+            wasPhone=isPhone;
+          });
         }
         const header=mainContent.querySelector(':scope > header');
         sidebar.querySelectorAll('.sidebar-link').forEach(control=>{
@@ -3914,6 +3955,7 @@
           mainContent.classList.remove('main-expanded','main-collapsed');
           document.getElementById('mobile-sidebar-backdrop')?.classList.add('hidden');
           document.body.classList.remove('mobile-sidebar-open');
+          document.documentElement.classList.remove('mobile-sidebar-open');
           document.querySelectorAll('.mobile-sidebar-trigger').forEach(toggle=>toggle.setAttribute('aria-expanded','false'));
         }else if (savedState === 'collapsed') {
           sidebar.classList.remove('sidebar-expanded');
@@ -13418,6 +13460,15 @@
     );
   }
 
+  document.addEventListener('pointerdown',event=>{
+    const button=event.target.closest?.('#projects-container .track-card-header button[onclick^="toggleMilestoneTrack("]');
+    if(!button||button.disabled||event.button!==0)return;
+    const ids=button.getAttribute('onclick').match(/toggleMilestoneTrack\((\d+)\s*,\s*(\d+)/);
+    if(ids)window._deliveryTrackPointerViewport={initiativeId:Number(ids[1]),trackId:Number(ids[2]),scrollX:window.scrollX,scrollY:window.scrollY,at:Date.now()};
+    event.preventDefault();
+    button.focus({preventScroll:true});
+  },true);
+
   function toggleMilestoneTrack(
     initiativeId,
     trackId
@@ -13444,11 +13495,30 @@
       return;
     }
 
-    track.collapsed =
-      !track.collapsed;
-
-    overviewSearch.explore('Track',track.id,track.collapsed,initiative.id);
-    renderProjects();
+    const previousViewport=window._deliveryTrackToggleViewport;
+    const pointerViewport=window._deliveryTrackPointerViewport;
+    delete window._deliveryTrackPointerViewport;
+    window._deliveryTrackToggleViewport=pointerViewport&&pointerViewport.initiativeId===Number(initiativeId)&&pointerViewport.trackId===Number(trackId)&&Date.now()-pointerViewport.at<2000?pointerViewport:{scrollX:window.scrollX,scrollY:window.scrollY};
+    const viewState=captureDeliveryViewState(null,{layoutOnly:true});
+    const anchoring=window._deliveryTrackAnchorState||={generation:0,styles:[document.documentElement,document.body].map(element=>({element,value:element.style.getPropertyValue('overflow-anchor'),priority:element.style.getPropertyPriority('overflow-anchor')}))};
+    const generation=++anchoring.generation;
+    for(const saved of anchoring.styles)saved.element.style.setProperty('overflow-anchor','none','important');
+    try{
+      track.collapsed=!track.collapsed;
+      overviewSearch.explore('Track',track.id,track.collapsed,initiative.id);
+      renderProjects();
+    }finally{
+      window._deliveryTrackToggleViewport=previousViewport;
+      restoreDeliveryViewState(viewState,{restoreFocus:false});
+      requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(()=>{
+        if(window._deliveryTrackAnchorState!==anchoring||anchoring.generation!==generation)return;
+        try{restoreDeliveryViewState(viewState,{restoreFocus:false,defer:false});}
+        finally{
+          for(const saved of anchoring.styles){if(saved.value)saved.element.style.setProperty('overflow-anchor',saved.value,saved.priority);else saved.element.style.removeProperty('overflow-anchor');}
+          delete window._deliveryTrackAnchorState;
+        }
+      })));
+    }
   }
 
 
@@ -16919,6 +16989,7 @@
     return `${deliveryElementSelector(parent)||'body'} > ${element.tagName.toLowerCase()}:nth-of-type(${siblings.indexOf(element)+1})`;
   }
   function captureDeliveryViewState(origin=document.activeElement,options={}){
+    const trackViewport=window._deliveryTrackToggleViewport;
     const row=origin?.closest('[data-inline-milestone-id],[data-milestone-id]');
     const root=document.getElementById('projects-container'),recordSelector='tr[data-inline-milestone-id],tr[data-milestone-id],[data-track-order-id],[data-overview-search-level]';
     const sticky=deliveryStickyOffset();
@@ -16931,15 +17002,15 @@
       if(!root?.contains(record)||!visible(record))record=null;
       if(!record)record=[...(root?.querySelectorAll(recordSelector)||[])].find(element=>{const rect=element.getBoundingClientRect();return visible(element)&&rect.bottom>sticky&&rect.top<innerHeight;});
     }
-    const anchor=record?{selector:deliveryElementSelector(record),top:record.getBoundingClientRect().top,milestoneId:record.dataset.inlineMilestoneId||record.dataset.milestoneId}:null;
+    const anchor=record&&!trackViewport?{selector:deliveryElementSelector(record),top:record.getBoundingClientRect().top,milestoneId:record.dataset.inlineMilestoneId||record.dataset.milestoneId}:null;
     const neighbors=[];
-    if(record){
+    if(record&&!trackViewport){
       for(const sibling of [record.nextElementSibling,record.previousElementSibling])if(sibling?.matches(recordSelector)&&visible(sibling))neighbors.push({selector:deliveryElementSelector(sibling),top:anchor.top});
       const parent=record.parentElement?.closest(recordSelector);
       if(parent&&visible(parent))neighbors.push({selector:deliveryElementSelector(parent),top:Math.max(sticky+16,parent.getBoundingClientRect().top)});
     }
     return{
-      scrollX:window.scrollX,scrollY:window.scrollY,
+      scrollX:trackViewport?.scrollX??window.scrollX,scrollY:trackViewport?.scrollY??window.scrollY,
       anchor,neighbors,workspace:currentWorkspaceView,navigationVersion:deliveryViewNavigationVersion,
       focusElement:origin,focusSelector:deliveryElementSelector(origin),
       milestoneId:row?.dataset.inlineMilestoneId||row?.dataset.milestoneId||null,
@@ -29253,6 +29324,78 @@
   Needs Review; no server success or exactly-once replay is assumed for these operations.
   Import files/checkpoints remain local until completion; do not clear browser site data while
   changes or imports are pending. No additional Supabase tables or schema changes are required.
+  </script>
+  <style id="delivery-dark-theme">
+    .delivery-theme-toggle{display:inline-flex;align-items:center;justify-content:center;flex:none;width:38px;height:38px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#475569}
+    .delivery-theme-toggle:hover{background:#f1f5f9}.delivery-theme-toggle:focus-visible{outline:2px solid #6366f1;outline-offset:2px}
+    html[data-theme="dark"]{color-scheme:dark;--delivery-dark-page:#13171d;--delivery-dark-surface:#20262e;--delivery-dark-raised:#2b333d;--delivery-dark-border:#485461;--delivery-dark-text:#e7edf3;--delivery-dark-muted:#abb8c6}
+    html[data-theme="dark"] body,html[data-theme="dark"] #main-content{background:var(--delivery-dark-page)!important;color:var(--delivery-dark-text)!important}
+    html[data-theme="dark"] .delivery-theme-toggle{background:#303a45;border-color:#586879;color:#f8df99}
+    html[data-theme="dark"] .delivery-theme-toggle:hover{background:#3d4956}
+    html[data-theme="dark"] :is(.bg-white,.bg-slate-50,.bg-slate-100,.bg-gray-50,.bg-gray-100,.bg-zinc-50,.bg-zinc-100,.bg-neutral-50,.bg-neutral-100){background-color:var(--delivery-dark-surface)!important;color:var(--delivery-dark-text)}
+    html[data-theme="dark"] :is(.bg-white\/90,.bg-white\/95,.bg-slate-50\/50,.bg-slate-50\/80,.bg-slate-100\/75){background-color:var(--delivery-dark-surface)!important}
+    html[data-theme="dark"] :is(.bg-slate-200,.bg-gray-200,.bg-zinc-200){background-color:var(--delivery-dark-raised)!important}
+    html[data-theme="dark"] :is(.text-slate-900,.text-slate-800,.text-slate-700,.text-gray-900,.text-gray-800,.text-gray-700,.text-zinc-900,.text-zinc-800,.text-zinc-700){color:var(--delivery-dark-text)!important}
+    html[data-theme="dark"] :is(.text-slate-600,.text-slate-500,.text-gray-600,.text-gray-500,.text-zinc-600,.text-zinc-500){color:var(--delivery-dark-muted)!important}
+    html[data-theme="dark"] :is(.border-slate-100,.border-slate-200,.border-slate-300,.border-gray-100,.border-gray-200,.border-gray-300,.border-zinc-200,.border-zinc-300){border-color:var(--delivery-dark-border)!important}
+    html[data-theme="dark"] :is(input:not([type="checkbox"]):not([type="radio"]),select,textarea){background-color:#171d24!important;color:var(--delivery-dark-text)!important;border-color:var(--delivery-dark-border)!important;color-scheme:dark}
+    html[data-theme="dark"] :is(input,textarea)::placeholder{color:#93a1af!important}
+    html[data-theme="dark"] :is(input,select,textarea,button):focus-visible{outline-color:#a6b8ff}
+    html[data-theme="dark"] :is(.bg-red-50,.bg-rose-50,.bg-pink-50,.bg-red-100,.bg-rose-100,.bg-pink-100){background-color:#492930!important;color:#ffd9df!important}
+    html[data-theme="dark"] :is(.bg-amber-50,.bg-orange-50,.bg-yellow-50,.bg-amber-100,.bg-orange-100,.bg-yellow-100){background-color:#493c29!important;color:#ffdfaa!important}
+    html[data-theme="dark"] :is(.bg-emerald-50,.bg-green-50,.bg-teal-50,.bg-emerald-100,.bg-green-100,.bg-teal-100){background-color:#203e35!important;color:#bcebd7!important}
+    html[data-theme="dark"] :is(.bg-blue-50,.bg-sky-50,.bg-cyan-50,.bg-indigo-50,.bg-violet-50,.bg-blue-100,.bg-sky-100,.bg-cyan-100,.bg-indigo-100,.bg-violet-100){background-color:#28394c!important;color:#d4e6ff!important}
+    html[data-theme="dark"] :is(.text-red-600,.text-red-700,.text-red-800,.text-rose-600,.text-rose-700,.text-rose-800){color:#ffabb5!important}
+    html[data-theme="dark"] :is(.text-amber-600,.text-amber-700,.text-amber-800,.text-orange-600,.text-orange-700,.text-yellow-700,.text-yellow-800){color:#f5ca82!important}
+    html[data-theme="dark"] :is(.text-emerald-600,.text-emerald-700,.text-emerald-800,.text-green-600,.text-green-700,.text-green-800,.text-teal-700){color:#9fe0c0!important}
+    html[data-theme="dark"] :is(.text-indigo-600,.text-indigo-700,.text-indigo-800,.text-violet-600,.text-violet-700,.text-blue-600,.text-blue-700,.text-sky-600,.text-sky-700,.text-cyan-700,.text-cyan-800){color:#a7caff!important}
+    html[data-theme="dark"] #projects-container :is([data-overview-search-level] > div:first-child,.track-card-header)[class*="from-violet-"],html[data-theme="dark"] #projects-container :is([data-overview-search-level] > div:first-child,.track-card-header)[class*="from-indigo-"]{background-image:none!important;background-color:#383063!important;color:#f5f2ff!important}
+    html[data-theme="dark"] #projects-container :is([data-overview-search-level] > div:first-child,.track-card-header):is([class*="from-amber-"],[class*="from-orange-"]){background-image:none!important;background-color:#664720!important;color:#fff4db!important}
+    html[data-theme="dark"] #projects-container :is([data-overview-search-level] > div:first-child,.track-card-header):is([class*="from-red-"],[class*="from-rose-"],[class*="from-pink-"]){background-image:none!important;background-color:#68323c!important;color:#fff0f2!important}
+    html[data-theme="dark"] #projects-container :is([data-overview-search-level] > div:first-child,.track-card-header):is([class*="from-green-"],[class*="from-emerald-"]){background-image:none!important;background-color:#24523e!important;color:#e3fff1!important}
+    html[data-theme="dark"] #projects-container :is([data-overview-search-level] > div:first-child,.track-card-header):is([class*="from-blue-"],[class*="from-cyan-"],[class*="from-sky-"]){background-image:none!important;background-color:#244862!important;color:#e5f6ff!important}
+    html[data-theme="dark"] #projects-container :is([data-overview-search-level] > div:first-child,.track-card-header):is([class*="from-slate-"],[class*="from-gray-"],[class*="from-zinc-"]){background-image:none!important;background-color:#3a4651!important;color:#edf2f7!important}
+    html[data-theme="dark"] :is(.engineer-user-menu,#overview-search-scopes,.report-field,.report-panel,.report-modal,.flat-shared-filter-banner,.unified-filter-container,.delivery-filter-bar,.analytics-row-dialog,.analytics-chart-actions button,.analytics-parameter-toggle,.analytics-parameter-reset,.unified-filter-reset,.unified-filter-toggle,.review-pending-row){background:var(--delivery-dark-surface)!important;color:var(--delivery-dark-text)!important;border-color:var(--delivery-dark-border)!important}
+    html[data-theme="dark"] body.daily-tracker-view-active #daily-multi-actions,html[data-theme="dark"] #delivery-sync-status,html[data-theme="dark"] #delivery-sync-dialog,html[data-theme="dark"] :is(.system-report-action-menu,.report-relationship-panel,.report-source-node,.report-field-source-toggle){background:var(--delivery-dark-surface)!important;color:var(--delivery-dark-text)!important;border-color:var(--delivery-dark-border)!important}
+    html[data-theme="dark"] #delivery-sync-status button{background:transparent!important;color:var(--delivery-dark-text)!important}
+    html[data-theme="dark"] #analytics-parameter-card .delivery-date-range-control input[type="date"],html[data-theme="dark"] [data-delivery-filter-page] .delivery-date-range-control input[type="date"]{background:#171d24!important;color:var(--delivery-dark-text)!important;border-color:var(--delivery-dark-border)!important}
+    html[data-theme="dark"] .report-relationship-canvas{background-color:#171d24!important;background-image:radial-gradient(#485461 .7px,transparent .7px)!important;border-color:var(--delivery-dark-border)!important}
+    html[data-theme="dark"] :is(#delivery-reports,#report-catalog-status,#system-report-catalog-status,#system-report-catalog-pagination,.report-preview-pager,.report-relationship-validation){color:var(--delivery-dark-text)!important}
+    html[data-theme="dark"] :is(#report-catalog-table th,#system-report-catalog-table th,.report-preview th,.report-preview-pager){background:var(--delivery-dark-raised)!important;color:var(--delivery-dark-text)!important;border-color:var(--delivery-dark-border)!important}
+    html[data-theme="dark"] :is(#report-catalog-table td,#system-report-catalog-table td,.report-preview td){border-color:var(--delivery-dark-border)!important}
+    html[data-theme="dark"] :is(#delivery-reports button,#report-catalog-table button,#system-report-catalog-table button,#system-report-catalog-pagination button,#report-catalog-refresh,#system-report-catalog-refresh,.system-report-catalog-actions summary){background:var(--delivery-dark-raised)!important;color:var(--delivery-dark-text)!important;border-color:var(--delivery-dark-border)!important}
+    html[data-theme="dark"] :is(.reviewed-today-row,.todo-completed-row){background:#203e35!important;color:#bcebd7!important}
+    html[data-theme="dark"] :is([style*="background: white"],[style*="background:white"],[style*="background-color: white"],[style*="background-color:white"],[style*="background: #fff"],[style*="background:#fff"],[style*="background-color: rgb(255, 255, 255)"]){background-color:var(--delivery-dark-surface)!important;color:var(--delivery-dark-text)}
+    html[data-theme="dark"] :is(.hover\:bg-slate-50,.hover\:bg-slate-100,.hover\:bg-gray-50,.hover\:bg-gray-100):hover{background-color:#35414d!important}
+    html[data-theme="dark"] .custom-scrollbar::-webkit-scrollbar-thumb{background:#5b6b7a}html[data-theme="dark"] .custom-scrollbar::-webkit-scrollbar-track{background:#1b222a}
+    @media print{html[data-theme="dark"]{color-scheme:light}html[data-theme="dark"] body{background:white!important;color:black!important}}
+  </style>
+  <script>
+    const deliveryThemeChartDefaults=typeof Chart==='undefined'?null:{color:Chart.defaults.color,borderColor:Chart.defaults.borderColor};
+    function updateDeliveryThemeCharts(){
+      if(!deliveryThemeChartDefaults||typeof Chart==='undefined')return;
+      const dark=document.documentElement.dataset.theme==='dark';
+      Chart.defaults.color=dark?'#c2ced9':deliveryThemeChartDefaults.color;
+      Chart.defaults.borderColor=dark?'rgba(181,196,210,.18)':deliveryThemeChartDefaults.borderColor;
+      Object.values(Chart.instances||{}).forEach(chart=>{if(chart?.canvas?.isConnected)chart.update('none');});
+    }
+    function toggleDeliveryTheme(){
+      const dark=document.documentElement.dataset.theme!=='dark';
+      if(dark)document.documentElement.dataset.theme='dark';else delete document.documentElement.dataset.theme;
+      try{localStorage.setItem('deliveryHubTheme',dark?'dark':'light');}catch(error){}
+      updateDeliveryThemeToggle();
+      updateDeliveryThemeCharts();
+      window.dispatchEvent(new CustomEvent('delivery-theme-change',{detail:{theme:dark?'dark':'light'}}));
+    }
+    function updateDeliveryThemeToggle(){
+      const button=document.getElementById('delivery-theme-toggle');if(!button)return;
+      const dark=document.documentElement.dataset.theme==='dark';
+      button.setAttribute('aria-pressed',String(dark));button.setAttribute('aria-label',dark?'Switch to light mode':'Switch to dark mode');button.title=dark?'Switch to light mode':'Switch to dark mode';
+      button.innerHTML=`<i data-lucide="${dark?'sun':'moon'}" class="w-4 h-4" aria-hidden="true"></i>`;
+      if(window.lucide)lucide.createIcons({root:button});
+    }
+    updateDeliveryThemeToggle();
+    updateDeliveryThemeCharts();
   </script>
   <script src="initiative-resequence.js?v=20261105-drag-preview-2"></script>
   </body>
