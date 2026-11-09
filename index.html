@@ -4061,6 +4061,7 @@
       }
 
       function evaluateInitiativeStatus(initiative) {
+        if (normalizeMilestoneStatus(initiative.status) === 'On-Hold') return 'On-Hold';
         const status = evaluateProjectStatus(initiative.name, initiative.revisedStartDate || initiative.startDate, getEffectiveEndDate(initiative.targetEndDate, initiative.revisedEndDate), initiative.actualEndDate);
         if (!status) return status;
         const hasPendingAction = (initiative.milestones || []).some(milestone =>
@@ -4364,7 +4365,7 @@
           '',
 
         status:
-          'Pending'
+          normalizeMilestoneStatus(initiative.status) === 'On-Hold' ? 'On-Hold' : 'Pending'
       };
     }
 
@@ -8499,92 +8500,43 @@
     programId,
     options = {}
   ) {
-
-    if (!canDeleteInitiative()) {
-
+    const program=programs.find(record=>Number(record.id)===Number(programId));
+    if(!canDeleteInitiative()){
       if(options.bulk)return {status:'skipped'};
-
-      showToast(
-        'You do not have permission to delete Programs.',
-        'error'
-      );
-
+      showToast('You do not have permission to archive Programs.','error');
       return;
     }
-
-    const confirmed =
-      options.bulk || confirm(
-        'Delete this Program? Its Initiatives will become unmapped and will not be deleted.'
-      );
-
-    if (!confirmed) return;
-
-    const {
-      error:unmapError
-    } =
-    await supabaseClient
-      .from('initiatives')
-      .update({
-        program_id: null
-      })
-      .eq(
-        'program_id',
-        Number(programId)
-      );
-
-    if (unmapError) {
-
-      if(options.bulk)return {status:'failed',error:unmapError};
-
-      showToast(
-        'Unable to unmap Program Initiatives: ' +
-        unmapError.message,
-        'error'
-      );
-
+    if(!program){
+      if(options.bulk)return {status:'skipped'};
+      showToast('Program was not found.','error');
       return;
     }
-
-    const {
-      error:programError
-    } =
-    await supabaseClient
-      .from('programs')
-      .update({
-        is_active: false,
-        updated_at:
-          new Date().toISOString()
-      })
-      .eq(
-        'id',
-        Number(programId)
-      );
-
-    if (programError) {
-
-      if(options.bulk)return {status:'failed',error:programError};
-
-      showToast(
-        'Unable to delete Program: ' +
-        programError.message,
-        'error'
-      );
-
+    if(program.recordStatus==='deleted'||program.isActive===false||program.is_active===false){
+      if(options.bulk)return {status:'skipped'};
+      showToast('This Program is already archived.','info');
       return;
     }
-
+    if(!options.bulk&&!confirm('Archive this Program and all of its Initiatives, Tracks, and Milestones? Nothing will be permanently deleted.'))return;
+    const {error}=await supabaseClient.rpc('delivery_hierarchy_mutate',{
+      p_action:'archive',p_selection:{programs:[Number(programId)]}
+    });
+    if(error){
+      const message=['PGRST202','42883'].includes(error.code)?'Apply supabase-migration-hierarchy-actions.sql in Supabase before archiving a hierarchy.':error.message;
+      if(options.bulk)return {status:'failed',error:new Error(message)};
+      showToast('Unable to archive Program hierarchy: '+message,'error');
+      return;
+    }
     if(options.bulk){
-      for(const initiative of projects)if(Number(initiative.programId)===Number(programId))initiative.programId=null;
-      const program=programs.find(record=>Number(record.id)===Number(programId));
-      if(program)program.recordStatus='deleted';
+      program.isActive=false;program.recordStatus='deleted';
+      for(const initiative of projects.filter(record=>Number(record.programId)===Number(programId))){
+        initiative.recordStatus='deleted';
+        for(const record of [...(initiative.tracks||[]),...(initiative.milestones||[])])record.recordStatus='deleted';
+      }
       return {status:'archived'};
     }
+    deliveryCurrentPage=1;
     await loadInitiativesFromSupabase();
-
-    showToast(
-      'Program removed. Its Initiatives are now unmapped.',
-      'success'
-    );
+    showToast('Program and its descendants archived successfully.','success');
   }
 
       // --- 5. BADGES ---
@@ -9241,6 +9193,7 @@
                   No milestones added yet. Click <button onclick="addMilestoneInline(${p.id})" class="text-indigo-600 font-semibold hover:underline">+ Add Milestone</button> to define tasks.
                 </div>
               ` : matchingMilestones.length === 0 ? `
+    if (normalizeMilestoneStatus(initiative.status) === 'On-Hold') status = 'On-Hold';
                 <div class="p-6 text-center text-slate-400 text-xs bg-white">
                   No milestones match current filters.
                 </div>
@@ -11916,7 +11869,7 @@
           getEffectiveEndDate(program.targetEndDate,program.revisedEndDate);
 
         const programStatus =
-          evaluateProjectStatus(
+          normalizeMilestoneStatus(program.status) === 'On-Hold' ? 'On-Hold' : evaluateProjectStatus(
             program.name,
             effectiveStartDate,
             effectiveEndDate,
@@ -13201,13 +13154,15 @@
     if (!initiative) { showToast('Initiative was not found.','error'); return; }
     if (initiative.recordStatus==='deleted') { showToast('This Initiative is already archived.','info'); return; }
     if (!options.bulk&&!confirm(`Archive Initiative ${initiative.sequenceNo}: ${initiative.name}?\n\nThe Initiative, Tracks and Milestones will be hidden from the Active Records view. Nothing will be permanently deleted.`)) return;
-    const updated_at=new Date().toISOString();
-    let result=await supabaseClient.from('milestones').update({record_status:'deleted'}).eq('initiative_id',Number(projectId));
-    if(result.error){if(options.bulk)return {status:'failed',error:result.error};showToast('Unable to archive Milestones: '+result.error.message,'error');return;}
-    result=await supabaseClient.from('milestone_tracks').update({record_status:'deleted',updated_at}).eq('initiative_id',Number(projectId));
-    if(result.error){if(options.bulk)return {status:'failed',error:result.error};showToast('Unable to archive Tracks: '+result.error.message,'error');return;}
-    result=await supabaseClient.from('initiatives').update({record_status:'deleted'}).eq('id',Number(projectId));
-    if(result.error){if(options.bulk)return {status:'failed',error:result.error};showToast('Unable to archive Initiative: '+result.error.message,'error');return;}
+    const {error}=await supabaseClient.rpc('delivery_hierarchy_mutate',{
+      p_action:'archive',p_selection:{initiatives:[Number(projectId)]}
+    });
+    if(error){
+      const message=['PGRST202','42883'].includes(error.code)?'Apply supabase-migration-hierarchy-actions.sql in Supabase before archiving a hierarchy.':error.message;
+      if(options.bulk)return {status:'failed',error:new Error(message)};
+      showToast('Unable to archive Initiative hierarchy: '+message,'error');
+      return;
+    }
     if(options.bulk){
       initiative.recordStatus='deleted';
       for(const record of [...(initiative.tracks||[]),...(initiative.milestones||[])])record.recordStatus='deleted';
@@ -17474,6 +17429,68 @@
   const openBulkEditModalBeforeClear=openBulkEditModal;
   openBulkEditModal=function(){const result=openBulkEditModalBeforeClear.apply(this,arguments);updateBulkEditClearOption();return result;};
   function closeBulkEditModal(){const modal=document.getElementById('bulk-edit-modal');modal.classList.add('hidden');modal.classList.remove('flex');bulkEditEntity='';}
+  async function cascadeHierarchyOnHold(entity,ids,statusValue){
+    const holding=normalizeMilestoneStatus(statusValue)==='On-Hold',selected=new Set(ids.map(Number));
+    const initiatives=projects.filter(initiative=>
+      !['deleted','archived'].includes(String(initiative.recordStatus||'').trim().toLowerCase())&&
+      (entity==='programs'?selected.has(Number(initiative.programId)):selected.has(Number(initiative.id)))
+    );
+    if(!initiatives.length)return;
+
+    const milestoneUpdates=new Map(),initiativeUpdates=new Map();
+    const addUpdate=(map,status,id)=>{if(!map.has(status))map.set(status,[]);map.get(status).push(Number(id));};
+    for(const initiative of initiatives){
+      for(const milestone of initiative.milestones||[]){
+        if(['deleted','archived'].includes(String(milestone.recordStatus||'').trim().toLowerCase()))continue;
+        const current=normalizeMilestoneStatus(milestone.persistedStatus??milestone.rawStatus??milestone.status);
+        if(holding){
+          if(current==='Done'||current==='On-Hold'||hasMilestoneCompletion(milestone))continue;
+          addUpdate(milestoneUpdates,'On-Hold',milestone.id);
+          Object.assign(milestone,{status:'On-Hold',persistedStatus:'On-Hold'});
+        }else{
+          if(current!=='On-Hold')continue;
+          const resumed=getEffectiveMilestoneStatus({...milestone,status:'',persistedStatus:'',rawStatus:''});
+          addUpdate(milestoneUpdates,resumed,milestone.id);
+          Object.assign(milestone,{status:resumed,persistedStatus:resumed});
+        }
+        const row=kpiMilestoneRows.find(item=>Number(item.id)===Number(milestone.id));
+        if(row)row.status=milestone.status;
+      }
+    }
+    for(const [status,milestoneIds] of milestoneUpdates){
+      const {error}=await supabaseClient.from('milestones').update({status}).in('id',milestoneIds);
+      if(error)throw error;
+    }
+
+    if(!holding){
+      for(const initiative of initiatives){
+        const status=evaluateInitiativeStatus({...initiative,status:''});
+        initiative.status=status;
+        addUpdate(initiativeUpdates,status,initiative.id);
+      }
+    }else if(entity==='programs'){
+      for(const initiative of initiatives){
+        if(normalizeMilestoneStatus(initiative.status)==='Done')continue;
+        initiative.status='On-Hold';
+        addUpdate(initiativeUpdates,'On-Hold',initiative.id);
+      }
+    }
+    for(const [status,initiativeIds] of initiativeUpdates){
+      const {error}=await supabaseClient.from('initiatives').update({initiative_status:status}).in('id',initiativeIds);
+      if(error)throw error;
+    }
+
+    if(!holding&&entity==='programs'){
+      for(const id of selected){
+        const program=programs.find(item=>Number(item.id)===id);
+        if(!program)continue;
+        const status=evaluateProjectStatus(program.name,program.revisedStartDate||program.startDate,getEffectiveEndDate(program.targetEndDate,program.revisedEndDate),program.actualEndDate);
+        program.status=status;
+        const {error}=await supabaseClient.from('programs').update({program_status:status,updated_at:new Date().toISOString()}).eq('id',id);
+        if(error)throw error;
+      }
+    }
+  }
   async function saveBulkEdit(event){
     event.preventDefault();
     const ids=selectedBulkIds(),field=document.getElementById('bulk-edit-field').value,value=document.getElementById('bulk-edit-value').value;
@@ -17529,7 +17546,21 @@
         }
       }else{
         const table=bulkEditEntity==='programs'?'programs':bulkEditEntity==='initiatives'?'initiatives':'milestones',payload={[field]:engineerField?(clearEngineer?null:Number(value)):clearSelectedValue?null:value};if(table!=='milestones')payload.updated_at=new Date().toISOString();
+        const isHierarchyStatusEdit=(bulkEditEntity==='programs'&&field==='program_status')||(bulkEditEntity==='initiatives'&&field==='initiative_status');
+        const wasOnHold=isHierarchyStatusEdit?ids.filter(id=>{
+          const record=bulkEditEntity==='programs'?programs.find(item=>Number(item.id)===Number(id)):projects.find(item=>Number(item.id)===Number(id));
+          return normalizeMilestoneStatus(record?.status)==='On-Hold';
+        }):[];
         const {error}=await supabaseClient.from(table).update(payload).in('id',ids);if(error)throw error;
+        if(isHierarchyStatusEdit){
+          const enteringHold=normalizeMilestoneStatus(value)==='On-Hold';
+          const affectedIds=enteringHold?ids:wasOnHold;
+          if(affectedIds.length)await cascadeHierarchyOnHold(bulkEditEntity,affectedIds,value);
+          ids.forEach(id=>{
+            const record=bulkEditEntity==='programs'?programs.find(item=>Number(item.id)===Number(id)):projects.find(item=>Number(item.id)===Number(id));
+            if(record)record.status=value;
+          });
+        }
       }
       finishHierarchyBulkEdit();
       const rowScopedMilestoneEdit=bulkEditEntity==='milestones'&&['days','start_date','end_date','deadline','completion_date','milestone_remarks'].includes(field);
@@ -17545,7 +17576,7 @@
       showToast('Selected records updated successfully.','success');
     }catch(error){showToast('Bulk edit failed: '+error.message,'error');}finally{button.disabled=false;}
   }
-  async function bulkDeleteSelected(){const entity=currentWorkspaceView,ids=selectedBulkIds();if(!ids.length)return;if(!confirm(`Archive ${ids.length} selected ${entity}?`))return;try{if(entity==='programs'){let r=await supabaseClient.from('initiatives').update({program_id:null}).in('program_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('programs').update({is_active:false,updated_at:new Date().toISOString()}).in('id',ids);if(r.error)throw r.error;}else if(entity==='initiatives'){let r=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('initiative_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('milestone_tracks').update({record_status:'deleted',updated_at:new Date().toISOString()}).in('initiative_id',ids);if(r.error)throw r.error;r=await supabaseClient.from('initiatives').update({record_status:'deleted'}).in('id',ids);if(r.error)throw r.error;}else if(entity==='tracks'){const r1=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('track_id',ids);if(r1.error)throw r1.error;const r2=await softDeleteRecords('milestone_tracks',ids);if(r2.error)throw r2.error;}else{const r=await softDeleteRecords('milestones',ids);if(r.error)throw r.error;}clearBulkSelection();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records archived successfully.','success');}catch(error){showToast('Bulk archive failed: '+error.message,'error');}}
+  async function bulkDeleteSelected(){const entity=currentWorkspaceView,ids=selectedBulkIds();if(!ids.length)return;if(!confirm(`Archive ${ids.length} selected ${entity}?`))return;try{if(entity==='programs'){for(const id of ids){const result=await deleteProgram(id,{bulk:true});if(result?.status==='failed')throw result.error||new Error('Program archive failed.');}}else if(entity==='initiatives'){for(const id of ids){const result=await deleteProject(id,{bulk:true});if(result?.status==='failed')throw result.error||new Error('Initiative archive failed.');}}else if(entity==='tracks'){const r1=await supabaseClient.from('milestones').update({record_status:'deleted'}).in('track_id',ids);if(r1.error)throw r1.error;const r2=await softDeleteRecords('milestone_tracks',ids);if(r2.error)throw r2.error;}else{const r=await softDeleteRecords('milestones',ids);if(r.error)throw r.error;}clearBulkSelection();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records archived successfully.','success');}catch(error){showToast('Bulk archive failed: '+error.message,'error');}}
   async function bulkDuplicateSelected(){const entity=currentWorkspaceView,ids=selectedBulkIds();if(!ids.length)return;if(!confirm(`Duplicate ${ids.length} selected ${entity}?`))return;try{for(const id of ids){if(entity==='programs'){const p=programs.find(x=>Number(x.id)===id),sequence_no=await getNextProgramSequence();if(!p)continue;const {error}=await supabaseClient.from('programs').insert({sequence_no,program_name:`${p.name} Copy`,program_owner:p.owner||null,assigned_to:p.assignedTo||null,vertical:p.vertical||null,start_date:p.startDate||null,target_end_date:p.targetEndDate||null,revised_start_date:p.revisedStartDate||null,revised_end_date:p.revisedEndDate||null,actual_end_date:null,impact_category:p.impactCategory||null,measurable_impact:p.measurableImpact||null,business_benefit:p.businessBenefit||null,program_status:'Pending',is_active:true,updated_at:new Date().toISOString()});if(error)throw error;}else if(entity==='initiatives'){const i=projects.find(x=>Number(x.id)===id),sequence_no=await getNextInitiativeSequence();if(!i)continue;const {error}=await supabaseClient.from('initiatives').insert({sequence_no,program_id:i.programId||null,title:`${i.name} Copy`,initiative_type:i.type||null,cr_no:i.crNo||null,vertical:i.vertical||null,delivery_method:i.deliveryMethod||'Waterfall',business_owner:i.businessOwner||null,assigned_to:i.assignedTo||null,start_date:i.startDate||null,target_end_date:i.targetEndDate||null,revised_start_date:i.revisedStartDate||null,revised_end_date:i.revisedEndDate||null,actual_end_date:null,impact_category:i.impactCategory||null,measurable_impact:i.measurableImpact||null,business_benefit:i.businessBenefit||null,initiative_status:'Pending',record_status:'active',updated_at:new Date().toISOString()});if(error)throw error;}else if(entity==='tracks'){let parent=null,track=null;for(const i of projects){track=(i.tracks||[]).find(t=>Number(t.id)===id);if(track){parent=i;break;}}if(!parent||!track)continue;const sequence_no=await getNextTrackSequence(parent.id),{error}=await supabaseClient.from('milestone_tracks').insert({initiative_id:parent.id,sequence_no,track_name:`${track.name} Copy`,display_order:sequence_no,record_status:'active',updated_at:new Date().toISOString()});if(error)throw error;}else{let parent=null,milestone=null;for(const i of projects){milestone=(i.milestones||[]).find(m=>Number(m.id)===id);if(milestone){parent=i;break;}}if(!parent||!milestone)continue;const sequence_no=await getNextMilestoneSequence(parent.id,milestone.trackId||null),end=calculateMilestoneEndDate(milestone.days,milestone.startDate),status=evaluateMilestoneStatus(milestone.title,milestone.days,milestone.startDate,end,end,'');const {error}=await supabaseClient.from('milestones').insert({initiative_id:parent.id,initiative_name:parent.name,sequence_no,track_id:milestone.trackId||null,milestone_title:milestone.title||milestone.actions||'Milestone',actions:`${milestone.actions||milestone.title||'Milestone'} Copy`,owner:milestone.owner||null,dependency:milestone.dependency||null,days:normalizeMilestoneDays(milestone.days),start_date:milestone.startDate||null,end_date:end||null,deadline:end||null,completion_date:null,status,deviation_days:null,record_status:'active'});if(error)throw error;}}clearBulkSelection();await loadInitiativesFromSupabase();renderFlatWorkspacePage();showToast('Selected records duplicated successfully.','success');}catch(error){showToast('Bulk duplication failed: '+error.message,'error');}}
   </script>
 
@@ -28722,50 +28753,20 @@
     }
     async function archiveSelected(records, ask) {
       const selected=Object.fromEntries(entities.map(entity=>[entity,[...new Set((records[entity]||[]).map(Number))]]));
-      const totals={selected:entities.reduce((count,entity)=>count+selected[entity].length,0),archived:0,skipped:0,failed:0};
-      if(!totals.selected||ask&&!confirm('Archive the selected records? Programs will unmap their Initiatives. Selected Initiatives will archive their Tracks and Milestones.'))return false;
-      const viewState=captureDeliveryViewState(),covered=new Set();
-      const recordFor=(entity,id)=>{
-        const source=sourceFor(entity,id);
-        return entity==='tracks'||entity==='milestones'?source?.[entity]?.find(record=>Number(record.id)===id):source;
-      };
-      const alreadyArchived=new Set();
-      for(const entity of entities)for(const id of selected[entity]){
-        const record=recordFor(entity,id);
-        if(!record||!Number.isFinite(id)||['deleted','archived'].includes(record.recordStatus)||record.isActive===false||record.is_active===false)alreadyArchived.add(`${entity}:${id}`);
-      }
-      for(const entity of ['initiatives','milestones','tracks','programs'])for(const id of selected[entity]){
-        const key=`${entity}:${id}`;
-        let result;
-        if(alreadyArchived.has(key))result={status:'skipped'};
-        else if(covered.has(key))result={status:'archived'};
-        else{
-          try{
-            const source=sourceFor(entity,id);
-            result=entity==='programs'?await deleteProgram(id,{bulk:true})
-              :entity==='initiatives'?await deleteProject(id,{bulk:true})
-              :entity==='tracks'?await deleteMilestoneTrack(source?.id,id,{bulk:true})
-              :await deleteMilestone(source?.id,id,{bulk:true});
-            if(result?.status==='archived'&&entity==='initiatives'){
-              for(const child of [...(source.tracks||[]).map(record=>`tracks:${Number(record.id)}`),...(source.milestones||[]).map(record=>`milestones:${Number(record.id)}`)])covered.add(child);
-            }
-          }catch(error){result={status:'failed',error};}
-        }
-        const outcome=result?.status||'failed';
-        totals[outcome]++;
-        if(outcome==='archived')bulkWorkspaceSelection[entity].delete(id);
-        if(result?.error)console.error('Hierarchy archive failed for a selected record:',result.error);
-        await deliveryOffline.yieldUi();
-      }
-      if(totals.archived||totals.failed){
-        await loadInitiativesFromSupabase({render:false});
-        renderActiveDeliveryWorkspace();
-        restoreDeliveryViewState(viewState);
-      }
-      overviewBulkEntity=entities.find(entity=>bulkWorkspaceSelection[entity].size)||'';
-      syncBulkSelectionUI();syncHierarchyCheckboxes();
-      showToast(`Selected: ${totals.selected} / Archived: ${totals.archived} / Skipped: ${totals.skipped} / Failed: ${totals.failed}`,totals.failed?'error':totals.skipped?'info':'success');
-      return totals;
+      const selectedCount=entities.reduce((count,entity)=>count+selected[entity].length,0);
+      if(!selectedCount||ask&&!confirm('Archive the selected records and their descendants? Program Initiatives remain linked and are archived with their Tracks and Milestones.'))return false;
+      requirePermission(selected,'archive');
+      const viewState=captureDeliveryViewState();
+      const {error}=await supabaseClient.rpc('delivery_hierarchy_mutate',{p_action:'archive',p_selection:selected});
+      if(error)throw new Error(['PGRST202','42883'].includes(error.code)
+        ?'Hierarchy archive migration is required. Apply supabase-migration-hierarchy-actions.sql in Supabase.'
+        :error.message);
+      clearBulkSelection();
+      await loadInitiativesFromSupabase({render:false});
+      renderActiveDeliveryWorkspace();
+      restoreDeliveryViewState(viewState);
+      showToast(`${selectedCount} selected record${selectedCount===1?'':'s'} and their descendants archived.`, 'success');
+      return {selected:selectedCount,archived:selectedCount,skipped:0,failed:0};
     }
     async function mutate(action, records, ask) {
       if (mutationInProgress || editInProgress) return;
