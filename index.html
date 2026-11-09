@@ -17715,8 +17715,6 @@
   <style>
   /* Overview selection controls extension */
   #overview-control-bar { min-height: 58px; }
-  body.overview-multi-select-active #main-content { height:max-content; min-height:100vh; }
-  #overview-selection-actions { position:sticky !important; top:65px; z-index:29; flex-wrap:wrap !important; }
   body:not(.overview-multi-select-active) #projects-container .overview-bulk-checkbox { display:none !important; }
   </style>
   <script>
@@ -21402,7 +21400,7 @@
       if(typeof updateDailyMultiSelectBanner==='function')updateDailyMultiSelectBanner();
     }
     const priorSetOverview=window.setOverviewMultiSelect;
-    window.setOverviewMultiSelect=function(enabled){if(!enabled)clearAllSelections();const result=priorSetOverview.apply(this,arguments);requestAnimationFrame(()=>{if(!enabled)document.querySelectorAll('#projects-container .overview-bulk-checkbox').forEach(box=>box.closest('label')?.remove());enhanceCurrentPage();});return result;};
+    window.setOverviewMultiSelect=function(enabled){if(!enabled)clearAllSelections();const result=priorSetOverview.apply(this,arguments);requestAnimationFrame(()=>{if(!enabled)document.querySelectorAll('#projects-container .overview-bulk-checkbox').forEach(box=>box.closest('label')?.remove());enhanceCurrentPage();if(currentWorkspaceView==='overview')window.deliveryOverviewFilterLayoutRefresh?.();});return result;};
     const priorSetDaily=window.setDailyMultiSelect;
     window.setDailyMultiSelect=function(enabled){if(!enabled)clearAllSelections();const result=priorSetDaily.apply(this,arguments);requestAnimationFrame(enhanceCurrentPage);return result;};
     function flatMultiSelectEnabled(){return flatMultiSelectByPage.get(currentWorkspaceView)===true;}
@@ -27439,6 +27437,7 @@
   [data-delivery-control-page="overview"].delivery-page-filter-row{grid-template-columns:minmax(0,1fr)!important}
   #overview-filter-row>.unified-filter-primary{grid-column:1/-1!important;overflow:visible!important;gap:8px!important}
   #overview-filter-row>.unified-filter-secondary{grid-column:1/-1!important;width:100%!important}
+  #overview-filter-row>.unified-filter-primary>.delivery-page-flat-actions{order:6!important;flex:0 0 auto!important}
   #overview-filter-row>.unified-filter-primary>.unified-search-host{order:0!important;flex:0 1 220px!important;width:220px!important;min-width:180px!important;max-width:220px!important}
   #overview-filter-row>.unified-filter-primary>select[data-delivery-filter-field]{flex:0 1 150px!important;width:150px!important;min-width:120px!important;max-width:170px!important;height:38px!important}
   #overview-filter-row>.unified-filter-primary>.unified-filter-spacer{display:block!important;order:6!important;flex:1 1 16px!important;min-width:16px!important;width:auto!important}
@@ -27805,6 +27804,8 @@
 
   <style id="overview-collapsed-hide-date-ranges">
   #overview-filter-row.is-collapsed .delivery-date-range-control{display:none!important}
+  #overview-filter-row.is-collapsed .unified-filter-secondary{display:none!important}
+  #overview-filter-row.is-collapsed .overview-filter-group-heading{display:none!important}
   </style>
   <script>
   (function keepCollapsedOverviewFiltersEven(){
