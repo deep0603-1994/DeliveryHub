@@ -2070,7 +2070,7 @@
       'use strict';
       const stores=['reads','entities','outbox','imports','checkpoints','datasets','meta','drafts'];
       const nativeFetch=window.fetch.bind(window),pending=new Map(),refreshes=new Map(),snapshotReads=new Map();
-      const readRpcs=new Set(['support_ticket_page','support_ticket_options','user_master_email_exists']);
+      const readRpcs=new Set(['support_ticket_page','support_ticket_options','user_master_email_exists','delivery_import_match_ids']);
       const credentialField=/password|access_token|refresh_token|secret|authorization|api_key/i;
       const editableTables=new Set(['programs','initiatives','milestones','milestone_tracks','support_tickets','todo_items','master_values','project_planners','project_planner_milestones','planner_type_groups','planner_type_values']);
       let database,scope='',sessionScope=null,reachable=navigator.onLine,busy=false,lastSynced=0,retryTimer=0,failures=0,activeImport=null,storageError='',blockedReason='',statusTimer=0,statusAt=0;
@@ -3830,7 +3830,37 @@
       initiative.revisedEndDate = revisedEndDate || '';
     }
     await synchronizeProgramRevisedEndDates(initiatives===projects?programs.map(program=>program.id):(initiatives||[]).map(initiative=>initiative.programId));
+    await synchronizeHierarchyActualEndDates(initiatives);
     if(!options.deferDependencyRender&&currentWorkspaceView==='overview')dependencyChanges.forEach(initiative=>window.deliveryMilestoneDependency?.renderAffected(initiative,null));
+  }
+
+  function calculateHierarchyActualEndDate(children,dateField){
+    const active=(children||[]).filter(child=>!['deleted','archived'].includes(String(child.recordStatus||'').trim().toLowerCase()));
+    if(!active.length)return undefined;
+    let latest='';
+    for(const child of active){
+      const date=String(child[dateField]||'').slice(0,10);
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return null;
+      const parsed=new Date(`${date}T00:00:00Z`);
+      if(Number.isNaN(parsed.getTime())||parsed.toISOString().slice(0,10)!==date)return null;
+      if(date>latest)latest=date;
+    }
+    return latest;
+  }
+
+  async function synchronizeHierarchyActualEndDates(initiatives=projects){
+    async function persist(table,record,date){
+      if(date===undefined||(record.actualEndDate||null)===date)return;
+      const {data,error}=await supabaseClient.from(table).update({actual_end_date:date}).eq('id',Number(record.id)).select('id,actual_end_date').single();
+      if(error)throw error;
+      if(!data||Number(data.id)!==Number(record.id)||(data.actual_end_date||null)!==date)throw new Error(`Actual End Date was not confirmed for ${table} record ${record.id}.`);
+      record.actualEndDate=date||'';
+      document.querySelectorAll(`[data-hierarchy-actual-end-entity="${table}"][data-hierarchy-actual-end-id="${Number(record.id)}"]`).forEach(element=>{element.textContent=formatDate(record.actualEndDate);});
+    }
+    const active=(initiatives||[]).filter(initiative=>!['deleted','archived'].includes(String(initiative.recordStatus||'').trim().toLowerCase()));
+    await Promise.all(active.map(initiative=>persist('initiatives',initiative,calculateHierarchyActualEndDate(initiative.milestones,'completionDate'))));
+    const affected=new Set(active.map(initiative=>Number(initiative.programId)));
+    await Promise.all(programs.filter(program=>affected.has(Number(program.id))&&!['deleted','archived'].includes(String(program.recordStatus||'').trim().toLowerCase())).map(program=>persist('programs',program,calculateHierarchyActualEndDate(projects.filter(initiative=>Number(initiative.programId)===Number(program.id)),'actualEndDate'))));
   }
 
   function calculateProgramRevisedEndDate(program,initiatives){
@@ -5693,17 +5723,21 @@
 
     try {
       await validateUserMasterEmail(email, userId);
-      const { error } =
-        await supabaseClient
-          .from('user_master')
-          .update(payload)
-          .eq(
-            'id',
-            Number(userId)
-          );
+      const renamed=fullName!==user.name;
+      const { data,error } = renamed
+        ? await supabaseClient.rpc('delivery_update_user_profile',{p_user_id:Number(userId),p_expected_name:user.name,p_profile:payload})
+        : await supabaseClient.from('user_master').update(payload).eq('id',Number(userId)).select('id,full_name').single();
 
       if (error) {
+        if(renamed&&['PGRST202','42883'].includes(error.code))throw new Error('User rename setup is required. Apply supabase-migration-user-name-propagation.sql before renaming a user. No changes were saved.');
         throw error;
+      }
+      if(!data||Number(data.id)!==Number(userId)||data.full_name!==fullName)throw new Error('The updated user profile was not confirmed. Refresh and retry.');
+      if(renamed){
+        const loaded=await loadInitiativesFromSupabase({render:false});
+        if(loaded===false)throw new Error('The name was saved, but activities could not be refreshed. Reload the portal.');
+        window.clearSupportTicketPageCache?.();
+        window.deliveryReportBuilder?.invalidate?.();
       }
 
       editingUserMasterId = null;
@@ -9162,7 +9196,7 @@
                 <div class="bg-white/10 p-2.5"><div class="text-[9px] uppercase text-amber-100">Start Date</div><div class="text-xs font-mono mt-0.5">${formatDate(p.startDate)}</div></div>
                 <div class="bg-white/10 p-2.5"><div class="text-[9px] uppercase text-amber-100">Target End</div><div class="text-xs font-mono mt-0.5">${formatDate(p.targetEndDate)}</div></div>
                 <div class="bg-white/10 p-2.5"><div class="text-[9px] uppercase text-amber-100">Revised End Date</div><div class="text-xs font-mono mt-0.5">${formatDate(p.revisedEndDate)}</div></div>
-                <div class="bg-white/10 p-2.5"><div class="text-[9px] uppercase text-amber-100">Actual End</div><div class="text-xs font-mono mt-0.5">${formatDate(p.actualEndDate)}</div></div>
+                <div class="bg-white/10 p-2.5"><div class="text-[9px] uppercase text-amber-100">Actual End</div><div class="text-xs font-mono mt-0.5" data-hierarchy-actual-end-entity="initiatives" data-hierarchy-actual-end-id="${Number(p.id)}">${formatDate(p.actualEndDate)}</div></div>
                 <div class="bg-white/10 p-2.5"><div class="text-[9px] uppercase text-amber-100">Project Age</div><div class="text-xs font-mono mt-0.5">${pAge === '-' ? '-' : `${pAge} work days`}</div></div>
               </div>
               <!-- Business Impact Strip (identical to Program) -->
@@ -12229,6 +12263,7 @@
 
                 <div
                   class="text-xs font-mono mt-0.5"
+                  data-hierarchy-actual-end-entity="programs" data-hierarchy-actual-end-id="${Number(program.id)}"
                 >
                   ${formatDate(
                     program.actualEndDate
@@ -14605,28 +14640,29 @@
     }
 
     const headers = deliveryWorkbookHeaders();
+    Object.keys(headers).forEach(entity=>{headers[entity]=['Unique ID',...headers[entity]];});
     const workbook = XLSX.utils.book_new();
     const value = item => item ?? '';
 
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
-      programs.map(program => [value(program.name), value(program.purpose), value(program.owner), value(program.assignedTo), value(program.vertical), value(program.startDate), value(program.targetEndDate), value(program.revisedEndDate), value(program.revisedStartDate), value(program.actualEndDate), value(program.impactCategory), value(program.measurableImpact), value(program.businessBenefit),value(program.functional_engineer_id),value(program.technical_engineer_id)]),
+      programs.map(program => [value(program.id),value(program.name), value(program.purpose), value(program.owner), value(program.assignedTo), value(program.vertical), value(program.startDate), value(program.targetEndDate), value(program.revisedEndDate), value(program.revisedStartDate), value(program.actualEndDate), value(program.impactCategory), value(program.measurableImpact), value(program.businessBenefit),value(program.functional_engineer_id),value(program.technical_engineer_id)]),
       headers.programs
     ), 'Programs');
 
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
-      projects.map(initiative => [value(programs.find(program => Number(program.id) === Number(initiative.programId))?.name), value(initiative.name), value(initiative.description), value(initiative.type), value(initiative.crNo), value(initiative.vertical), value(initiative.deliveryMethod), value(initiative.businessOwner), value(initiative.assignedTo), value(initiative.startDate), value(initiative.targetEndDate), value(initiative.revisedEndDate), value(initiative.revisedStartDate), value(initiative.actualEndDate), value(initiative.impactCategory), value(initiative.measurableImpact), value(initiative.businessBenefit),value(initiative.functional_engineer_id),value(initiative.technical_engineer_id)]),
+      projects.map(initiative => [value(initiative.id),value(programs.find(program => Number(program.id) === Number(initiative.programId))?.name), value(initiative.name), value(initiative.description), value(initiative.type), value(initiative.crNo), value(initiative.vertical), value(initiative.deliveryMethod), value(initiative.businessOwner), value(initiative.assignedTo), value(initiative.startDate), value(initiative.targetEndDate), value(initiative.revisedEndDate), value(initiative.revisedStartDate), value(initiative.actualEndDate), value(initiative.impactCategory), value(initiative.measurableImpact), value(initiative.businessBenefit),value(initiative.functional_engineer_id),value(initiative.technical_engineer_id)]),
       headers.initiatives
     ), 'Initiatives');
 
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
-      projects.flatMap(initiative => (initiative.tracks || []).map(track => [initiative.name, track.name, track.displayOrder])),
+      projects.flatMap(initiative => (initiative.tracks || []).map(track => [value(track.id),initiative.name, track.name, track.displayOrder])),
       headers.tracks
     ), 'Tracks');
 
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
       projects.flatMap(initiative => (initiative.milestones || []).map(milestone => {
         const track = (initiative.tracks || []).find(item => Number(item.id) === Number(milestone.trackId));
-        return [initiative.name, value(track?.name), value(milestone.title), value(milestone.actions), value(milestone.owner), value(milestone.dependency), value(milestone.days), value(milestone.startDate), value(milestone.completionDate),value(programs.find(program=>String(program.id)===String(initiative.programId))?.name),value(milestone.plannerTypeId),value(milestone.milestoneRemarks),value(milestone.remarks),value(milestone.id),value(milestone.scheduleMode||'sequential'),value(milestone.referenceMilestoneId),value(milestone.referenceDateType||'start_date'),value(Number(milestone.referenceOffsetDays)||0)];
+        return [value(milestone.id),initiative.name, value(track?.name), value(milestone.title), value(milestone.actions), value(milestone.owner), value(milestone.dependency), value(milestone.days), value(milestone.startDate), value(milestone.completionDate),value(programs.find(program=>String(program.id)===String(initiative.programId))?.name),value(milestone.plannerTypeId),value(milestone.milestoneRemarks),value(milestone.remarks),value(milestone.id),value(milestone.scheduleMode||'sequential'),value(milestone.referenceMilestoneId),value(milestone.referenceDateType||'start_date'),value(Number(milestone.referenceOffsetDays)||0)];
       })),
       headers.milestones
     ), 'Milestones');
@@ -14671,6 +14707,7 @@
 
     try {
       const workbook = await deliveryOffline.readWorkbook(file,{ type: 'array', cellDates: false });
+      if(window.deliveryPartialImport&&workbook.SheetNames.some(name=>name!=='_PMO_META'&&window.deliveryPartialImport.getUploadedColumns(workbook.Sheets[name]).has('Unique ID')))return await window.deliveryPartialImport.importHierarchy(event,workbook,file);
       const headers = deliveryWorkbookHeaders();
       const requiredSheets = ['Programs', 'Initiatives', 'Tracks', 'Milestones'];
       requiredSheets.forEach(name => {
@@ -15892,6 +15929,7 @@
         }
       );
 
+      if(window.deliveryPartialImport&&workbook.SheetNames.some(name=>name!=='_PMO_META'&&window.deliveryPartialImport.getUploadedColumns(workbook.Sheets[name]).has('Unique ID')))return await window.deliveryPartialImport.importEntity(event,'user_master',workbook,file);
       const userSheet =
         workbook.Sheets['Users'];
 
@@ -17493,6 +17531,7 @@
   }
   async function saveBulkEdit(event){
     event.preventDefault();
+    const savedEntity=bulkEditEntity,confirmedMilestoneRows=[];
     const ids=selectedBulkIds(),field=document.getElementById('bulk-edit-field').value,value=document.getElementById('bulk-edit-value').value;
     const clearSelectedValue=document.getElementById('bulk-edit-clear-value')?.checked===true;
     const engineerField=engineerAssignments.fields.includes(field),clearEngineer=document.getElementById('bulk-engineer-clear')?.checked===true;
@@ -17509,7 +17548,7 @@
     if(field==='milestone_remarks'&&value.length>MAX_MILESTONE_REMARKS_LENGTH){showToast(`Remarks cannot exceed ${MAX_MILESTONE_REMARKS_LENGTH.toLocaleString()} characters.`,'error');return;}
     const impactBelow=document.getElementById('bulk-edit-impact-below')?.checked===true;
     if(bulkEditEntity==='milestones'&&field==='start_date'&&!confirm(`Apply this Start Date to ${ids.length} selected Milestones? Impact Below Dates? ${impactBelow?'Yes':'No'}.`))return;
-    const viewState=bulkEditEntity==='milestones'&&['days','start_date','end_date','deadline','completion_date','milestone_remarks'].includes(field)?captureDeliveryViewState():null;
+    const viewState=bulkEditEntity==='milestones'&&['status','days','start_date','end_date','deadline','completion_date','milestone_remarks'].includes(field)?captureDeliveryViewState():null;
     if(viewState)viewState.milestoneId=ids[0];
     const button=document.getElementById('bulk-edit-save');button.disabled=true;
     try{
@@ -17536,6 +17575,30 @@
         await applyMilestoneScheduleImpact(records,impactBelow);
         const recordsByProject=new Map();records.forEach(record=>{const key=String(record.project.id);if(!recordsByProject.has(key))recordsByProject.set(key,{project:record.project,ids:[]});recordsByProject.get(key).ids.push(record.milestone.id);});
         for(const {project,ids:changedIds} of recordsByProject.values())if(!await cascadeReferencedMilestoneSchedule(project,changedIds))throw new Error('Some referenced Milestone dates could not be propagated.');
+      }else if(bulkEditEntity==='milestones'&&field==='status'&&normalizeMilestoneStatus(value)==='Done'){
+        const groups=new Map();
+        for(const id of ids){
+          const project=projects.find(initiative=>(initiative.milestones||[]).some(item=>Number(item.id)===Number(id)));
+          const milestone=project?.milestones?.find(item=>Number(item.id)===Number(id));
+          if(!project||!milestone)throw new Error('A selected Milestone could not be found. Refresh and retry.');
+          const end=milestone.deadline||milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);
+          const completionDate=String(end||'').slice(0,10);
+          if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate))throw new Error('Every selected Milestone needs a valid End Date before it can be marked Done.');
+          if(completionDate>localToday())throw new Error('A future End Date cannot be used as a Completion Date.');
+          if(milestone.startDate&&completionDate<milestone.startDate)throw new Error('Completion Date cannot be before Start Date.');
+          const initiativeId=Number(project.id);
+          if(!groups.has(initiativeId))groups.set(initiativeId,{initiativeId,expected:[],changes:[]});
+          const group=groups.get(initiativeId);
+          group.expected.push({id:Number(milestone.id),initiative_id:initiativeId});
+          group.changes.push({id:Number(milestone.id),completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,milestone.startDate,completionDate)||null});
+        }
+        for(const group of groups.values()){
+          const {data,error}=await supabaseClient.rpc('delivery_update_milestone_batch',{p_initiative_id:group.initiativeId,p_expected:group.expected,p_changes:group.changes});
+          if(error)throw error;
+          const updated=Array.isArray(data)?data:[];
+          if(updated.length!==group.changes.length||group.changes.some(change=>!updated.some(row=>Number(row.id)===change.id&&normalizeMilestoneStatus(row.status)==='Done'&&String(row.completion_date||'').slice(0,10)===change.completion_date)))throw new Error('Supabase did not confirm every selected Milestone was completed.');
+          confirmedMilestoneRows.push(...updated);
+        }
       }else if(bulkEditEntity==='milestones'&&field==='milestone_remarks'){
         for(const id of ids){
           const milestone=projects.flatMap(initiative=>initiative.milestones||[]).find(item=>Number(item.id)===Number(id));
@@ -17551,7 +17614,13 @@
           const record=bulkEditEntity==='programs'?programs.find(item=>Number(item.id)===Number(id)):projects.find(item=>Number(item.id)===Number(id));
           return normalizeMilestoneStatus(record?.status)==='On-Hold';
         }):[];
-        const {error}=await supabaseClient.from(table).update(payload).in('id',ids);if(error)throw error;
+        const statusEdit=bulkEditEntity==='milestones'&&field==='status';
+        const query=supabaseClient.from(table).update(payload).in('id',ids);
+        const {data,error}=await (statusEdit?query.select('id,status,completion_date,deviation_days'):query);if(error)throw error;
+        if(statusEdit){
+          if(!Array.isArray(data)||data.length!==ids.length||ids.some(id=>!data.some(row=>Number(row.id)===Number(id)&&normalizeMilestoneStatus(row.status)===normalizeMilestoneStatus(value))))throw new Error('Supabase did not confirm every selected Milestone status. Selection was retained.');
+          confirmedMilestoneRows.push(...data);
+        }
         if(isHierarchyStatusEdit){
           const enteringHold=normalizeMilestoneStatus(value)==='On-Hold';
           const affectedIds=enteringHold?ids:wasOnHold;
@@ -17562,14 +17631,22 @@
           });
         }
       }
-      finishHierarchyBulkEdit();
-      const rowScopedMilestoneEdit=bulkEditEntity==='milestones'&&['days','start_date','end_date','deadline','completion_date','milestone_remarks'].includes(field);
+      for(const row of confirmedMilestoneRows){
+        const milestone=projects.flatMap(project=>project.milestones||[]).find(item=>Number(item.id)===Number(row.id));
+        if(milestone)Object.assign(milestone,{status:row.status,persistedStatus:row.status,rawStatus:row.status,completionDate:row.completion_date||'',deviationDays:row.deviation_days});
+        const kpiRow=kpiMilestoneRows.find(item=>Number(item.id)===Number(row.id));
+        if(kpiRow)Object.assign(kpiRow,row);
+      }
+      if(savedEntity==='milestones'&&['status','completion_date'].includes(field))await synchronizeHierarchyActualEndDates(projects.filter(project=>(project.milestones||[]).some(milestone=>ids.some(id=>Number(id)===Number(milestone.id)))));
+      const rowScopedMilestoneEdit=savedEntity==='milestones'&&['status','days','start_date','end_date','deadline','completion_date','milestone_remarks'].includes(field);
       if(rowScopedMilestoneEdit){
         ids.forEach(id=>{const project=projects.find(initiative=>(initiative.milestones||[]).some(item=>Number(item.id)===Number(id)));if(project)refreshMilestoneRowInPlace(project,id);});
+        finishHierarchyBulkEdit();
         if(viewState)restoreDeliveryViewState(viewState);
         else renderFlatWorkspacePage();
       }else{
         await loadInitiativesFromSupabase();
+        finishHierarchyBulkEdit();
         if(viewState){restoreDeliveryViewState(viewState);renderActiveDeliveryWorkspace();restoreDeliveryViewState(viewState);}
         else renderFlatWorkspacePage();
       }
@@ -19181,7 +19258,7 @@
   function plannerMetadataRow(template){return[['PMO_PROJECT_PLANNER','1.0',String(template.id),template.template_name||'',template.description||'']];}
   function plannerRuleExportRows(template,rows){return rows.map((row,index)=>({'Planner ID':String(template.id),'Planner Name':template.template_name||'','Description':template.description||'','Planner Milestone ID':row.id||'','Sequence':Number(row.display_order||index+1),'Milestone':row.milestone_action||'','Owner Mode':row.owner_mode||'FIXED','Owner Rule':row.owner_rule||'','Owner Fixed Value':row.owner_fixed_value||'','Dependency Mode':row.dependency_mode||'FIXED','Dependency Rule':row.dependency_rule||'','Dependency Fixed Value':row.dependency_fixed_value||'','Days':row.days??'','Schedule':row.schedule_mode||'sequential','Reference Milestone ID':row.reference_milestone_id||'','Reference Sequence':row.reference_display_order||'','Planner Type ID':row.planner_type_id||''}));}
   function plannerAppliedMilestoneExportRows(rows){const byId=new Map(rows.map(row=>[String(row.id),row]));return rows.map(row=>{const initiative=projects.find(item=>Number(item.id)===Number(row.initiative_id)),track=(initiative?.tracks||[]).find(item=>Number(item.id)===Number(row.track_id)),reference=byId.get(String(row.reference_milestone_id));return{'Milestone ID':Number(row.id),'Initiative ID':Number(row.initiative_id),'Initiative':initiative?.name||row.initiative_name||'','Track ID':row.track_id||'','Track':track?.name||'','Sequence':Number(row.sequence_no||0),'Action / Deliverable':row.actions||row.milestone_title||'','Owner':row.owner||'','Dependency':row.dependency||'','Days':row.days??'','Start Date':row.start_date||'','End Date':row.end_date||'','Deadline':row.deadline||'','Completion Date':row.completion_date||'','Status':row.status||'','Schedule':row.schedule_mode||'sequential','Reference Milestone ID':row.reference_milestone_id||'','Reference Milestone':reference?.actions||reference?.milestone_title||'','Planner Type ID':row.planner_type_id||'','Reference Date Type':row.reference_date_type||'start_date','Reference Offset (Working Days)':Number(row.reference_offset_days)||0};});}
-  function writePlannerWorkbook(template,ruleRows,appliedRows,fileSuffix,scope=selectedPlannerImportScope()){const workbook=XLSX.utils.book_new(),isMaster=scope==='planner';const sheet=XLSX.utils.json_to_sheet(isMaster?ruleRows:appliedRows,{header:isMaster?plannerRuleHeaders:plannerAppliedMilestoneHeaders});XLSX.utils.book_append_sheet(workbook,sheet,isMaster?'Planner Fields':'Applied Milestones');XLSX.writeFile(workbook,`${String(template.template_name||'Project_Planner').replace(/[^A-Za-z0-9_-]+/g,'_')}_${isMaster?'Planner_Master':'Existing_Milestones'}_${fileSuffix}_${new Date().toISOString().slice(0,10)}.xlsx`);}
+  function writePlannerWorkbook(template,ruleRows,appliedRows,fileSuffix,scope=selectedPlannerImportScope()){const workbook=XLSX.utils.book_new(),isMaster=scope==='planner',exporting=fileSuffix==='Export';const rows=isMaster?ruleRows:appliedRows,headers=isMaster?plannerRuleHeaders:plannerAppliedMilestoneHeaders;const values=exporting?rows.map(row=>({'Unique ID':row[isMaster?'Planner Milestone ID':'Milestone ID'],...row})):rows;const sheet=XLSX.utils.json_to_sheet(values,{header:exporting?['Unique ID',...headers]:headers});XLSX.utils.book_append_sheet(workbook,sheet,isMaster?'Planner Fields':'Applied Milestones');XLSX.writeFile(workbook,`${String(template.template_name||'Project_Planner').replace(/[^A-Za-z0-9_-]+/g,'_')}_${isMaster?'Planner_Master':'Existing_Milestones'}_${fileSuffix}_${new Date().toISOString().slice(0,10)}.xlsx`);}
   function selectedPlannerRecord(){return plannerTemplates.find(template=>String(template.id)===String(activePlannerId))||null;}
   function downloadSelectedPlannerTemplate(){const template=selectedPlannerRecord();if(!template)return showToast('Select a Project Planner before downloading its template.','error');writePlannerWorkbook(template,[],[],'Import_Template');}
   async function exportSelectedPlanner(){const template=selectedPlannerRecord();if(!template||plannerWorkbookBusy)return showToast('Select one Project Planner before exporting.','error');const scope=selectedPlannerImportScope();plannerWorkbookBusy=true;updateSelectedPlannerIoButtons();try{if(scope==='planner'){writePlannerWorkbook(template,plannerRuleExportRows(template,plannerRows),[],'Export',scope);showToast(`Exported ${plannerRows.length} Planner master rules.`,'success');return;}if(!await deliveryReportProvenanceReady())throw new Error('Apply the Planner provenance SQL before exporting its generated milestones.');const result=await supabaseClient.from('milestones').select('*').eq('template_id',activePlannerId).eq('record_status','active').order('initiative_id').order('sequence_no');if(result.error)throw result.error;writePlannerWorkbook(template,[],plannerAppliedMilestoneExportRows(result.data||[]),'Export',scope);showToast(`Exported ${(result.data||[]).length} existing milestones from ${template.template_name}.`,'success');}catch(error){showToast(`Unable to export Project Planner: ${error?.message||error}`,'error');}finally{plannerWorkbookBusy=false;updateSelectedPlannerIoButtons();}}
@@ -22732,6 +22809,151 @@
   </script>
 
   <!-- PAGE-SPECIFIC IMPORT/EXPORT EXTENSION: preserves Project Overview handlers -->
+  <script id="delivery-partial-import-sql" type="text/plain">
+  BEGIN;
+  CREATE OR REPLACE FUNCTION public.delivery_import_table(p_entity text)
+  RETURNS text LANGUAGE sql IMMUTABLE SET search_path = '' AS $table$
+    SELECT CASE p_entity
+      WHEN 'programs' THEN 'programs' WHEN 'initiatives' THEN 'initiatives'
+      WHEN 'tracks' THEN 'milestone_tracks' WHEN 'milestones' THEN 'milestones'
+      WHEN 'daily' THEN 'milestones' WHEN 'user_master' THEN 'user_master'
+      WHEN 'user_roles' THEN 'user_master' WHEN 'initiative_type' THEN 'master_values'
+      WHEN 'departments' THEN 'master_values' WHEN 'business_benefit' THEN 'master_values'
+      WHEN 'project_status' THEN 'master_values' WHEN 'project_planner' THEN 'project_planner_templates'
+      WHEN 'todo' THEN 'todo_items' WHEN 'support' THEN 'support_tickets' END;
+  $table$;
+
+  CREATE OR REPLACE FUNCTION public.delivery_import_existing_ids(p_entity text,p_ids text[])
+  RETURNS SETOF text LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $exists$
+  DECLARE
+    target_table text := public.delivery_import_table(p_entity);
+    id_column text := CASE WHEN p_entity = 'support' THEN 'request_id' ELSE 'id' END;
+    id_type text;
+  BEGIN
+    IF auth.uid() IS NULL OR NOT EXISTS (
+      SELECT 1 FROM public.user_master actor WHERE actor.is_active = true
+        AND actor.role IN ('Admin','Level 1','Level 2')
+        AND (actor.auth_user_id = auth.uid() OR (actor.auth_user_id IS NULL AND lower(actor.email) = lower(auth.jwt()->>'email')))
+    ) THEN RAISE EXCEPTION 'Import authorization required' USING ERRCODE = '42501'; END IF;
+    IF target_table IS NULL OR coalesce(cardinality(p_ids),0) > 500 THEN RAISE EXCEPTION 'Invalid import ID batch'; END IF;
+    SELECT format_type(attribute.atttypid,attribute.atttypmod) INTO id_type
+      FROM pg_catalog.pg_attribute attribute
+      WHERE attribute.attrelid = to_regclass(format('public.%I',target_table))
+        AND attribute.attname = id_column AND NOT attribute.attisdropped;
+    IF id_type IS NULL THEN RAISE EXCEPTION 'Import entity is unavailable'; END IF;
+    RETURN QUERY EXECUTE format('SELECT %1$I::text FROM public.%2$I WHERE %1$I IN (SELECT value::%3$s FROM unnest($1) value)',id_column,target_table,id_type) USING p_ids;
+  END;
+  $exists$;
+
+  CREATE OR REPLACE FUNCTION public.delivery_import_match_ids(p_entity text,p_ids text[])
+  RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $match$
+  DECLARE
+    target_table text := public.delivery_import_table(p_entity);
+    id_column text := CASE WHEN p_entity = 'support' THEN 'request_id' ELSE 'id' END;
+    id_type text;
+    existing_ids text[];
+    result jsonb;
+  BEGIN
+    SELECT coalesce(array_agg(value),ARRAY[]::text[]) INTO existing_ids FROM public.delivery_import_existing_ids(p_entity,p_ids) value;
+    SELECT format_type(attribute.atttypid,attribute.atttypmod) INTO id_type FROM pg_catalog.pg_attribute attribute
+      WHERE attribute.attrelid = to_regclass(format('public.%I',target_table)) AND attribute.attname = id_column;
+    EXECUTE format('WITH visible AS (SELECT %1$I::text AS id,to_jsonb(source) AS record FROM public.%2$I source
+      WHERE %1$I IN (SELECT value::%3$s FROM unnest($1) value))
+      SELECT coalesce(jsonb_agg(jsonb_build_object(''id'',requested.id,''state'',CASE WHEN visible.id IS NOT NULL THEN ''Existing''
+        WHEN requested.id = ANY($2) THEN ''Unauthorized'' ELSE ''Missing'' END,''record'',visible.record)),''[]''::jsonb)
+      FROM unnest($1) requested(id) LEFT JOIN visible ON visible.id = requested.id',id_column,target_table,id_type)
+      INTO result USING p_ids,existing_ids;
+    RETURN result;
+  END;
+  $match$;
+
+  CREATE OR REPLACE FUNCTION public.delivery_import_update(p_entity text,p_rows jsonb)
+  RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = '' AS $update$
+  DECLARE
+    target_table text := public.delivery_import_table(p_entity);
+    id_column text := CASE WHEN p_entity = 'support' THEN 'request_id' ELSE 'id' END;
+    allowed text[];
+    id_type text;
+    column_set record;
+    assignments text;
+    affected integer;
+    total integer := 0;
+    entry jsonb;
+    current_user_record jsonb;
+    actor_role text;
+  BEGIN
+    SELECT actor.role INTO actor_role FROM public.user_master actor WHERE actor.is_active = true
+      AND (actor.auth_user_id = auth.uid() OR (actor.auth_user_id IS NULL AND lower(actor.email) = lower(auth.jwt()->>'email')))
+      ORDER BY (actor.auth_user_id IS NOT NULL) DESC LIMIT 1;
+    IF auth.uid() IS NULL OR actor_role IS NULL OR actor_role NOT IN ('Admin','Level 1','Level 2') THEN
+      RAISE EXCEPTION 'Import authorization required' USING ERRCODE = '42501';
+    END IF;
+    IF target_table IS NULL OR jsonb_typeof(p_rows) IS DISTINCT FROM 'array' OR jsonb_array_length(p_rows) > 250 THEN RAISE EXCEPTION 'Invalid import update batch'; END IF;
+    total := jsonb_array_length(p_rows);
+    IF (SELECT count(DISTINCT value->>'id') FROM jsonb_array_elements(p_rows)) <> jsonb_array_length(p_rows) THEN RAISE EXCEPTION 'Duplicate import IDs'; END IF;
+    IF p_entity IN ('user_master','user_roles','initiative_type','departments','business_benefit','project_status','project_planner') AND actor_role <> 'Admin' THEN
+      RAISE EXCEPTION 'Only Admin may import this entity' USING ERRCODE = '42501';
+    END IF;
+    allowed := CASE target_table
+      WHEN 'programs' THEN ARRAY['program_name','purpose','vertical','program_owner','assigned_to','start_date','target_end_date','revised_start_date','revised_end_date','actual_end_date','impact_category','measurable_impact','business_benefit','program_status','functional_engineer_id','technical_engineer_id']
+      WHEN 'initiatives' THEN ARRAY['title','description','initiative_type','cr_no','vertical','delivery_method','business_owner','assigned_to','start_date','target_end_date','revised_start_date','revised_end_date','actual_end_date','impact_category','measurable_impact','business_benefit','initiative_status','functional_engineer_id','technical_engineer_id']
+      WHEN 'milestone_tracks' THEN ARRAY['track_name']
+      WHEN 'milestones' THEN ARRAY['actions','milestone_title','owner','dependency','days','start_date','end_date','deadline','completion_date','status','deviation_days','remarks','planner_type_id','reference_offset_days']
+      WHEN 'user_master' THEN ARRAY['full_name','email','department','role','assigned_vertical','is_active']
+      WHEN 'master_values' THEN ARRAY['code','value_name','is_active']
+      WHEN 'project_planner_templates' THEN ARRAY['template_name','description','is_active']
+      WHEN 'todo_items' THEN ARRAY['title','notes','priority','due_date','is_completed','completed_at']
+      WHEN 'support_tickets' THEN ARRAY['fields','request_type','subject','request_status','location','department','service_category','request_mode','category','sub_category','type_of_issue','priority','template','ticket_group','status','technician','resolution','requester','approval_status','assigned_time','completed_time','due_by_time','item','overdue_status','requester_email','resolved_by','resolved_time','site','site_code','ticket_type','time_elapsed','solution','responded_date','response_due_by_time','resolve_mode','region']
+      ELSE ARRAY[]::text[] END;
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_rows) item
+      WHERE jsonb_typeof(item->'patch') IS DISTINCT FROM 'object' OR item->'patch' = '{}'::jsonb
+        OR jsonb_typeof(item->'expected') IS DISTINCT FROM 'object'
+        OR EXISTS (SELECT 1 FROM jsonb_object_keys(item->'patch') field WHERE NOT field = ANY(allowed)
+          OR NOT (item->'expected' ? field))) THEN RAISE EXCEPTION 'Protected or invalid import field'; END IF;
+
+    IF target_table = 'user_master' AND EXISTS (SELECT 1 FROM jsonb_array_elements(p_rows) item WHERE item->'patch' ? 'full_name') THEN
+      FOR entry IN SELECT value FROM jsonb_array_elements(p_rows) WHERE value->'patch' ? 'full_name' LOOP
+        SELECT to_jsonb(profile) INTO current_user_record FROM public.user_master profile WHERE profile.id = (entry->>'id')::bigint FOR UPDATE;
+        IF current_user_record IS NULL OR NOT current_user_record @> (entry->'expected') THEN RAISE EXCEPTION 'User profile changed or is inaccessible' USING ERRCODE = '40001'; END IF;
+        PERFORM public.delivery_update_user_profile((entry->>'id')::bigint,current_user_record->>'full_name',
+          jsonb_build_object('full_name',entry->'patch'->>'full_name','email',coalesce(entry->'patch'->>'email',current_user_record->>'email'),
+            'department',coalesce(entry->'patch'->>'department',current_user_record->>'department'),'assigned_vertical',coalesce(entry->'patch'->>'assigned_vertical',current_user_record->>'assigned_vertical')));
+      END LOOP;
+      SELECT coalesce(jsonb_agg(updated), '[]'::jsonb) INTO p_rows FROM (
+        SELECT CASE WHEN value->'patch' ? 'full_name' THEN jsonb_set(jsonb_set(value,'{expected}',
+          (value->'expected') || (value->'patch' - ARRAY['role','is_active'])),'{patch}',
+          value->'patch' - ARRAY['full_name','email','department','assigned_vertical']) ELSE value END updated
+        FROM jsonb_array_elements(p_rows)
+      ) changes WHERE updated->'patch' <> '{}'::jsonb;
+    END IF;
+
+    SELECT format_type(attribute.atttypid,attribute.atttypmod) INTO id_type FROM pg_catalog.pg_attribute attribute
+      WHERE attribute.attrelid = to_regclass(format('public.%I',target_table)) AND attribute.attname = id_column;
+    IF id_type IS NULL THEN RAISE EXCEPTION 'Import update entity is unavailable'; END IF;
+    FOR column_set IN
+      SELECT array_agg(value ORDER BY value) AS columns,items.rows
+      FROM (SELECT keys.columns,jsonb_agg(item) rows FROM jsonb_array_elements(p_rows) item
+        CROSS JOIN LATERAL (SELECT array_agg(field ORDER BY field) columns FROM jsonb_object_keys(item->'patch') field) keys
+        GROUP BY keys.columns) items CROSS JOIN LATERAL unnest(items.columns) value GROUP BY items.columns,items.rows
+    LOOP
+      SELECT string_agg(CASE WHEN target_table = 'support_tickets' AND field = 'fields' THEN 'fields = target.fields || proposed.fields' ELSE format('%1$I = proposed.%1$I',field) END,', ') INTO assignments FROM unnest(column_set.columns) field;
+      EXECUTE format('UPDATE public.%1$I target SET %2$s FROM jsonb_to_recordset($1) item(id text,patch jsonb,expected jsonb)
+        CROSS JOIN LATERAL jsonb_populate_record(NULL::public.%1$I,item.patch) proposed
+        WHERE target.%4$I = item.id::%3$s AND to_jsonb(target) @> item.expected',target_table,assignments,id_type,id_column) USING column_set.rows;
+      GET DIAGNOSTICS affected = ROW_COUNT;
+      IF affected <> jsonb_array_length(column_set.rows) THEN RAISE EXCEPTION 'Import record changed or is unauthorized. Refresh and retry.' USING ERRCODE = '40001'; END IF;
+    END LOOP;
+    RETURN jsonb_build_object('updated',total);
+  END;
+  $update$;
+  REVOKE ALL ON FUNCTION public.delivery_import_table(text) FROM PUBLIC, anon;
+  REVOKE ALL ON FUNCTION public.delivery_import_existing_ids(text,text[]) FROM PUBLIC, anon;
+  REVOKE ALL ON FUNCTION public.delivery_import_match_ids(text,text[]) FROM PUBLIC, anon;
+  REVOKE ALL ON FUNCTION public.delivery_import_update(text,jsonb) FROM PUBLIC, anon;
+  GRANT EXECUTE ON FUNCTION public.delivery_import_table(text),public.delivery_import_existing_ids(text,text[]),public.delivery_import_match_ids(text,text[]),public.delivery_import_update(text,jsonb) TO authenticated;
+  NOTIFY pgrst, 'reload schema';
+  COMMIT;
+  </script>
   <style>
   #page-export-menu{position:fixed;z-index:100000;min-width:210px;background:#fff;border:1px solid #cbd5e1;border-radius:.75rem;box-shadow:0 18px 45px rgba(15,23,42,.22);padding:.35rem}#page-export-menu button{display:block;width:100%;padding:.6rem .75rem;text-align:left;border-radius:.5rem;font-size:.75rem;font-weight:600;color:#334155}#page-export-menu button:hover,#page-export-menu button:focus{background:#eef2ff;color:#4338ca;outline:0}.page-io-progress{height:8px;border-radius:999px;background:#e2e8f0;overflow:hidden}.page-io-progress>i{display:block;height:100%;width:0;background:#4f46e5;transition:width .15s}
   </style>
@@ -22782,6 +23004,405 @@
     });
     cfg[entity].rows=()=>(entity==='programs'?programs:projects).map(record=>({...record,status:evaluateProjectStatus(record.name,record.revisedStartDate||record.startDate,getEffectiveEndDate(record.targetEndDate,record.revisedEndDate),record.actualEndDate),...Object.fromEntries(engineerAssignments.fields.map((field,index)=>[engineerAssignments.labels[index],engineerAssignments.display(record[field])]))}));
   }
+  cfg.user_master.rows=cfg.user_roles.rows=()=>userMaster;
+  cfg.project_planner.rows=()=>typeof plannerTemplates==='undefined'?[]:plannerTemplates;
+  for(const config of Object.values(cfg))if(config.masterType)config.rows=()=>getMasterValues(config.masterType);
+  cfg.daily.map={...cfg.milestones.map,...cfg.daily.map};
+  Object.assign(cfg.daily.map,{'Milestone Owner':'owner','Milestone':'actions','Actual End Date':'completion_date','Due Date':'deadline'});
+  cfg.todo.map.Description='notes';cfg.todo.map.Status='is_completed';
+  cfg.todo.rows=()=>loadTodoItems().map(item=>({...item,notes:item.note,'Status':item.done?'Done':'Pending'}));
+  cfg.user_master.required=['Full Name','Email','Department','Role Tier','Assigned Vertical'];
+  cfg.user_roles.required=cfg.user_master.required;
+  function normalizeImportId(value,textIdentity=false){
+    if(value===null||value===undefined||String(value).trim()==='')return '';
+    if(typeof value==='number'&&!Number.isSafeInteger(value))throw new Error('Unique ID must be stored as Excel text when it exceeds the safe integer range.');
+    const text=String(value).trim();
+    if(textIdentity){if(text.length>512||/[\u0000-\u001f]/.test(text))throw new Error('Invalid ticket Unique ID.');return text;}
+    if(/^\d+(?:\.0+)?$/.test(text)){const id=BigInt(text.replace(/\.0+$/,''));if(id<=0n)throw new Error('Unique ID must be a positive database ID.');return String(id);}
+    if(/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(text))return text.toLowerCase();
+    throw new Error('Invalid Unique ID.');
+  }
+  function getUploadedColumns(sheet){
+    const range=XLSX.utils.decode_range(sheet['!ref']||'A1');
+    const header=XLSX.utils.sheet_to_json(sheet,{header:1,range:{s:range.s,e:{r:range.s.r,c:range.e.c}},blankrows:false})[0]||[];
+    const columns=header.map(value=>String(value??'').replace(/^\uFEFF/,'').trim());
+    if(new Set(columns.filter(Boolean)).size!==columns.filter(Boolean).length)throw new Error('Duplicate Excel column headings are not allowed.');
+    return new Set(columns);
+  }
+  function importDatabaseField(p,field){
+    const aliases={programs:{name:'program_name',owner:'program_owner',status:'program_status'},initiatives:{name:'title',status:'initiative_status'},user_master:{name:'full_name',role_tier:'role',vertical:'assigned_vertical'},user_roles:{role_tier:'role',vertical:'assigned_vertical'},project_planner:{name:'template_name'},initiative_type:{value:'value_name'},departments:{value:'value_name'},business_benefit:{value:'value_name'},project_status:{value:'value_name'}};
+    return aliases[p]?.[field]||field;
+  }
+  const protectedImportFields=new Set(['id','request_id','normalized_request_id','created_time','last_updated_time','ticket_created_by','last_updated_by','source_cells','source_import_id','source_filename','source_row','version','sequence_no','display_order','initiative_id','program_id','track_id','master_type','record_status','created_at','created_by','created_by_name','updated_at','updated_by','updated_by_name','modified_at','modified_by','modified_by_name','archived_at','archived_by','archived_by_name','auth_user_id','permissions','deviation_days','review_state']);
+  const clearableImportFields=new Set(['purpose','description','notes','cr_no','dependency','remarks','start_date','end_date','deadline','completion_date','target_end_date','revised_start_date','revised_end_date','actual_end_date','due_date','planner_type_id','functional_engineer_id','technical_engineer_id']);
+  function normalizeImportedValue(field,value){
+    if(value===null||value===undefined||String(value).trim()==='')return null;
+    if(/(?:_date)$/.test(field)){
+      const date=normalizeExcelDate(value),parsed=new Date(`${date}T00:00:00Z`);
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(parsed.getTime())||parsed.toISOString().slice(0,10)!==date)throw new Error(`Invalid date: ${value}`);
+      return date;
+    }
+    if(field==='is_active'||field==='is_completed'){
+      if(typeof value==='boolean')return value;
+      const boolean=String(value).trim().toLowerCase();
+      if(['true','yes','1','active',...(field==='is_completed'?['done','complete','completed']:[])].includes(boolean))return true;
+      if(['false','no','0','inactive',...(field==='is_completed'?['pending','open']:[])].includes(boolean))return false;
+      throw new Error('Active Status must be Yes/No or Active/Inactive.');
+    }
+    if(/(?:^|_)status$/.test(field))return normalizeMilestoneStatus(value);
+    if(field==='days'){
+      const text=String(value).trim();if(['TBD','-'].includes(text))return text;
+      const days=normalizeMilestoneDays(text);if(days===null)throw new Error('Days must be a positive whole number, TBD, or -.');return days;
+    }
+    if(field==='functional_engineer_id'||field==='technical_engineer_id')return normalizeImportId(value);
+    return String(value).trim();
+  }
+  function compareImportedValue(field,left,right){return JSON.stringify(normalizeImportedValue(field,left))===JSON.stringify(normalizeImportedValue(field,right));}
+  function buildPartialPatch(p,c,row,columns,current){
+    const patch={},changed=[];
+    for(const heading of columns){
+      if(heading==='Unique ID'||heading==='Revision History')continue;
+      const mapped=c.map[heading];if(!mapped)continue;
+      const field=importDatabaseField(p,mapped);if(protectedImportFields.has(field))continue;
+      const cell=row[heading];if(cell===null||cell===undefined||String(cell).trim()==='')continue;
+      let value;
+      if(String(cell).trim()==='__CLEAR__'){
+        if(!clearableImportFields.has(field)&&!(p==='support'&&!c.required.includes(heading)))throw new Error(`${heading} cannot be cleared.`);
+        value=p==='support'?'':null;
+      }else value=normalizeImportedValue(field,cell);
+      const before=field==='remarks'&&['milestones','daily'].includes(p)?getStoredMilestoneRemarks({remarks:current.remarks}):current[field]??(p==='support'?current.fields?.[heading]:undefined);
+      if(p==='support'&&/(?:Time|Date)$/.test(heading)&&value){
+        const proposedRank=window.supportTickets.dateTimeRank({fields:{[heading]:value}},heading);
+        if(proposedRank===null&&!/^(?:-|not assigned)$/i.test(String(value)))throw new Error(`${heading} must contain a valid date/time.`);
+        if(proposedRank!==null&&proposedRank===window.supportTickets.dateTimeRank({fields:{[heading]:before}},heading))continue;
+      }
+      if(compareImportedValue(field,before,value))continue;
+      if(Object.hasOwn(patch,field)&&!compareImportedValue(field,patch[field],value))throw new Error(`Conflicting columns for ${heading}.`);
+      patch[field]=value;
+      changed.push({field,heading,before:before??'',after:value??''});
+    }
+    if(p==='support'&&changed.length)patch.fields=Object.fromEntries(changed.map(change=>[change.heading,change.after]));
+    return {patch,changed};
+  }
+  function partialImportEntry(row,index){return {row,sourceRow:Number.isInteger(row.__rowNum__)?row.__rowNum__+1:index+2,id:'',action:'Unchanged',status:'Ready',changed:[],patch:{}};}
+  let partialImportMatchFallback=false,partialImportWriteFallback=false,partialImportWriteReady=false;
+  function missingPartialImportFunction(error,name){return ['PGRST202','42883'].includes(error?.code)&&String(error.message||'').includes(name);}
+  async function matchPartialImportIds(p,ids){
+    if(!partialImportMatchFallback){
+      const result=await supabaseClient.rpc('delivery_import_match_ids',{p_entity:p,p_ids:ids});
+      if(!missingPartialImportFunction(result.error,'delivery_import_match_ids'))return result;
+      partialImportMatchFallback=true;
+    }
+    const column=p==='support'?'request_id':'id';
+    const result=await supabaseClient.from(cfg[p].table).select('*').in(column,ids);
+    if(result.error)return result;
+    const byId=new Map((result.data||[]).map(record=>[String(record[column]),record]));
+    return {data:ids.map(id=>({id,state:byId.has(id)?'Existing':'Unauthorized',record:byId.get(id)||null}))};
+  }
+  function partialImportSnapshotFilter(column,entry){
+    const term=(field,value)=>value===null?`${field}.is.null`:`${field}.eq.${typeof value==='object'?JSON.stringify(JSON.stringify(value)):JSON.stringify(String(value))}`;
+    const terms=[term(column,entry.id),...Object.entries(entry.expected).map(([field,value])=>term(field,value))];
+    return `and(${terms.join(',')})`;
+  }
+  async function persistPartialUpdateFallback(p,batch){
+    const column=p==='support'?'request_id':'id',groups=new Map();
+    if(['user_master','user_roles'].includes(p)&&batch.some(entry=>Object.hasOwn(entry.patch,'full_name')))throw new Error('User name propagation requires the database import setup. No replacement user will be inserted.');
+    for(const entry of batch){
+      const patch=p==='support'&&entry.patch.fields?{...entry.patch,fields:{...entry.expected.fields,...entry.patch.fields}}:entry.patch;
+      const signature=JSON.stringify(Object.entries(patch).sort(([left],[right])=>left.localeCompare(right)));
+      if(!groups.has(signature))groups.set(signature,[]);groups.get(signature).push({...entry,patch});
+    }
+    let updated=0;
+    for(const group of groups.values()){
+      const chunks=[];let chunk=[],size=0;
+      for(const entry of group){
+        const filter=partialImportSnapshotFilter(column,entry);
+        if(filter.length>6000)throw new Error('This record needs the embedded import database setup for a safe large-field update.');
+        if(chunk.length&&(size+filter.length>6000||chunk.length>=100)){chunks.push(chunk);chunk=[];size=0;}
+        chunk.push({entry,filter});size+=filter.length+1;
+      }
+      if(chunk.length)chunks.push(chunk);
+      for(const items of chunks){
+        const query=supabaseClient.from(cfg[p].table).update(items[0].entry.patch).in(column,items.map(item=>item.entry.id)).or(items.map(item=>item.filter).join(',')).select(column);
+        const result=await deliveryOffline.importQuery(query);if(result.error)throw result.error;
+        const confirmed=new Set((result.data||[]).map(row=>String(row[column])));
+        if(items.some(item=>!confirmed.has(item.entry.id)))throw new Error('A record changed or is inaccessible. Refresh and retry; no replacement record was inserted.');
+        updated+=items.length;await deliveryOffline.yieldUi();
+      }
+    }
+    return {data:{updated}};
+  }
+  async function classifyImportRows(p,c,rows,columns,match){
+    const entries=[],occurrences=new Map();
+    for(let index=0;index<rows.length;index++){
+      const entry=partialImportEntry(rows[index],index);entries.push(entry);
+      try{entry.id=normalizeImportId(entry.row['Unique ID'],p==='support');if(entry.id){const key=p==='support'?entry.id.toLowerCase():entry.id;if(!occurrences.has(key))occurrences.set(key,[]);occurrences.get(key).push(entry);}}
+      catch(error){entry.action='Error';entry.status=error.message;}
+      if(index%500===499)await deliveryOffline.yieldUi();
+    }
+    const ids=[];
+    for(const [id,items] of occurrences){
+      if(items.length===1){ids.push(items[0].id);continue;}
+      const sources=items.slice(0,20).map(item=>item.sourceRow).join(', ')+(items.length>20?` (+${items.length-20} more)`:'');
+      for(const entry of items){entry.action='Error';entry.duplicate=true;entry.status=`Duplicate Unique ID; source rows ${sources}.`;}
+    }
+    const currentById=new Map(),unavailable=new Set();
+    for(let start=0;start<ids.length;start+=500){
+      progress(10+Math.round(start/Math.max(ids.length,1)*15),`Matching IDs: ${start} of ${ids.length}`);
+      const result=await match(p,ids.slice(start,start+500));
+      if(result.error)throw result.error;
+      if(!Array.isArray(result.data))throw new Error('ID matching did not return a valid result. No rows were saved.');
+      for(const item of result.data){if(item.state==='Existing')currentById.set(String(item.id),item.record);else if(item.state==='Unauthorized')unavailable.add(String(item.id));}
+      await deliveryOffline.yieldUi();
+    }
+    const users=new Set((userMaster||[]).filter(user=>user.is_active!==false).map(user=>norm(user.name)));
+    for(let index=0;index<entries.length;index++){
+      const entry=entries[index];if(entry.action==='Error')continue;
+      try{
+        if(unavailable.has(entry.id))throw new Error('Authorization error: Unique ID is inaccessible. A replacement record will not be inserted.');
+        const current=currentById.get(entry.id);
+        if(!current){
+          const missing=c.required.filter(heading=>!safe(entry.row[heading]).trim());
+          if(missing.length)throw new Error(entry.id?'ID not found and mandatory fields for a new record are missing':`Missing mandatory fields: ${missing.join(', ')}`);
+          entry.action='Insert';entry.status=entry.id?'ID not found; new record validation required':'New record validation required';
+          entry.row={...entry.row,__rowNum__:entry.sourceRow-1};for(const [heading,field]of Object.entries(c.map))if(field==='id')delete entry.row[heading];
+          delete entry.row['Unique ID'];
+        }else{
+          if(c.masterType&&current.master_type!==c.masterType)throw new Error('Authorization error: Unique ID belongs to another Master Type.');
+          if(['deleted','archived'].includes(norm(current.record_status)))throw new Error('Archived records cannot be modified by this import.');
+          entry.current=current;
+          Object.assign(entry,buildPartialPatch(p,c,entry.row,columns,current));
+          for(const [field,value]of Object.entries(entry.patch)){
+            if(p!=='support'&&['owner','business_owner','program_owner','assigned_to','dependency'].includes(field)&&value&&!users.has(norm(value)))throw new Error(`${field}: user is not in User Master.`);
+            if(engineerAssignments.fields.includes(field)&&value&&!engineerAssignments.users.some(user=>String(user.id)===String(value)&&user.is_active===true))throw new Error('Select an active engineer.');
+          }
+          entry.action=entry.changed.length?'Update':'Unchanged';
+          entry.expected=Object.fromEntries(Object.keys(entry.patch).map(field=>[field,current[field]??null]));
+        }
+      }catch(error){entry.action='Error';entry.status=error.message;entry.patch={};entry.changed=[];}
+      if(index%250===249){progress(25+Math.round(index/entries.length*10),`Comparing: ${index} of ${entries.length}`);await deliveryOffline.yieldUi();}
+    }
+    return entries;
+  }
+  async function preparePartialImport(p,c,rows,columns){
+    const insertConfig=p==='daily'?{...c,required:cfg.milestones.required}:c;
+    const entries=await deliveryOffline.prepared(`partial-plan-v1:${p}`,()=>classifyImportRows(p,insertConfig,rows,columns,matchPartialImportIds));
+    const plan={entries,byRow:new Map(entries.map(entry=>[entry.row,entry])),columns};
+    validatePartialEntityEntries(p,plan);
+    await validatePartialMilestones(p,plan);
+    return plan;
+  }
+  function validatePartialEntityEntries(p,plan){
+    for(const entry of plan.entries.filter(item=>item.action==='Update')){
+      try{
+        const proposed={...entry.current,...entry.patch};
+        if(['programs','initiatives'].includes(p)){
+          const start=proposed.revised_start_date||proposed.start_date;
+          if(start&&proposed.actual_end_date&&proposed.actual_end_date<start)throw new Error('Actual End Date cannot be before Start Date.');
+          if(Object.hasOwn(entry.patch,'vertical')&&!getMasterValues('DEPARTMENT').some(value=>norm(value.value_name)===norm(proposed.vertical)))throw new Error('Vertical must be an active Department Master value.');
+          if(Object.hasOwn(entry.patch,'initiative_type')&&!getMasterValues('INITIATIVE_TYPE').some(value=>norm(value.value_name)===norm(proposed.initiative_type)))throw new Error('Invalid Initiative Type.');
+          if(Object.hasOwn(entry.patch,'delivery_method')&&!['Waterfall','Agile'].includes(proposed.delivery_method))throw new Error('Invalid Delivery Method.');
+          const statusField=p==='programs'?'program_status':'initiative_status';
+          if(Object.keys(entry.patch).some(field=>field.endsWith('_date'))){
+            const status=evaluateProjectStatus(proposed.program_name||proposed.title,start,getEffectiveEndDate(proposed.target_end_date,proposed.revised_end_date),proposed.actual_end_date);
+            if(Object.hasOwn(entry.patch,statusField)&&normalizeMilestoneStatus(entry.patch[statusField])!==normalizeMilestoneStatus(status))throw new Error('Status conflicts with the supplied Initiative or Program dates.');
+            if(normalizeMilestoneStatus(proposed[statusField])!=='On-Hold')appendPartialDerived(entry,statusField,status,'Status');
+          }
+          if(Object.hasOwn(entry.patch,statusField)&&entry.patch[statusField]==='Done'&&!proposed.actual_end_date)throw new Error('Done requires an Actual End Date.');
+          if(Object.hasOwn(entry.patch,statusField)&&normalizeMilestoneStatus(entry.patch[statusField])!=='On-Hold'){
+            const effective=evaluateProjectStatus(proposed.program_name||proposed.title,start,getEffectiveEndDate(proposed.target_end_date,proposed.revised_end_date),proposed.actual_end_date);
+            if(normalizeMilestoneStatus(entry.patch[statusField])!==normalizeMilestoneStatus(effective))throw new Error('Status is derived from the Initiative or Program dates.');
+          }
+        }
+        if(['user_master','user_roles'].includes(p)){
+          if(Object.hasOwn(entry.patch,'email')){entry.patch.email=String(entry.patch.email).toLowerCase();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(entry.patch.email))throw new Error('Invalid Email.');}
+          if(Object.hasOwn(entry.patch,'role')&&!['Admin','Level 1','Level 2','Read-Only'].includes(proposed.role))throw new Error('Invalid User Master Role.');
+          if(proposed.role==='Level 2'&&proposed.assigned_vertical==='All')throw new Error('Level 2 requires a specific Assigned Vertical.');
+        }
+        if(p==='todo'&&Object.hasOwn(entry.patch,'is_completed'))appendPartialDerived(entry,'completed_at',entry.patch.is_completed?new Date().toISOString():null,'Completed At');
+      }catch(error){entry.action='Error';entry.status=error.message;entry.patch={};entry.changed=[];}
+    }
+  }
+  function importMilestoneModel(record){
+    const model=Object.fromEntries(Object.entries(record).map(([field,value])=>[toCamel(field),value]));
+    return {...model,title:record.milestone_title||record.actions,status:record.status,persistedStatus:record.status,rawStatus:record.status};
+  }
+  function appendPartialDerived(entry,field,value,label){
+    if(compareImportedValue(field,entry.current[field],value)){delete entry.patch[field];delete entry.expected[field];entry.changed=entry.changed.filter(change=>change.field!==field);return;}
+    entry.patch[field]=value;
+    const change=entry.changed.find(item=>item.field===field);
+    if(change)change.after=value??'';else entry.changed.push({field,heading:label||field,before:entry.current[field]??'',after:value??''});
+    entry.expected[field]=entry.current[field]??null;
+  }
+  async function validatePartialMilestones(p,plan){
+    plan.effects=[];
+    if(!['milestones','daily'].includes(p))return;
+    const updates=plan.entries.filter(entry=>entry.action==='Update');
+    const dateFields=['days','start_date','end_date','deadline','completion_date'];
+    const contextIds=[...new Set(updates.filter(entry=>Object.keys(entry.patch).some(field=>dateFields.includes(field)||field==='planner_type_id')||Object.hasOwn(entry.patch,'status')).map(entry=>String(entry.current.initiative_id)))];
+    const contextRows=await deliveryOffline.prepared(`partial-milestone-context:${p}`,async()=>{
+      const rows=[];
+      for(let start=0;start<contextIds.length;start+=100){
+        for(let offset=0;;offset+=1000){
+          const result=await supabaseClient.from('milestones').select('*').in('initiative_id',contextIds.slice(start,start+100)).order('id').range(offset,offset+999);
+          if(result.error)throw result.error;rows.push(...(result.data||[]));
+          if((result.data||[]).length<1000)break;
+          await deliveryOffline.yieldUi();
+        }
+      }
+      return rows;
+    });
+    const rawById=new Map(contextRows.map(row=>[String(row.id),row]));
+    const projectById=new Map(projects.map(project=>[String(project.id),project]));
+    const stages=new Map();
+    for(const row of contextRows){const id=String(row.initiative_id);if(!stages.has(id)){const project=projectById.get(id);if(!project)throw new Error('An imported Milestone Initiative is inaccessible.');stages.set(id,{...project,milestones:[],sourceIds:[],impactIds:[]});}stages.get(id).milestones.push(importMilestoneModel(row));}
+    for(const stage of stages.values()){stage.milestones.sort((left,right)=>Number(left.sequenceNo)-Number(right.sequenceNo)||Number(left.id)-Number(right.id));stage.byId=new Map(stage.milestones.map(row=>[String(row.id),row]));}
+    for(const entry of updates){
+      try{
+        const current=entry.current,stage=stages.get(String(current.initiative_id));
+        const model=importMilestoneModel(current);
+        if(Object.hasOwn(entry.patch,'remarks')){
+          const text=entry.patch.remarks??'';if(text.length>MAX_MILESTONE_REMARKS_LENGTH)throw new Error('Remarks exceed the allowed length.');
+          entry.patch.remarks=milestoneRemarksRecord(text,current.remarks).remarks;
+        }
+        if(!Object.keys(entry.patch).some(field=>dateFields.includes(field)||field==='status'||field==='planner_type_id'))continue;
+        if(!stage||!canEditInitiative(stage))throw new Error('Permission denied for the Milestone Initiative.');
+        if(model.scheduleMode==='parallel'&&Object.keys(entry.patch).some(field=>['days','start_date','end_date','deadline'].includes(field)))throw new Error('Imported dates cannot override a dynamically referenced Milestone. Edit its Planner reference first.');
+        const proposed={...current,...entry.patch};
+        if(Object.hasOwn(entry.patch,'days')||Object.hasOwn(entry.patch,'start_date')){
+          const changes={};if(Object.hasOwn(entry.patch,'days'))changes.days=entry.patch.days;if(Object.hasOwn(entry.patch,'start_date'))changes.startDate=entry.patch.start_date||'';
+          const schedule=calculateMilestoneSchedule(model,changes);
+          for(const [field,value]of Object.entries({start_date:schedule.startDate||null,days:['TBD','-'].includes(String(schedule.days))?schedule.days:normalizeMilestoneDays(schedule.days),end_date:schedule.endDate||null,deadline:schedule.deadline||null,...(schedule.hasHistory?{remarks:schedule.remarks,deviation_days:schedule.deviationDays}:{})})){
+            if(Object.hasOwn(entry.patch,field)&&!['days','start_date'].includes(field)&&!compareImportedValue(field,entry.patch[field],value))throw new Error(`${field} conflicts with the calculated Milestone schedule.`);
+            appendPartialDerived(entry,field,value);proposed[field]=value;
+          }
+        }
+        if(Object.hasOwn(entry.patch,'status')&&entry.patch.status==='Done'&&!proposed.completion_date){
+          const completion=proposed.deadline||proposed.end_date||calculateMilestoneEndDate(proposed.days,proposed.start_date);
+          if(!completion)throw new Error('Done requires a valid Completion Date or End Date.');
+          appendPartialDerived(entry,'completion_date',normalizeImportedValue('completion_date',completion),'Completion Date');proposed.completion_date=completion;
+        }
+        if(proposed.completion_date&&proposed.completion_date>localToday())throw new Error('Completion Date cannot be in the future.');
+        if(proposed.start_date&&proposed.completion_date&&proposed.completion_date<proposed.start_date)throw new Error('Completion Date cannot be before Start Date.');
+        if(proposed.start_date&&proposed.end_date&&proposed.end_date<proposed.start_date)throw new Error('End Date cannot be before Start Date.');
+        const scheduling=Object.keys(entry.patch).some(field=>dateFields.includes(field));
+        if(scheduling||Object.hasOwn(entry.patch,'status')){
+          const effective=getEffectiveMilestoneStatus(importMilestoneModel(proposed));
+          if(Object.hasOwn(entry.patch,'status')&&normalizeMilestoneStatus(entry.patch.status)!==normalizeMilestoneStatus(effective))throw new Error('Status conflicts with the Milestone dates, completion, or deviation history.');
+          appendPartialDerived(entry,'status',effective,'Status');
+          if(scheduling)appendPartialDerived(entry,'deviation_days',calculateDeviation(proposed.deadline,proposed.start_date,proposed.completion_date)||null,'Deviation');
+        }
+        Object.assign(stage.byId.get(entry.id),importMilestoneModel({...current,...entry.patch}));
+        if(scheduling){stage.sourceIds.push(Number(entry.id));if(/^(yes|true|1)$/i.test(String(entry.row['Impact Below Dates']||'')))stage.impactIds.push(Number(entry.id));}
+      }catch(error){entry.action='Error';entry.status=error.message;entry.patch={};entry.changed=[];}
+    }
+    const mappingChanges=updates.filter(entry=>entry.action==='Update'&&Object.hasOwn(entry.patch,'planner_type_id'));
+    if(mappingChanges.length){
+      try{await milestoneTypeIntegrity.validate(mappingChanges.map(entry=>({id:entry.id,initiative_id:entry.current.initiative_id,...entry.patch})),contextRows);}
+      catch(error){for(const entry of mappingChanges){entry.action='Error';entry.status=error.message;entry.patch={};entry.changed=[];}}
+    }
+    const explicitIds=new Set(updates.filter(entry=>entry.action==='Update').map(entry=>Number(entry.id)));
+    for(const stage of stages.values()){
+      const effects=new Map();
+      try{
+        for(const id of stage.impactIds){const changes=await cascadeTrackMilestoneSchedule(stage,id,{impactBelow:true,calculateOnly:true,preserveMilestoneIds:explicitIds});for(const change of changes)effects.set(String(change.milestone.id),change.payload);}
+        if(stage.sourceIds.length){
+          const dependency=await planMilestoneDependencyChanges(stage,stage.sourceIds);stage.milestones=dependency.project.milestones;
+          for(const change of dependency.changes)if(!explicitIds.has(Number(change.milestone.id)))effects.set(String(change.milestone.id),change.payload);
+          const queue=[...stage.sourceIds,...[...effects.keys()].map(Number)],visited=new Set();
+          for(let index=0;index<queue.length;index++){
+            const id=queue[index];if(visited.has(id))continue;visited.add(id);
+            for(const milestone of stage.milestones.filter(item=>item.scheduleMode==='parallel'&&Number(item.referenceMilestoneId)===id)){
+              if(explicitIds.has(Number(milestone.id))||isMilestoneScheduleImpactProtected(milestone))continue;
+              const startDate=getMilestoneScheduleStartDate(stage,milestone,'');if(!startDate)continue;
+              const schedule=calculateMilestoneSchedule(milestone,{startDate},{baseSchedule:true}),endDate=schedule.endDate||'',deadline=getMilestoneDeadline(startDate,endDate);
+              const patch={start_date:startDate,end_date:endDate||null,deadline:deadline||null,status:getEffectiveMilestoneStatus({...milestone,startDate,endDate,deadline}),deviation_days:schedule.hasHistory?schedule.deviationDays:calculateDeviation(deadline,startDate,milestone.completionDate)||null,...(schedule.hasHistory?{days:normalizeMilestoneDays(schedule.days),remarks:schedule.remarks}:{})};
+              Object.assign(milestone,importMilestoneModel({...rawById.get(String(milestone.id)),...patch}));effects.set(String(milestone.id),patch);queue.push(Number(milestone.id));
+            }
+          }
+        }
+        for(const [id,patch]of effects){
+          const current=rawById.get(id),entry={id,current,sourceRow:'Derived',action:'Update',status:'Affected Milestone schedule',patch:{},changed:[],expected:{}};
+          for(const [field,value]of Object.entries(patch))appendPartialDerived(entry,field,value);
+          if(Object.keys(entry.patch).length)plan.effects.push(entry);
+        }
+      }catch(error){for(const entry of updates.filter(item=>String(item.current.initiative_id)===String(stage.id))){entry.action='Error';entry.status=error.message;entry.patch={};entry.changed=[];}}
+    }
+  }
+  async function persistPartialUpdates(p,plan){
+    const updates=[...plan.entries.filter(entry=>entry.action==='Update'),...(plan.effects||[])];
+    const work=await deliveryOffline.prepared(`partial-writes-v1:${p}`,()=>updates.map(entry=>({id:entry.id,patch:entry.patch,expected:entry.expected})));
+    for(let start=0;start<work.length;start+=250){
+      const batch=work.slice(start,start+250);
+      let result;
+      if(!partialImportWriteFallback&&!partialImportWriteReady){
+        const probe=await supabaseClient.rpc('delivery_import_update',{p_entity:p,p_rows:[]});
+        if(missingPartialImportFunction(probe.error,'delivery_import_update'))partialImportWriteFallback=true;
+        else if(probe.error)throw probe.error;
+        else partialImportWriteReady=true;
+      }
+      if(partialImportWriteFallback)result=await persistPartialUpdateFallback(p,batch);
+      else result=await deliveryOffline.importQuery(supabaseClient.rpc('delivery_import_update',{p_entity:p,p_rows:batch}));
+      if(result.error)throw result.error;
+      if(Number(result.data?.updated)!==batch.length)throw new Error('Supabase did not confirm every partial update. The import needs review.');
+      progress(40+Math.round((start+batch.length)/work.length*35),`Updating: ${start+batch.length} of ${work.length}`);
+      await deliveryOffline.yieldUi();
+    }
+    if(work.length)await deliveryOffline.invalidate(cfg[p].table,deliveryOffline.scope);
+    const entriesById=new Map(updates.map(entry=>[entry.id,entry]));
+    return work.map(item=>({...entriesById.get(item.id),patch:item.patch,expected:item.expected}));
+  }
+  async function applyPartialLocalState(p,updates){
+    const table=cfg[p].table,rows=table==='programs'?programs:table==='initiatives'?projects:table==='milestone_tracks'?projects.flatMap(project=>project.tracks||[]):table==='milestones'?projects.flatMap(project=>project.milestones||[]):[];
+    const byId=new Map(rows.map(row=>[String(row.id),row]));
+    const kpis=table==='milestones'?new Map(kpiMilestoneRows.map(row=>[String(row.id),row])):new Map();
+    const affected=new Set(),holdGroups=new Map();let scheduleChanged=false;
+    for(const entry of updates){
+      const hierarchyStatus=table==='programs'?'program_status':table==='initiatives'?'initiative_status':null;
+      if(hierarchyStatus&&Object.hasOwn(entry.patch,hierarchyStatus)&&[entry.current[hierarchyStatus],entry.patch[hierarchyStatus]].some(status=>normalizeMilestoneStatus(status)==='On-Hold')){
+        const status=entry.patch[hierarchyStatus];if(!holdGroups.has(status))holdGroups.set(status,[]);holdGroups.get(status).push(Number(entry.id));
+      }
+      const record=byId.get(entry.id);if(record){for(const [field,value]of Object.entries(entry.patch)){const alias=({program_name:'name',program_owner:'owner',program_status:'status',title:table==='initiatives'?'name':'title',initiative_status:'status',track_name:'name',milestone_title:'title',planner_type_id:'plannerTypeId'})[field]||toCamel(field);record[alias]=value??'';}if(Object.hasOwn(entry.patch,'status')){record.persistedStatus=entry.patch.status;record.rawStatus=entry.patch.status;}}
+      if(kpis.has(entry.id))Object.assign(kpis.get(entry.id),entry.patch);
+      if(table==='milestones'&&Object.keys(entry.patch).some(field=>['days','start_date','end_date','deadline','completion_date'].includes(field))){affected.add(String(entry.current.initiative_id));scheduleChanged=true;}
+    }
+    for(const [status,ids]of holdGroups)await cascadeHierarchyOnHold(table,ids,status);
+    if(scheduleChanged)await synchronizeInitiativeRevisedEndDates(projects.filter(project=>affected.has(String(project.id))),{deferDependencyRender:true});
+    if(['user_master','user_roles'].includes(p)){await loadUsersFromSupabase();populateUserDropdowns();renderUserMasterList();renderUserRoleManagement();}
+    else if(cfg[p].masterType)await loadMasterValues();
+    else if(p==='project_planner')await loadPlanners(true);
+    else if(p==='todo'){await loadTodoItemsFromSupabase(false);if(currentWorkspaceView==='todo')renderTodoListPage();}
+    else if(p==='support'){
+      const changes=new Map(updates.map(entry=>[entry.id,entry]));
+      const sets=[window.supportTickets.state.records,typeof supportTicketReadCache==='undefined'?[]:supportTicketReadCache.rows||[]];
+      const seen=new Set();
+      for(const rows of sets)for(const record of rows){if(seen.has(record))continue;seen.add(record);const entry=changes.get(String(record.request_id));if(!entry)continue;Object.assign(record,entry.patch,{fields:{...record.fields,...entry.patch.fields},version:Number(entry.current.version||0)+1});}
+      window.clearSupportTicketPageCache?.();if(currentWorkspaceView==='support')await window.supportTickets.load(true);
+    }
+  }
+  function partialImportCounts(plan){
+    const counts={Total:plan.entries.length,Updates:0,Inserts:0,Unchanged:0,Errors:0,'Duplicate IDs':new Set(plan.entries.filter(entry=>entry.duplicate).map(entry=>entry.id)).size};
+    for(const entry of plan.entries)counts[{Update:'Updates',Insert:'Inserts',Error:'Errors',Unchanged:'Unchanged'}[entry.action]]++;
+    return counts;
+  }
+  async function previewPartialImport(plan){
+    if(deliveryOffline.activeImport?.background){
+      const approved=await deliveryOffline.prepared('partial-preview-approved',()=>false);
+      if(!approved)throw Object.assign(new Error('Import preview needs approval before recovery can apply rows.'),{needsReview:true});
+      return true;
+    }
+    const host=document.getElementById('import-modal-status');if(!host)throw new Error('Import preview is unavailable.');
+    host.className='rounded-lg border border-slate-200 bg-white p-3 text-xs';
+    host.replaceChildren();let pageIndex=0;
+    const counts=document.createElement('p');counts.className='font-semibold mb-3';counts.textContent=Object.entries(partialImportCounts(plan)).map(([key,value])=>`${key}: ${value}`).join(' | ');host.appendChild(counts);
+    const scroll=document.createElement('div');scroll.className='overflow-auto max-h-80';host.appendChild(scroll);
+    const pager=document.createElement('div');pager.className='flex justify-end gap-2 mt-3';host.appendChild(pager);
+    const previous=document.createElement('button'),next=document.createElement('button');
+    for(const [button,label]of [[previous,'Previous'],[next,'Next']]){button.type='button';button.className='border rounded-lg px-3 py-2';button.textContent=label;pager.appendChild(button);}
+    const render=()=>{scroll.replaceChildren();const table=document.createElement('table');table.className='w-full text-left';const head=table.createTHead().insertRow();for(const label of ['Source Row','Unique ID','Action','Changed Fields','Status']){const cell=document.createElement('th');cell.className='p-2 border-b';cell.textContent=label;head.appendChild(cell);}const body=table.createTBody();for(const entry of plan.entries.slice(pageIndex*100,(pageIndex+1)*100)){const row=body.insertRow();for(const text of [entry.sourceRow,entry.id,entry.action,entry.changed.map(change=>`${change.heading}: ${change.before} -> ${change.after}`).join('; '),entry.status]){const cell=row.insertCell();cell.className='p-2 border-b whitespace-normal break-words';cell.textContent=String(text);}}scroll.appendChild(table);previous.disabled=pageIndex===0;next.disabled=(pageIndex+1)*100>=plan.entries.length;};
+    previous.onclick=()=>{pageIndex--;render();};next.onclick=()=>{pageIndex++;render();};render();
+    return new Promise(resolve=>{for(const [label,accepted]of [['Cancel',false],['Apply Valid Rows',true]]){const button=document.createElement('button');button.type='button';button.className=accepted?'rounded-lg bg-indigo-600 text-white px-3 py-2':'border rounded-lg px-3 py-2';button.textContent=label;button.onclick=async()=>{pager.querySelectorAll('button').forEach(control=>control.disabled=true);await deliveryOffline.prepared('partial-preview-approved',()=>accepted);if(!accepted&&deliveryOffline.activeImport)deliveryOffline.activeImport.cancelled=true;resolve(accepted);};pager.appendChild(button);}});
+  }
   function master(label,type){return{label,sheet:label.slice(0,31),table:'master_values',key:'id',masterType:type,required:['Value Name'],headers:['Master ID','Code','Value Name','Master Type','Active Status'],map:{'Master ID':'id','Code':'code','Value Name':'value','Master Type':'master_type','Active Status':'is_active'},rows:()=> (window.masterValues||window.masterData||[]).filter(x=>x.master_type===type||x.type===type)}}
   function page(){
     if(window.deliveryOffline.activeImport)return window.deliveryOffline.activeImport.kind;
@@ -22818,23 +23439,29 @@
   }
   window.openPageImportModal=function(){const p=page();if(p==='overview')return original.openImport();const c=cfg[p];if(!c)return showToast?.('Import is not available for this page.','error');if(!canImport(p))return showToast?.('You are not authorised to import this page.','error');const title=document.getElementById('import-modal-title'),content=document.getElementById('import-modal-default'),status=document.getElementById('import-modal-status');if(title)title.textContent=`${c.label} Import Center`;if(content)content.innerHTML=`<p class="text-sm text-slate-600">Template: <b>${c.label}_Import_Template.xlsx</b></p><div class="grid grid-cols-1 sm:grid-cols-2 gap-3"><button type="button" id="pio-template" class="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white">Download Template</button><button type="button" id="pio-select" class="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-semibold text-white">Select Import File</button></div><div class="page-io-progress"><i id="pio-bar"></i></div><p id="pio-count" class="text-xs text-slate-500">Ready</p>`;if(status){status.classList.add('hidden');status.innerHTML=''};openImportModal();document.getElementById('pio-template').onclick=()=>template(p);document.getElementById('pio-select').onclick=()=>document.getElementById('import-file')?.click()};
   function template(p){const c=cfg[p],wb=XLSX.utils.book_new(),ws=XLSX.utils.aoa_to_sheet([c.headers]),meta=XLSX.utils.aoa_to_sheet([['PMO_DELIVERY_HUB_TEMPLATE',p,'1.0']]);XLSX.utils.book_append_sheet(wb,ws,c.sheet);XLSX.utils.book_append_sheet(wb,meta,'_PMO_META');meta['!state']='hidden';XLSX.writeFile(wb,`${c.label.replace(/ /g,'_')}_Import_Template.xlsx`)}
-  window.importCurrentWorkspacePage=async function(e){
-    const p=page();
+  window.importCurrentWorkspacePage=async function importPageFile(e,supplied={}){
+    const p=supplied.page||page();
     if(p==='overview')return original.importPage(e);
     if(busy)return;
-    const file=e.target.files?.[0];e.target.value='';if(!file)return;
+    const file=supplied.file||e.target.files?.[0];e.target.value='';if(!file)return;
     const c=cfg[p];busy=true;lock(true);
     try{
       if(!canImport(p))throw new Error('You are not authorised to import this page.');
-      const wb=await deliveryOffline.readWorkbook(file,{type:'array',cellDates:true});
+      progress(0,'Reading');
+      const wb=supplied.workbook||await deliveryOffline.readWorkbook(file,{type:'array',cellDates:true});
       const meta=wb.Sheets._PMO_META?XLSX.utils.sheet_to_json(wb.Sheets._PMO_META,{header:1})[0]:null;
-      if(!meta||meta[0]!=='PMO_DELIVERY_HUB_TEMPLATE'||meta[1]!==p||!wb.Sheets[c.sheet])throw new Error(`This file is not a ${c.label} import template. Please use the ${c.label} template.`);
-      const rows=XLSX.utils.sheet_to_json(wb.Sheets[c.sheet],{defval:''}),heads=rows.length?Object.keys(rows[0]):[];
-      const missing=c.required.filter(h=>!heads.includes(h));
-      if(missing.length)throw new Error(`Missing required columns: ${missing.join(', ')}`);
+      const sheet=wb.Sheets[c.sheet]||wb.Sheets[wb.SheetNames.find(name=>name!=='_PMO_META')];
+      const uploaded=sheet?getUploadedColumns(sheet):new Set();
+      if(!uploaded.has('Unique ID')&&(!meta||meta[0]!=='PMO_DELIVERY_HUB_TEMPLATE'||meta[1]!==p||!wb.Sheets[c.sheet]))throw new Error(`This file is not a ${c.label} import template. Please use the ${c.label} template.`);
+      let rows=XLSX.utils.sheet_to_json(sheet,{defval:'',raw:true}),heads=[...uploaded];
       if(!rows.length)throw new Error('The selected template contains no data rows.');
+      progress(5,'Validating');
+      const partial=uploaded.has('Unique ID')?await preparePartialImport(p,c,rows,uploaded):null;
+      if(partial)rows=partial.entries.filter(entry=>entry.action==='Insert').map(entry=>entry.row);
+      const missing=c.required.filter(h=>!heads.includes(h));
+      if(!partial&&missing.length)throw new Error(`Missing required columns: ${missing.join(', ')}`);
       const engineers=['programs','initiatives'].includes(p);
-      const hierarchyPage=['programs','initiatives','tracks','milestones'].includes(p);
+      const hierarchyPage=['programs','initiatives','tracks','milestones'].includes(p)||Boolean(partial&&p==='daily');
       const sourceRecords=p==='programs'?programs:p==='initiatives'?projects:p==='tracks'?projects.flatMap(initiative=>initiative.tracks||[]):p==='milestones'?projects.flatMap(initiative=>initiative.milestones||[]):[];
       const idHeading={programs:'Program ID',initiatives:'Initiative ID',tracks:'Track ID',milestones:'Milestone ID'}[p];
       const recordsById=new Map(sourceRecords.map(record=>[String(record.id),record]));
@@ -22844,8 +23471,9 @@
       const existing=row=>recordsById.get(String(row[idHeading]));
       const errors=[];
       for(const [index,row] of rows.entries()){
+        const errorStart=errors.length;
         if(index%200===0){progress(Math.round(index/rows.length*10),`Validating ${index} of ${rows.length} rows`);await new Promise(resolve=>setTimeout(resolve,0));}
-        c.required.forEach(heading=>{if(!safe(row[heading]).trim())errors.push(`Row ${index+2}: ${heading} is required.`)});
+        (partial&&p==='daily'?cfg.milestones.required:c.required).forEach(heading=>{if(!safe(row[heading]).trim())errors.push(`Row ${index+2}: ${heading} is required.`)});
         if(engineers){
           try{
             const record=existing(row);
@@ -22854,19 +23482,22 @@
           }catch(error){errors.push(`Row ${index+2}: ${error.message}`)}
         }
         if((p==='user_master'||p==='user_roles')&&row.Email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.Email))errors.push(`Row ${index+2}: invalid email.`);
+        if(partial&&errors.length>errorStart){const entry=partial.byRow.get(row);entry.action='Error';entry.status=errors.splice(errorStart).join(' ');}
       }
-      let importRows=rows,verticalValidationFailures=[];
-      if(p==='initiatives'){
+      let importRows=partial?rows.filter(row=>partial.byRow.get(row).action==='Insert'):rows,verticalValidationFailures=[];
+      if(p==='initiatives'&&importRows.length){
         const validVerticals=await getActiveDepartmentValueSet();
         if(!validVerticals.size)throw new Error('Department Master contains no active Value Name records for Initiative Vertical validation.');
-        importRows=rows.filter((row,index)=>{const vertical=safe(row.Vertical).trim();if(validVerticals.has(vertical.toLowerCase()))return true;verticalValidationFailures.push({row:index+2,vertical});return false});
-        if(!importRows.length&&verticalValidationFailures.length)throw new Error(formatInitiativeVerticalValidationSummary(0,verticalValidationFailures));
+        importRows=importRows.filter((row,index)=>{const vertical=safe(row.Vertical).trim();if(validVerticals.has(vertical.toLowerCase()))return true;verticalValidationFailures.push({row:index+2,vertical});if(partial){const entry=partial.byRow.get(row);entry.action='Error';entry.status='Vertical must be an active Department Master value.';}return false});
+        if(!partial&&!importRows.length&&verticalValidationFailures.length)throw new Error(formatInitiativeVerticalValidationSummary(0,verticalValidationFailures));
       }
       if(errors.length)throw new Error(errors.slice(0,8).join(' '));
       const payload=[];
+      const todoUser=partial&&p==='todo'&&importRows.length?await getTodoAuthUser():null;
       let nextSequence=null;
       const hierarchySequences=new Map();
       for(const row of importRows){
+        try{
         if(payload.length%200===0){progress(10+Math.round(payload.length/importRows.length*20),`Preparing ${payload.length} of ${importRows.length} rows`);await new Promise(resolve=>setTimeout(resolve,0));}
         const record={};
         const previous=existing(row);
@@ -22895,7 +23526,7 @@
           if(p==='programs'){record.is_active=record.record_status!=='deleted';delete record.record_status;}
           if(!previous&&!record.sequence_no){if(nextSequence===null)nextSequence=await (p==='programs'?getNextProgramSequence():getNextInitiativeSequence());record.sequence_no=nextSequence++;}
         }
-        if(p==='tracks'||p==='milestones'){
+        if(p==='tracks'||p==='milestones'||partial&&p==='daily'){
           const parent=initiativesById.get(String(record.initiative_id));
           if(!parent||!canEditInitiative(parent))throw new Error(`Invalid or inaccessible Initiative ID: ${record.initiative_id}`);
           if(p==='tracks'&&!record.sequence_no){
@@ -22904,7 +23535,7 @@
             record.sequence_no=Number(record.display_order)||hierarchySequences.get(key);
             hierarchySequences.set(key,Math.max(hierarchySequences.get(key),record.sequence_no)+1);
           }
-          if(p==='milestones'){
+          if(p==='milestones'||partial&&p==='daily'){
             const program=programsById.get(String(parent.programId));
             const track=record.track_id?tracksByInitiative.get(String(parent.id))?.get(String(record.track_id)):null;
             if(record.track_id&&!track)throw new Error(`Track ${record.track_id} does not belong to Initiative ${parent.id}.`);
@@ -22931,31 +23562,169 @@
         }
         if(c.masterType)record.master_type=c.masterType;
         if(!hierarchyPage){record.modified_at=new Date().toISOString();record.modified_by=currentUser?.email||currentUser?.name||'';}
+        if(partial){
+          for(const [field,value]of Object.entries({...record})){const mapped=importDatabaseField(p,field);if(mapped!==field){record[mapped]=value;delete record[field];}}
+          delete record.id;
+          for(const field of ['created_at','created_by','modified_at','modified_by','archived_at','archived_by'])delete record[field];
+          const entry=partial.byRow.get(row);entry.payload=record;entry.status='Validated new record';
+          if(supplied.prepareInsert)Object.assign(record,supplied.prepareInsert(row));
+          if(p==='todo'){
+            if(!todoUser)throw new Error('Sign in before importing To Do items.');
+            record.user_id=todoUser.id;record.user_email=currentUser?.email||todoUser.email||null;
+            if(Object.hasOwn(record,'is_completed'))record.is_completed=normalizeImportedValue('is_completed',record.is_completed);
+            if(record.is_completed)record.completed_at=new Date().toISOString();
+            delete record.owner;delete record.start_date;
+          }
+          if(['user_master','user_roles'].includes(p)){
+            if(!['Admin','Level 1','Level 2','Read-Only'].includes(record.role))throw new Error('Invalid User Master Role.');
+            if(record.role==='Level 2'&&record.assigned_vertical==='All')throw new Error('Level 2 requires a specific Assigned Vertical.');
+            record.is_active=record.is_active===undefined?true:normalizeImportedValue('is_active',record.is_active);
+            record.email=String(record.email||'').trim().toLowerCase();
+            if(userMaster.some(user=>norm(user.email)===record.email))throw new Error(USER_MASTER_DUPLICATE_EMAIL_MESSAGE);
+          }
+          if(p==='milestones'||p==='daily'){
+            if(!record.owner||!(userMaster||[]).some(user=>norm(user.name)===norm(record.owner)))throw new Error('Milestone Owner is required and must be in User Master.');
+            const start=record.start_date||'',completion=record.completion_date||'',end=record.end_date||calculateMilestoneEndDate(record.days,start);
+            if(completion&&completion>localToday()||start&&completion&&completion<start)throw new Error('Invalid Milestone Completion Date.');
+            record.end_date=end||null;record.deadline=record.deadline||getMilestoneDeadline(start,end)||null;
+            record.status=getEffectiveMilestoneStatus(importMilestoneModel(record));
+          }
+        }
         payload.push(record);
+        }catch(error){if(!partial)throw error;const entry=partial.byRow.get(row);entry.action='Error';entry.status=error.message;delete entry.payload;}
       }
       progress(30,`Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}`);
-      const db=hierarchyPage?supabaseClient:(window.supabaseClient||window.supabase);
+      let confirmedUpdates=[];
+      if(partial){
+        const preparedInserts=await deliveryOffline.prepared(`partial-inserts-v1:${p}`,()=>payload.slice());
+        payload.length=0;for(const record of preparedInserts)payload.push(record);
+        if(!await previewPartialImport(partial))return;
+        confirmedUpdates=await persistPartialUpdates(p,partial);
+      }
+      const db=partial||hierarchyPage?supabaseClient:(window.supabaseClient||window.supabase);
       if(!db?.from)throw new Error('Database connection is not available.');
       for(let start=0;start<payload.length;start+=250){
         const batch=payload.slice(start,start+250);
-        let query=db.from(c.table).upsert(batch,{onConflict:c.key,defaultToNull:false});
-        if(hierarchyPage)query=query.select('id');
+        let query=partial?supabaseClient.from(c.table).insert(batch).select('id'):db.from(c.table).upsert(batch,{onConflict:c.key,defaultToNull:false});
+        if(hierarchyPage&&!partial)query=query.select('id');
         const result=await deliveryOffline.importQuery(query);if(result.error)throw result.error;
         if(hierarchyPage&&(!Array.isArray(result.data)||result.data.length!==batch.length))throw new Error('Supabase did not confirm every imported row. Refresh and review before retrying.');
-        progress(30+Math.round((start+batch.length)/payload.length*70),`Confirmed ${start+batch.length} of ${payload.length} rows`);
+        progress(75+Math.round((start+batch.length)/payload.length*20),`Inserting: ${start+batch.length} of ${payload.length}`);
         await deliveryOffline.yieldUi();
+      }
+      if(partial){
+        if(payload.length&&hierarchyPage)await loadInitiativesFromSupabase({render:false});
+        else await applyPartialLocalState(p,confirmedUpdates);
+        if(!supplied.deferRefresh&&['programs','initiatives','tracks','milestones','daily'].includes(p)&&[p,'overview'].includes(currentWorkspaceView))renderActiveDeliveryWorkspace();
+        const summary=Object.entries(partialImportCounts(partial)).map(([key,value])=>`${key}: ${value}`).join(' | ');
+        progress(100,'Completed');showStatus('success',summary);return partial;
       }
       progress(100,`Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}.`);
       showStatus('success',`${c.label} import completed. Rows Valid: ${importRows.length}. Rows Rejected: ${verticalValidationFailures.length}.`);
       if(verticalValidationFailures.length)alert(formatInitiativeVerticalValidationSummary(importRows.length,verticalValidationFailures));
       if(hierarchyPage)await loadInitiativesFromSupabase();
       await refresh(p);
-    }catch(error){deliveryOffline.importFailed(error);console.error('[Page import]',p,error);showStatus('error',error.message||'Import paused. Confirmed batches are retained.')}
+    }catch(error){deliveryOffline.importFailed(error);console.error('[Page import]',p,error);showStatus('error',error.message||'Import paused. Confirmed batches are retained.');if(supplied.workbook)throw error;}
     finally{busy=false;lock(false)}
+  };
+  const partialPageImport=window.importCurrentWorkspacePage;
+  window.deliveryPartialImport={normalizeImportId,getUploadedColumns,buildPartialPatch,compareImportedValue,classifyImportRows,configs:cfg,
+    prependSupportUniqueId(workbook){
+      const sheet=workbook.Sheets['Support Tickets'];if(!sheet?.['!ref'])return;
+      const range=XLSX.utils.decode_range(sheet['!ref']);
+      if(sheet[XLSX.utils.encode_cell({r:range.s.r,c:range.s.c})]?.v==='Unique ID')return;
+      let idColumn=-1;
+      for(let column=range.s.c;column<=range.e.c;column++)if(sheet[XLSX.utils.encode_cell({r:range.s.r,c:column})]?.v==='RequestID')idColumn=column;
+      if(idColumn<0)throw new Error('Support Ticket export has no immutable RequestID.');
+      for(let row=range.s.r;row<=range.e.r;row++){
+        const id=row===range.s.r?'Unique ID':String(sheet[XLSX.utils.encode_cell({r:row,c:idColumn})]?.v??'');
+        for(let column=range.e.c;column>=range.s.c;column--){const from=XLSX.utils.encode_cell({r:row,c:column}),to=XLSX.utils.encode_cell({r:row,c:column+1});if(sheet[from])sheet[to]=sheet[from];else delete sheet[to];}
+        sheet[XLSX.utils.encode_cell({r:row,c:range.s.c})]={t:'s',v:id};
+      }
+      range.e.c++;sheet['!ref']=XLSX.utils.encode_range(range);if(sheet['!cols'])sheet['!cols']=[{wch:24},...sheet['!cols']];
+    },
+    installSupportExportIds(){
+      const originalWrite=XLSX.writeFile;
+      XLSX.writeFile=function(workbook,name,...args){if(/^Support_Tickets_/i.test(String(name))&&!/template|validation/i.test(String(name)))window.deliveryPartialImport.prependSupportUniqueId(workbook);return originalWrite.call(this,workbook,name,...args);};
+      const NativeWorker=window.Worker;
+      if(NativeWorker)window.Worker=class DeliveryImportExportWorker extends NativeWorker{
+        constructor(url,options){super(url,options);this.deliverySupportWorker=String(url).includes('support-ticket-import-worker.js');this.deliveryExportIdIndex=-1;}
+        postMessage(message,transfer){
+          if(this.deliverySupportWorker&&message?.type==='export-start'&&!message.headers.includes('Unique ID')){
+            this.deliveryExportIdIndex=message.headers.indexOf('RequestID');
+            if(this.deliveryExportIdIndex<0)throw new Error('Support Ticket export has no immutable RequestID.');
+            message={...message,headers:['Unique ID',...message.headers]};
+          }else if(this.deliverySupportWorker&&message?.type==='export-rows'&&this.deliveryExportIdIndex>=0)message={...message,rows:message.rows.map(row=>[row[this.deliveryExportIdIndex],...row])};
+          return super.postMessage(message,transfer);
+        }
+      };
+    },
+    async importSupport(event,workbook,file,prepareInsert){
+      cfg.support={label:'Support Tickets',sheet:'Support Tickets',table:'support_tickets',key:'request_id',required:['RequestID','Subject'],headers:window.supportTickets.headers,map:window.deliverySupportTicketColumnMap};
+      const sheet=workbook.Sheets['Support Tickets']||workbook.Sheets[workbook.SheetNames.find(name=>name!=='_PMO_META')];
+      return partialPageImport(event,{page:'support',workbook:{SheetNames:['Support Tickets'],Sheets:{'Support Tickets':sheet}},file,prepareInsert});
+    },
+    async importEntity(event,entity,workbook,file){
+      const sheet=workbook.Sheets[cfg[entity].sheet]||workbook.Sheets[workbook.SheetNames.find(name=>name!=='_PMO_META')];
+      const normalized={SheetNames:[cfg[entity].sheet],Sheets:{[cfg[entity].sheet]:sheet}};
+      const execute=()=>partialPageImport(event,{page:entity,workbook:normalized,file});
+      if(deliveryOffline.activeImport)return execute();
+      return deliveryOffline.runImport(entity,file,execute);
+    },
+    async importHierarchy(event,workbook,file){
+      const aliases={programs:{'Program Name*':'Program Name','Program Assigned To':'Assigned To','Vertical*':'Vertical'},initiatives:{'Initiative Name*':'Initiative Name','Type*':'Initiative Type','CR No':'CR Number','Vertical*':'Vertical','Delivery Method*':'Delivery Method','Business Owner*':'Business Owner','Assigned To*':'Assigned To','Impact Category*':'Impact Category','Measurable Impact*':'Measurable Impact','Business Benefit*':'Business Benefit'},tracks:{'Track Name*':'Track Name'},milestones:{'Track - User Story*':'Milestone Name','Workstream / User Story*':'Milestone Name','Milestone - Actions*':'Action / Deliverable','Milestone / Executive Action*':'Action / Deliverable','Milestoner Owner*':'Owner','Milestone Owner*':'Owner'}};
+      const projectsByName=new Map();for(const project of projects){const key=norm(project.name);if(projectsByName.has(key))projectsByName.set(key,null);else projectsByName.set(key,project);}
+      const plans=[];
+      for(const entity of ['programs','initiatives','tracks','milestones']){
+        const sheetName=cfg[entity].sheet,sheet=workbook.Sheets[sheetName];if(!sheet)continue;
+        const rows=XLSX.utils.sheet_to_json(sheet,{defval:'',raw:true});if(!rows.length)continue;
+        for(const row of rows){
+          for(const [from,to]of Object.entries(aliases[entity]||{}))if(Object.hasOwn(row,from)){row[to]=row[from];delete row[from];}
+          const initiativeName=row['Initiative Name*']||row['Initiative Name'];
+          if(['tracks','milestones'].includes(entity)&&!row['Initiative ID']&&initiativeName)row['Initiative ID']=projectsByName.get(norm(initiativeName))?.id||'';
+          if(entity==='milestones'&&!row['Track ID']&&row['Track Name']){const project=projects.find(item=>String(item.id)===String(row['Initiative ID']));row['Track ID']=(project?.tracks||[]).find(track=>norm(track.name)===norm(row['Track Name']))?.id||'';}
+        }
+        const normalized=XLSX.utils.json_to_sheet(rows),normalizedWorkbook={SheetNames:[sheetName],Sheets:{[sheetName]:normalized}};
+        plans.push(await partialPageImport(event,{page:entity,workbook:normalizedWorkbook,file,deferRefresh:true}));
+        if(deliveryOffline.activeImport?.cancelled)break;
+      }
+      if(plans.length)renderActiveDeliveryWorkspace();
+      return plans;
+    }
   };
   function lock(on){document.getElementById('import-modal-close')?.toggleAttribute('disabled',on);const b=document.getElementById('pio-select');if(b)b.disabled=on}function progress(n,t){const b=document.getElementById('pio-bar'),c=document.getElementById('pio-count');if(b)b.style.width=n+'%';if(c)c.textContent=t}function showStatus(type,msg){const s=document.getElementById('import-modal-status');if(s){s.className=`rounded-lg p-3 text-sm ${type==='success'?'bg-emerald-50 text-emerald-800':'bg-rose-50 text-rose-800'}`;s.textContent=msg}}
   async function refresh(p){if(['programs','initiatives','tracks','milestones','daily'].includes(p)&&typeof loadProjectsFromDB==='function')await loadProjectsFromDB();if(p==='todo'&&typeof renderTodoList==='function')renderTodoList();if(typeof renderFlatWorkspacePage==='function'&&['programs','initiatives','tracks','milestones'].includes(p))renderFlatWorkspacePage()}
-  window.exportCurrentWorkspacePage=function(){const p=page();if(p==='overview')return original.exportPage();if(p==='analytics')return menu();const c=cfg[p];if(!c)return showToast?.('Export is not available for this page.','error');if(busy)return;busy=true;try{let exportHeaders=c.headers,rows;if(p==='daily'){const table=document.querySelector('#workspace-flat-page table');if(!table)throw new Error('Daily Tracker table is not available.');const allHeaders=[...table.querySelectorAll('thead th')].map((th,index)=>({index,label:th.innerText.replace(/\s+/g,' ').trim()}));const included=allHeaders.filter(h=>h.label&&!/^(select|action|actions)$/i.test(h.label));exportHeaders=included.map(h=>h.label);rows=[...table.querySelectorAll('tbody tr')].filter(tr=>tr.offsetParent!==null&&!tr.querySelector('td[colspan]')).map(tr=>{const cells=[...tr.querySelectorAll(':scope > td')],o={};included.forEach(h=>{const cell=cells[h.index];o[h.label]=cell?cell.innerText.replace(/\s+/g,' ').trim():''});return o}).filter(row=>Object.values(row).some(value=>String(value).trim()));if(!rows.length)throw new Error('No Daily Tracker rows are visible for the current filters.');}else{rows=c.rows().map(x=>{const o={};c.headers.forEach(h=>{if(Object.prototype.hasOwnProperty.call(x,h)){o[h]=x[h]??'';return}const k=c.map[h];o[h]=k?x[k]??x[toCamel(k)]??'':''});return o})}const ws=XLSX.utils.json_to_sheet(rows,{header:exportHeaders}),wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,c.sheet);XLSX.writeFile(wb,`${c.label.replace(/ /g,'_')}_${stamp()}.xlsx`);showToast?.(`${c.label} export created.`,'success')}catch(err){console.error('[Page export]',p,err);showToast?.(`Unable to export ${c.label}: ${err.message}`,'error')}finally{busy=false}};
+  window.exportCurrentWorkspacePage=function(){
+    const p=page();if(p==='overview')return original.exportPage();if(p==='analytics')return menu();
+    const c=cfg[p];if(!c)return showToast?.('Export is not available for this page.','error');if(busy)return;
+    busy=true;
+    try{
+      let exportHeaders=['Unique ID',...c.headers],rows;
+      if(p==='daily'){
+        const table=document.querySelector('#workspace-flat-page table');if(!table)throw new Error('Daily Tracker table is not available.');
+        const allHeaders=[...table.querySelectorAll('thead th')].map((th,index)=>({index,label:th.innerText.replace(/\s+/g,' ').trim()}));
+        const included=allHeaders.filter(h=>h.label&&!/^(select|action|actions)$/i.test(h.label));
+        exportHeaders=['Unique ID',...included.map(h=>h.label)];
+        const milestones=new Map(projects.flatMap(project=>project.milestones||[]).map(milestone=>[String(milestone.id),milestone]));
+        rows=[...table.querySelectorAll('tbody tr')].filter(tr=>tr.offsetParent!==null&&!tr.querySelector('td[colspan]')).map(tr=>{
+          const marker=tr.querySelector('[data-daily-select-entity="milestones"],.daily-row-checkbox,[data-entity="milestones"][data-id]');
+          let id=tr.dataset.inlineMilestoneId||tr.dataset.milestoneId||marker?.dataset.id;
+          if(!id){const source=[tr,...tr.querySelectorAll('[ondblclick],[onclick]')].map(node=>(node.getAttribute('ondblclick')||'')+' '+(node.getAttribute('onclick')||'')).join(' ');id=source.match(/(?:startDailyTrackerEdit|openDailyMilestoneActionMenu)\(\s*(\d+)/)?.[1];}
+          const milestone=milestones.get(String(id));if(!milestone)throw new Error('A visible Daily Tracker row has no confirmed database ID.');
+          const cells=[...tr.querySelectorAll(':scope > td')],row={'Unique ID':normalizeImportId(milestone.id)};
+          included.forEach(header=>{const cell=cells[header.index];row[header.label]=cell?cell.innerText.replace(/\s+/g,' ').trim():'';});return row;
+        });
+        if(!rows.length)throw new Error('No Daily Tracker rows are visible for the current filters.');
+      }else rows=c.rows().map(record=>{
+        const row={'Unique ID':normalizeImportId(record.id)};
+        c.headers.forEach(heading=>{if(Object.hasOwn(record,heading)){row[heading]=record[heading]??'';return;}const field=c.map[heading];row[heading]=field?record[field]??record[toCamel(field)]??record[importDatabaseField(p,field)]??'':'';});return row;
+      });
+      const ws=XLSX.utils.json_to_sheet(rows,{header:exportHeaders}),wb=XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb,ws,c.sheet);XLSX.writeFile(wb,`${c.label.replace(/ /g,'_')}_${stamp()}.xlsx`);
+      showToast?.(`${c.label} export created.`,'success');
+    }catch(error){console.error('[Page export]',p,error);showToast?.(`Unable to export ${c.label}: ${error.message}`,'error');}
+    finally{busy=false;}
+  };
   function toCamel(s){return s.replace(/_([a-z])/g,(_,c)=>c.toUpperCase())}
   function menu(){document.getElementById('page-export-menu')?.remove();const b=document.getElementById('btn-page-export'),r=b.getBoundingClientRect(),m=document.createElement('div');m.id='page-export-menu';m.setAttribute('role','menu');m.innerHTML=['Excel','PDF','Word','PowerPoint'].map((x,i)=>`<button role="menuitem" data-format="${x.toLowerCase()}" tabindex="${i?' -1':'0'}">Export as ${x}</button>`).join('');m.style.left=Math.max(8,r.right-210)+'px';m.style.top=(r.bottom+6)+'px';document.body.appendChild(m);m.onclick=async e=>{const x=e.target.closest('button');if(x){m.remove();try{if(window.deliveryReportBuilder?.isActive())await window.exportAnalyticsReport(x.dataset.format);else await analyticsExport(x.dataset.format);}catch(error){showToast(error.message,'error');}}};m.onkeydown=e=>{const a=[...m.querySelectorAll('button')],i=a.indexOf(document.activeElement);if(e.key==='ArrowDown'){e.preventDefault();a[(i+1)%a.length].focus()}if(e.key==='ArrowUp'){e.preventDefault();a[(i+a.length-1)%a.length].focus()}if(e.key==='Escape'){m.remove();b.focus()}};setTimeout(()=>document.addEventListener('click',function out(e){if(!m.contains(e.target)&&e.target!==b){m.remove();document.removeEventListener('click',out)}}),0);m.querySelector('button').focus()}
   function analyticsData(){const root=document.getElementById('analytics-dashboard')||document.querySelector('.analytics-dashboard')||document.getElementById('workspace-flat-page'),filters=[...document.querySelectorAll('select,input')].filter(x=>x.offsetParent&&x.value).map(x=>`${x.getAttribute('aria-label')||x.name||x.id}: ${x.value}`),kpis=[...root.querySelectorAll('[data-kpi],.kpi-card,.analytics-kpi')].map(x=>safe(x.innerText).replace(/\s+/g,' ').trim()).filter(Boolean),charts=[...root.querySelectorAll('canvas')].filter(x=>x.offsetParent).map(x=>({title:x.closest('.analytics-chart-card')?.querySelector('h3')?.textContent||'Analytics Report',image:x.toDataURL('image/png'),chart:window.Chart?.getChart(x)}));return{root,filters,kpis,charts,date:new Date().toLocaleString('en-IN',{timeZone:'Asia/Kolkata'})}}
@@ -23351,13 +24120,13 @@
 
     window.exportUserMaster=function(){
       if(typeof XLSX==='undefined')return showToast('Excel library is not available.','error');
-      const headers=['User ID','Full Name','Email','Department','Role Tier','Assigned Vertical','Active Status','Created At','Created By','Modified At','Modified By'];
+      const headers=['Unique ID','User ID','Full Name','Email','Department','Role Tier','Assigned Vertical','Active Status','Created At','Created By','Modified At','Modified By'];
       const rows=(userMaster||[]).map(user=>[
-        user.id??'',user.name||'',user.email||'',user.department||'',user.role||user.roleTier||'',user.assignedVertical||'',user.isActive===false?'Inactive':'Active',user.createdAt||'',user.createdBy||'',user.updatedAt||'',user.modifiedBy||''
+        user.id??'',user.id??'',user.name||'',user.email||'',user.department||'',user.role||user.roleTier||'',user.assignedVertical||'',user.isActive===false?'Inactive':'Active',user.createdAt||'',user.createdBy||'',user.updatedAt||'',user.modifiedBy||''
       ]);
       const workbook=XLSX.utils.book_new();
       const sheet=XLSX.utils.aoa_to_sheet([headers,...rows]);
-      sheet['!cols']=[12,28,34,22,18,22,14,22,26,22,26].map(wch=>({wch}));
+      sheet['!cols']=[12,12,28,34,22,18,22,14,22,26,22,26].map(wch=>({wch}));
       XLSX.utils.book_append_sheet(workbook,sheet,'User Master');
       XLSX.writeFile(workbook,`User_Master_${new Date().toISOString().slice(0,10)}.xlsx`);
       showToast?.(`${rows.length} User Master record(s) exported.`,'success');
@@ -23463,6 +24232,7 @@
     function dailyExportValue(row){
       const milestone=row.m||{};
       return {
+        'Unique ID':milestone.id??'',
         'Bucket':row.bucket||'',
         'Program':row.p?.name||'',
         'Initiative':row.i?.name||'',
@@ -23492,7 +24262,7 @@
       if(typeof getDailyTrackerTaskRows!=='function'||typeof DAILY_TASK_BUCKETS==='undefined')return showToast?.('Daily Tracker data is not available.','error');
       try{
         const allRows=getDailyTrackerTaskRows();
-        const headers=['Bucket','Program','Initiative','Track','Milestone ID','Milestone','Milestone Owner','Dependency','Status','Start Date','Due Date','Overdue Days','Actual End Date','Critical','Review State','Record Status'];
+        const headers=['Unique ID','Bucket','Program','Initiative','Track','Milestone ID','Milestone','Milestone Owner','Dependency','Status','Start Date','Due Date','Overdue Days','Actual End Date','Critical','Review State','Record Status'];
         const workbook=XLSX.utils.book_new();
         appendDailySheet(workbook,'All Items',allRows,headers);
         DAILY_TASK_BUCKETS.forEach(item=>{
@@ -26616,6 +27386,8 @@
     window.milestoneTypeEditing={decorate,modalControl,saveTypes,label,schedule};
     const verifiedFiles=new WeakSet();
     async function validateImport(file){
+      const sparseWorkbook=await deliveryOffline.readWorkbook(file,{type:'array',cellDates:true});
+      if(window.deliveryPartialImport&&sparseWorkbook.SheetNames.some(name=>name!=='_PMO_META'&&window.deliveryPartialImport.getUploadedColumns(sparseWorkbook.Sheets[name]).has('Unique ID')))return;
       const workbook=await deliveryOffline.readWorkbook(file,{type:'array',cellDates:true}),candidates=[];
       for(const sheetName of workbook.SheetNames){const rows=XLSX.utils.sheet_to_json(workbook.Sheets[sheetName],{defval:''});for(let index=0;index<rows.length;index++){const row=rows[index];const field=['Milestone Planner Type ID','Planner Type ID','planner_type_id'].find(name=>Object.hasOwn(row,name));if(!field)continue;const initiativeId=row['Initiative ID']||row.initiative_id,initiativeName=row['Initiative Name*']||row['Initiative Name']||row['Initiative Name *']||'',programName=row['Program Name']||row['Program Name*']||'';let parent=initiativeId?projects.find(project=>key(project.id)===key(initiativeId)):null;if(!parent&&initiativeName){const matches=projects.filter(project=>key(project.name).trim().toLowerCase()===key(initiativeName).trim().toLowerCase()&&(!programName||key(programs.find(program=>key(program.id)===key(project.programId))?.name).trim().toLowerCase()===key(programName).trim().toLowerCase()));if(matches.length>1)throw new Error('Typed import row '+(index+2)+' has an ambiguous Initiative. Supply Initiative ID.');parent=matches[0];}if(!initiativeId&&!parent&&!initiativeName)throw new Error('Typed import row '+(index+2)+' requires Initiative ID or Initiative Name.');candidates.push({patch:{...(row['Milestone ID']||row.id?{id:row['Milestone ID']||row.id}:{}),initiative_id:parent?.id||initiativeId||'new:'+key(programName).trim().toLowerCase()+':'+key(initiativeName).trim().toLowerCase(),planner_type_id:key(row[field]).trim()||null,...(row['Record Status']||row.record_status?{record_status:row['Record Status']||row.record_status}:{})},row:(row.__rowNum__??index+1)+1,initiative:initiativeName||initiativeId,sheet:sheetName});}}
       if(!candidates.length)return;const existing=await fetchAllSupabaseRows('milestones');if(existing.error)throw existing.error;const meta=workbook.Sheets._PMO_META?XLSX.utils.sheet_to_json(workbook.Sheets._PMO_META,{header:1})[0]:null,updatesExisting=meta?.[0]==='PMO_DELIVERY_HUB_TEMPLATE'&&meta[1]==='milestones';for(const candidate of candidates){if(!updatesExisting)delete candidate.patch.id;else if(candidate.patch.id&&!candidate.patch.planner_type_id)delete candidate.patch.planner_type_id;}await milestonePlannerTypes.load();const errors=integrity.conflicts(candidates.map(item=>item.patch),existing.data||[]);if(errors.length)throw new Error(integrity.duplicateMessage+'\n'+errors.map(error=>{const source=candidates[error.row-1],type=milestonePlannerTypes.state.values.find(value=>key(value.id)===key(error.typeId));return `${source.sheet} row ${source.row}: Initiative ${source.initiative}, Planner Type ${type?.value_name||error.typeId}, conflicting Milestone ${error.milestoneId}.`;}).join('\n'));await integrity.validate(candidates.map(item=>item.patch),existing.data||[]);
@@ -28955,6 +29727,7 @@
       'RequestID':'request_id','Request Type':'request_type','Subject':'subject','Request Status':'request_status','Location':'location','Department':'department','Service Category':'service_category','Request Mode':'request_mode','Category':'category','Sub Category':'sub_category','Type of issue':'type_of_issue','Priority':'priority','Template':'template','Group':'ticket_group','Status':'status','Technician':'technician','Created Time':'created_time','Last Updated Time':'last_updated_time','Resolution':'resolution','Requester':'requester','Approval Status':'approval_status','Assigned Time':'assigned_time','Completed Time':'completed_time','Created By':'ticket_created_by','Due By Time':'due_by_time','Item':'item','Last Updated By':'last_updated_by','Overdue Status':'overdue_status','Requester Email':'requester_email','Resolved By':'resolved_by','Resolved Time':'resolved_time','Site':'site','Site Code':'site_code','Type':'ticket_type','Time Elapsed':'time_elapsed','Solution':'solution','Responded Date':'responded_date','Response Due By Time':'response_due_by_time','Resolve Mode':'resolve_mode','Region':'region'
     };
     window.deliverySupportTicketColumnMap=ticketColumnMap;
+    window.deliveryPartialImport?.installSupportExportIds();
     const ticketSchemaColumns=['request_id','normalized_request_id','fields','source_cells','source_import_id','source_sheet','source_row','source_filename','source_file_index','version',...Object.values(ticketColumnMap).filter(column=>column!=='request_id')];
     let supportImportBusy=false;
     let supportRefreshCounts=null;
@@ -29045,6 +29818,13 @@
       let importPhase='Preparing import',importCommitted=false;
       try{
         if(!/\.xlsx?$/i.test(file.name))throw new Error('Only .xls and .xlsx workbooks are supported.');
+        const sparseWorkbook=await deliveryOffline.readWorkbook(file,{type:'array',cellDates:true});
+        const sparseSheet=sparseWorkbook.Sheets[sparseWorkbook.SheetNames.find(name=>name!=='_PMO_META')];
+        if(window.deliveryPartialImport.getUploadedColumns(sparseSheet).has('Unique ID'))return await window.deliveryPartialImport.importSupport(event,sparseWorkbook,file,row=>{
+          const fields=Object.fromEntries(window.supportTickets.headers.map(header=>[header,String(row[header]??'')]));
+          for(const field of ['Assigned Time','Completed Time','Due By Time','Resolved Time','Responded Date','Response Due By Time'])if(fields[field]&&!/^(?:-|not assigned)$/i.test(fields[field])&&window.supportTickets.dateTimeRank({fields},field)===null)throw new Error(`${field} must contain a valid date/time.`);
+          return ticketImportRecord({fields,source_row:(row.__rowNum__??1)+1,source_sheet:'Support Tickets'},file);
+        });
         importPhase='Reading workbook';
         showImportProgress(1,'Reading Support Ticket workbook');
         supportImportMetrics(0,0,0,0,0,0,'Reading workbook and locating the RequestID header');
@@ -29671,6 +30451,98 @@
   </script>
   <script src="initiative-resequence.js?v=20261105-drag-preview-2"></script>
   <script src="milestone-dependency.js"></script>
+  <style id="delivery-action-feedback-style">
+  #delivery-action-loading[hidden]{display:none!important}
+  #delivery-action-loading{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:20px;background:rgba(15,23,42,.18);pointer-events:none}
+  #delivery-action-loading .action-loading-panel{display:flex;align-items:center;gap:16px;width:340px;max-width:100%;padding:22px;background:#fff;color:#0f172a;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 16px 48px rgba(15,23,42,.2)}
+  #delivery-action-loading .action-loading-spinner{width:28px;height:28px;flex:0 0 28px;border:3px solid #d1fae5;border-top-color:#059669;border-radius:50%;animation:delivery-action-spin .8s linear infinite}
+  #delivery-action-loading strong{display:block;font-size:14px;line-height:1.5}
+  #delivery-action-loading p{margin:3px 0 0;color:#64748b;font-size:12px;line-height:1.5}
+  #app-toast{z-index:10001!important;border-radius:8px;box-shadow:0 12px 36px rgba(15,23,42,.18);overflow:hidden}
+  @keyframes delivery-action-spin{to{transform:rotate(360deg)}}
+  @media(prefers-reduced-motion:reduce){#delivery-action-loading .action-loading-spinner{animation:none}}
+  </style>
+  <div id="delivery-action-loading" hidden role="status" aria-live="polite" aria-atomic="true">
+    <div class="action-loading-panel"><span class="action-loading-spinner" aria-hidden="true"></span><div><strong id="delivery-action-loading-title">Processing</strong><p>Please wait...</p></div></div>
+  </div>
+  <script id="delivery-action-feedback">
+  (function installDeliveryActionFeedback(){
+    if(window.deliveryActionFeedback)return;
+    const pending=new Set(),wrapped=new WeakMap();
+    const popup=document.getElementById('delivery-action-loading');
+    const title=document.getElementById('delivery-action-loading-title');
+    const notify=window.showToast;
+    let timer=0,gestureTimer=0,userAction=false,outcome=null;
+    const actionPattern=/^(save|confirm|delete|archive|duplicate|import|export|refresh|submit|bulk|login|logout|move|reorder|runReport|generateReport)/i;
+    function label(name){
+      if(/^(save|confirm|submit|bulk)/i.test(name))return 'Updating records';
+      if(/^import/i.test(name))return 'Importing records';
+      if(/^export/i.test(name))return 'Preparing export';
+      if(/^(delete|archive)/i.test(name))return 'Archiving records';
+      if(/^refresh/i.test(name))return 'Refreshing data';
+      return 'Processing';
+    }
+    function begin(name){
+      const token={};
+      if(!pending.size){
+        outcome=null;title.textContent=label(name);
+        timer=setTimeout(()=>{timer=0;if(pending.size)popup.hidden=false;},1000);
+      }
+      pending.add(token);return token;
+    }
+    function finish(token){
+      pending.delete(token);
+      if(pending.size)return;
+      clearTimeout(timer);timer=0;popup.hidden=true;
+      const result=outcome;outcome=null;
+      if(result&&typeof notify==='function')notify.apply(window,result);
+    }
+    window.showToast=function(message,type='info'){
+      if(pending.size&&['success','error'].includes(type)){
+        if(!outcome||type==='error'||outcome[1]!=='error')outcome=[message,type];
+        return;
+      }
+      return notify?.apply(this,arguments);
+    };
+    function wrap(action,name){
+      if(wrapped.has(action))return wrapped.get(action);
+      function trackedAction(...args){
+        if(!userAction&&!pending.size)return action.apply(this,args);
+        const token=begin(name);
+        try{
+          const result=action.apply(this,args);
+          if(result&&typeof result.then==='function')return Promise.resolve(result).then(value=>{finish(token);return value;},error=>{window.showToast(error?.message||'The action could not be completed.','error');finish(token);throw error;});
+          finish(token);return result;
+        }catch(error){window.showToast(error?.message||'The action could not be completed.','error');finish(token);throw error;}
+      }
+      wrapped.set(action,trackedAction);wrapped.set(trackedAction,trackedAction);
+      return trackedAction;
+    }
+    function install(){
+      for(const name of Object.getOwnPropertyNames(window)){
+        if(!actionPattern.test(name))continue;
+        const descriptor=Object.getOwnPropertyDescriptor(window,name);
+        if(descriptor?.writable&&typeof descriptor.value==='function')window[name]=wrap(descriptor.value,name);
+      }
+      for(const moduleName of ['deliveryReportBuilder','milestonePlannerTypes','supportTickets']){
+        const module=window[moduleName];if(!module)continue;
+        for(const name of Object.keys(module)){
+          if(!actionPattern.test(name)&&!['run','rename','remove','retry','print','setActive'].includes(name))continue;
+          const descriptor=Object.getOwnPropertyDescriptor(module,name);
+          if(descriptor?.writable&&typeof descriptor.value==='function')module[name]=wrap(descriptor.value,name);
+        }
+      }
+    }
+    function startGesture(){
+      userAction=true;clearTimeout(gestureTimer);
+      gestureTimer=setTimeout(()=>{userAction=false;},0);
+    }
+    for(const event of ['click','submit','change','drop','keydown'])document.addEventListener(event,startGesture,true);
+    window.deliveryActionFeedback={run(action,name='Processing'){const token=begin(name);try{return Promise.resolve(action()).catch(error=>{window.showToast(error?.message||'The action could not be completed.','error');throw error;}).finally(()=>finish(token));}catch(error){window.showToast(error?.message||'The action could not be completed.','error');finish(token);throw error;}},install};
+    install();
+    document.addEventListener('DOMContentLoaded',install,{once:true});
+  })();
+  </script>
   </body>
   </html>
   
