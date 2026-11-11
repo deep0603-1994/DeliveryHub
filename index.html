@@ -3017,7 +3017,10 @@
   window.supabase.createClient(
     SUPABASE_URL,
     SUPABASE_KEY,
-    { global: { fetch: window.deliveryOffline.fetch } }
+    { global: { fetch: (...args)=>{
+      const request=()=>window.deliveryOffline.fetch(...args);
+      return window.deliveryActionFeedback?.trackRequest?window.deliveryActionFeedback.trackRequest(request):request();
+    } } }
   );
       // --- 1. SUPABASE DATA STORE & RBAC STATE ---
 
@@ -30487,13 +30490,13 @@
     const title=document.getElementById('delivery-action-loading-title');
     const notify=window.showToast;
     let timer=0,gestureTimer=0,userAction=false,outcome=null;
-    const actionPattern=/^(save|confirm|delete|archive|duplicate|import|export|refresh|submit|bulk|login|logout|move|reorder|runReport|generateReport)/i;
+    const actionPattern=/^(save|confirm|delete|archive|duplicate|import|export|refresh|submit|bulk|login|logout|move|reorder|apply|cascade|persist|synchronize|open|load|runReport|generateReport)/i;
     function label(name){
-      if(/^(save|confirm|submit|bulk)/i.test(name))return 'Updating records';
+      if(/^(save|confirm|submit|bulk|apply|cascade|persist|synchronize)/i.test(name))return 'Updating records';
       if(/^import/i.test(name))return 'Importing records';
       if(/^export/i.test(name))return 'Preparing export';
       if(/^(delete|archive)/i.test(name))return 'Archiving records';
-      if(/^refresh/i.test(name))return 'Refreshing data';
+      if(/^(refresh|load)/i.test(name))return 'Refreshing data';
       return 'Processing';
     }
     function begin(name){
@@ -30532,6 +30535,13 @@
       wrapped.set(action,trackedAction);wrapped.set(trackedAction,trackedAction);
       return trackedAction;
     }
+    function trackRequest(request){
+      if(!userAction&&!pending.size)return request();
+      const token=begin('Updating records');
+      try{
+        return Promise.resolve(request()).then(response=>{setTimeout(()=>finish(token),0);return response;},error=>{setTimeout(()=>finish(token),0);throw error;});
+      }catch(error){setTimeout(()=>finish(token),0);throw error;}
+    }
     function install(){
       for(const name of Object.getOwnPropertyNames(window)){
         if(!actionPattern.test(name))continue;
@@ -30551,8 +30561,8 @@
       userAction=true;clearTimeout(gestureTimer);
       gestureTimer=setTimeout(()=>{userAction=false;},0);
     }
-    for(const event of ['click','submit','change','drop','keydown'])document.addEventListener(event,startGesture,true);
-    window.deliveryActionFeedback={run(action,name='Processing'){const token=begin(name);try{return Promise.resolve(action()).catch(error=>{window.showToast(error?.message||'The action could not be completed.','error');throw error;}).finally(()=>finish(token));}catch(error){window.showToast(error?.message||'The action could not be completed.','error');finish(token);throw error;}},install};
+    for(const event of ['click','submit','change','drop','keydown'])window.addEventListener(event,startGesture,true);
+    window.deliveryActionFeedback={run(action,name='Processing'){const token=begin(name);try{return Promise.resolve(action()).catch(error=>{window.showToast(error?.message||'The action could not be completed.','error');throw error;}).finally(()=>finish(token));}catch(error){window.showToast(error?.message||'The action could not be completed.','error');finish(token);throw error;}},install,trackRequest};
     install();
     document.addEventListener('DOMContentLoaded',install,{once:true});
   })();
