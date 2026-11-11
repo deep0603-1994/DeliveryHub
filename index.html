@@ -8885,11 +8885,27 @@
     let scope='All',term='',snapshot=null,queryKey='';
     const matches=new Map(),programMatches=new Set(),programPaths=new Set();
     const manualPrograms=new Map(),manualProjects=new Map(),manualTracks=new Map(),trackParents=new Set();
+    const textCache=new WeakMap(),assignmentCache=new WeakMap();
     const key=value=>String(value??'');
     const normalize=value=>String(value??'').trim().toLowerCase();
-    const includes=values=>values.filter(value=>value!==null&&value!==undefined).map(normalize).join(' ').includes(term);
+    const includes=(record,values)=>{
+      let cached=textCache.get(record);
+      if(!cached||cached.values.length!==values.length||values.some((value,index)=>value!==cached.values[index])){
+        cached={values,text:values.filter(value=>value!==null&&value!==undefined).map(normalize).join(' ')};
+        textCache.set(record,cached);
+      }
+      return cached.text.includes(term);
+    };
     const enabled=level=>scope==='All'||scope===level;
-    const assigned=record=>engineerAssignments.fields.map(field=>record[field]==null?'':engineerAssignments.display(record[field]));
+    const assigned=record=>{
+      const values=engineerAssignments.fields.map(field=>record[field]);
+      let cached=assignmentCache.get(record);
+      if(!cached||cached.users!==userMaster||cached.values.length!==values.length||values.some((value,index)=>value!==cached.values[index])){
+        cached={users:userMaster,values,labels:values.map(value=>value==null?'':engineerAssignments.display(value))};
+        assignmentCache.set(record,cached);
+      }
+      return cached.labels;
+    };
     const active=()=>currentWorkspaceView==='overview'&&Boolean(term);
     const exploring=project=>manualPrograms.get(key(project.programId))===false||manualProjects.get(key(project.id))===false;
     const projectMatch=project=>matches.get(key(project.id))?.found||manualProjects.has(key(project.id))||trackParents.has(key(project.id))||manualPrograms.get(key(project.programId))===false;
@@ -8926,13 +8942,13 @@
       const revealDescendants=term.length>1;
       document.body.classList.remove(...[...document.body.classList].filter(name=>name.startsWith('overview-progressive-level-')||name==='overview-hierarchy-stage-3'));
       for(const program of programs){
-        if(enabled('Program')&&includes([program.id,program.sequenceNo,program.name,program.owner,program.assignedTo,program.vertical,program.impactCategory,program.measurableImpact,program.businessBenefit,...assigned(program)]))programMatches.add(key(program.id));
+        if(enabled('Program')&&includes(program,[program.id,program.sequenceNo,program.name,program.owner,program.assignedTo,program.vertical,program.impactCategory,program.measurableImpact,program.businessBenefit,...assigned(program)]))programMatches.add(key(program.id));
       }
       for(const project of projects){
-        const own=enabled('Initiative')&&includes([project.id,project.sequenceNo,project.name,project.type,project.crNo,project.cr_no,project.cr_number,project.vertical,project.businessOwner,project.assignedTo,project.impactCategory,project.measurableImpact,project.businessBenefit,project.deliveryMethod,...assigned(project)]);
+        const own=enabled('Initiative')&&includes(project,[project.id,project.sequenceNo,project.name,project.type,project.crNo,project.cr_no,project.cr_number,project.vertical,project.businessOwner,project.assignedTo,project.impactCategory,project.measurableImpact,project.businessBenefit,project.deliveryMethod,...assigned(project)]);
         const tracks=new Set(),ownTracks=new Set(),milestones=new Set(),openTracks=new Set();
-        for(const track of getVisibleInitiativeTracks(project))if(enabled('Track')&&includes([track.id,track.sequenceNo,track.name,track.owner,track.assignedTo,track.description])){tracks.add(key(track.id));ownTracks.add(key(track.id));}
-        for(const milestone of getVisibleInitiativeMilestones(project))if(enabled('Milestone')&&includes([milestone.id,milestone.sequenceNo,milestone.title,milestone.actions,milestone.owner,milestone.dependency,milestone.remarks,milestone.kpi,milestone.bucket])){
+        for(const track of getVisibleInitiativeTracks(project))if(enabled('Track')&&includes(track,[track.id,track.sequenceNo,track.name,track.owner,track.assignedTo,track.description])){tracks.add(key(track.id));ownTracks.add(key(track.id));}
+        for(const milestone of getVisibleInitiativeMilestones(project))if(enabled('Milestone')&&includes(milestone,[milestone.id,milestone.sequenceNo,milestone.title,milestone.actions,milestone.owner,milestone.dependency,milestone.remarks,milestone.kpi,milestone.bucket])){
           milestones.add(key(milestone.id));
           if(milestone.trackId){tracks.add(key(milestone.trackId));openTracks.add(key(milestone.trackId));}
         }
@@ -8945,7 +8961,7 @@
       for(const program of programs)program.collapsed=manualPrograms.get(key(program.id))??!programPaths.has(key(program.id));
     }
     return {
-      prepare,capture,active,exploring,term:()=>term,scope:()=>scope,
+      prepare,capture,active,exploring,term:()=>term,scope:()=>scope,queryKey:()=>queryKey,
       explore(level,id,collapsed,projectId){
         if(!active())return;
         if(level==='Program')manualPrograms.set(key(id),collapsed);
@@ -9474,48 +9490,23 @@
         if (!toUpdate.length) return true;
 
         window._initiativeSequenceSaveLocks.add(initiativeId);
-        let originalRows = [];
-        let temporaryBase = 0;
-        let writeStarted = false;
-        const updateSequence = async (milestoneId, sequenceNo) => {
-          const { data, error } = await supabaseClient.from('milestones')
-            .update({ sequence_no: sequenceNo }).eq('id', Number(milestoneId))
-            .eq('initiative_id', initiativeId).select('id');
-          if (error) throw error;
-          if (!data?.length) throw new Error('Milestone order was not saved. Check your edit permissions and refresh the page.');
-        };
-        const updateSequences = async updates => {
-          const results = await Promise.allSettled(
-            updates.map(({ id, sequenceNo }) => updateSequence(id, sequenceNo))
-          );
-          const failed = results.find(result => result.status === 'rejected');
-          if (failed) throw failed.reason;
-        };
         try {
-          const { data: storedRows, error: readError } = await supabaseClient.from('milestones')
-            .select('id, sequence_no').eq('initiative_id', initiativeId);
-          if (readError) throw readError;
-          originalRows = toUpdate.map(milestone => {
-            const stored = (storedRows || []).find(row => Number(row.id) === Number(milestone.id));
-            if (!stored) throw new Error('A Milestone is no longer available. Refresh before reordering.');
-            return { id: Number(stored.id), sequenceNo: stored.sequence_no };
+          const expected=toUpdate.map(milestone=>{
+            const sequence=milestone.persistedSequenceNo;
+            if(sequence!==null&&(!Number.isInteger(Number(sequence))||Number(sequence)<1))throw new Error('The saved Milestone order is unavailable. Refresh before reordering.');
+            return {id:Number(milestone.id),sequence_no:sequence===null?null:Number(sequence)};
           });
-          temporaryBase = Math.max(0, ...(storedRows || []).map(row => Number(row.sequence_no) || 0),
-            ...(project.milestones || []).map(milestone => Number(milestone.sequenceNo) || 0));
-          writeStarted = true;
-          await updateSequences(toUpdate.map((milestone, index) => ({
-            id: milestone.id,
-            sequenceNo: temporaryBase + index + 1
-          })));
-          await updateSequences(toUpdate.map(milestone => ({
-            id: milestone.id,
-            sequenceNo: Number(milestone.sequenceNo)
-          })));
+          const changes=toUpdate.map(milestone=>({id:Number(milestone.id),sequence_no:Number(milestone.sequenceNo)}));
+          const {data,error}=await supabaseClient.rpc('delivery_update_milestone_batch',{p_initiative_id:initiativeId,p_expected:expected,p_changes:changes});
+          if(error)throw error;
+          const confirmed=new Map((Array.isArray(data)?data:[]).map(row=>[Number(row.id),Number(row.sequence_no)]));
+          if(confirmed.size!==changes.length||changes.some(change=>confirmed.get(change.id)!==change.sequence_no))throw new Error('Supabase did not confirm the complete Milestone order. Refresh and retry.');
+          const kpisById=new Map(kpiMilestoneRows.map((row,index)=>[Number(row.id),index]));
           for (const milestone of toUpdate) {
             const newSeq = Number(milestone.sequenceNo);
             milestone.persistedSequenceNo = newSeq;
-            const kpiIndex = kpiMilestoneRows.findIndex(row => Number(row.id) === Number(milestone.id));
-            if (kpiIndex >= 0) {
+            const kpiIndex = kpisById.get(Number(milestone.id));
+            if (kpiIndex !== undefined) {
               kpiMilestoneRows[kpiIndex] = { ...kpiMilestoneRows[kpiIndex], sequence_no: newSeq };
             }
           }
@@ -9523,23 +9514,8 @@
           return true;
         } catch (error) {
           console.error('Unable to persist milestone sequence:', error);
-          let rollbackFailed = false;
-          if (writeStarted) {
-            try {
-              await updateSequences(originalRows.map((row, index) => ({
-                id: row.id,
-                sequenceNo: temporaryBase + originalRows.length + index + 1
-              })));
-              await updateSequences(originalRows.map(row => ({
-                id: row.id,
-                sequenceNo: row.sequenceNo
-              })));
-            } catch (rollbackError) {
-              rollbackFailed = true;
-              console.error('Unable to restore milestone sequence:', rollbackError);
-            }
-          }
-          showToast(`Unable to save milestone order: ${error.message || error}${rollbackFailed ? ' Some order changes could not be restored; refresh and retry.' : ''}`, 'error');
+          const message=['PGRST202','42883'].includes(error.code)?'Apply supabase-migration-milestone-batch-update.sql in Supabase to enable fast atomic Milestone reordering.':error.message||error;
+          showToast(`Unable to save milestone order: ${message}`, 'error');
           return false;
         } finally {
           window._initiativeSequenceSaveLocks.delete(initiativeId);
@@ -10517,7 +10493,6 @@
       return;
     }
 
-    renderProjects();
     showToast('Milestone order updated.', 'success');
   }
 
@@ -11035,6 +11010,7 @@
     );
   }
   function initiativeMatchesGlobalFilters(project) {
+    if(overviewSearch.active()&&!overviewSearch.project(project))return false;
     const searchText =
       document
         .getElementById('filter-search')
@@ -21506,11 +21482,20 @@
     let overviewSearchTimer=0,flatSearchTimer=0;
     const overviewFilterRoot=document.querySelector('#main-content > main');
     const flatFilterRoot=document.getElementById('workspace-flat-page');
+    function applyOverviewSearchInput(){
+      overviewSearchTimer=0;
+      if(currentWorkspaceView!=='overview')return;
+      if(window._draggingMilestone||window._initiativeSequenceSaveLocks?.size){overviewSearchTimer=setTimeout(applyOverviewSearchInput,60);return;}
+      const value=String(document.getElementById('filter-search')?.value||'').trim().toLowerCase();
+      if(overviewSearch.queryKey()===`${overviewSearch.scope()}:${value}`)return;
+      resetDeliveryPagination();
+    }
     overviewFilterRoot?.addEventListener('input',event=>{
       const input=event.target;if(currentWorkspaceView!=='overview'||input?.id!=='filter-search')return;
       overviewSearch.capture();
       event.stopImmediatePropagation();if(overviewSearchTimer)clearTimeout(overviewSearchTimer);
-      overviewSearchTimer=setTimeout(()=>{overviewSearchTimer=0;if(currentWorkspaceView==='overview')resetDeliveryPagination();},160);
+      if(event.isComposing)return;
+      overviewSearchTimer=setTimeout(applyOverviewSearchInput,160);
     },true);
     flatFilterRoot?.addEventListener('input',event=>{
       const input=event.target;if(!['programs','initiatives','tracks','milestones'].includes(currentWorkspaceView)||input?.id!=='flat-search')return;
@@ -30337,10 +30322,12 @@
         const ids=header.querySelector('button[onclick^="toggleMilestoneTrack("]')?.getAttribute('onclick')?.match(/toggleMilestoneTrack\((\d+)\s*,\s*(\d+)\)/);
         if(ids){const card=header.parentElement;card.dataset.overviewSearchLevel='Track';card.dataset.overviewSearchId=ids[2];card.dataset.overviewSearchProject=ids[1];}
       }
-      const term=overviewSearch.term(),walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT),nodes=[];
+      const term=overviewSearch.term(),walker=document.createTreeWalker(root,NodeFilter.SHOW_ELEMENT|NodeFilter.SHOW_TEXT,{acceptNode(node){
+        if(node.nodeType===1)return node.matches('mark,script,style,svg,input,textarea,select,.hidden,[hidden],.audit-action-menu')?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_SKIP;
+        return node.nodeValue.toLowerCase().includes(term)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_SKIP;
+      }}),nodes=[];
       while(walker.nextNode()){
         const node=walker.currentNode,parent=node.parentElement;
-        if(!node.nodeValue.toLowerCase().includes(term)||parent.closest('mark,script,style,svg,input,textarea,select,.hidden,[hidden]'))continue;
         const record=parent.closest('tr[data-inline-milestone-id],[data-overview-search-level]');if(!record)continue;
         const level=record.dataset.inlineMilestoneId?'Milestone':record.dataset.overviewSearchLevel,id=record.dataset.inlineMilestoneId||record.dataset.overviewSearchId,projectId=record.dataset.inlineMilestoneProjectId||record.dataset.overviewSearchProject;
         if(overviewSearch.own(level,id,projectId))nodes.push(node);
