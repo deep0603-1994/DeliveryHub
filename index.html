@@ -22695,15 +22695,7 @@
           const wasOpen=box.classList.contains('open');
           document.querySelectorAll('.audit-action-menu.open').forEach(close);
           if(wasOpen)return;
-          box.classList.add('open');trigger.setAttribute('aria-expanded','true');
-          list.style.left='8px';list.style.top='8px';
-          list.showPopover();
-          const anchor=trigger.getBoundingClientRect(),popup=list.getBoundingClientRect();
-          const left=Math.max(8,Math.min(anchor.right-popup.width,window.innerWidth-popup.width-8));
-          const below=anchor.bottom+4;
-          const top=below+popup.height<=window.innerHeight-8?below:Math.max(8,Math.min(anchor.top-popup.height-4,window.innerHeight-popup.height-8));
-          list.style.left=left+'px';list.style.top=top+'px';
-          list.querySelector('button:not(:disabled),a')?.focus({preventScroll:true});
+          openMilestoneActionsMenu(box);
         });
         trigger.addEventListener('keydown',e=>{if(['ArrowDown','Enter',' '].includes(e.key)){e.preventDefault();if(!box.classList.contains('open'))trigger.click();else list.querySelector('button:not(:disabled),a')?.focus({preventScroll:true})}});
         list.addEventListener('keydown',e=>{const items=[...list.querySelectorAll('button:not(:disabled),a')],i=items.indexOf(document.activeElement);if(e.key==='ArrowDown'){e.preventDefault();items[(i+1)%items.length]?.focus({preventScroll:true})}if(e.key==='ArrowUp'){e.preventDefault();items[(i-1+items.length)%items.length]?.focus({preventScroll:true})}if(e.key==='Escape'){e.preventDefault();close(box);trigger.focus({preventScroll:true})}});
@@ -22711,6 +22703,30 @@
       })
     }
     function close(b){const list=b.querySelector('.audit-action-list');if(list?.matches(':popover-open'))list.hidePopover();b.classList.remove('open');const x=b.querySelector('.audit-action-trigger');if(x)x.setAttribute('aria-expanded','false')}
+    function openMilestoneActionsMenu(box,position){
+      const trigger=box.querySelector('.audit-action-trigger'),list=box.querySelector('.audit-action-list');
+      if(!trigger||!list||trigger.disabled||trigger.getAttribute('aria-disabled')==='true')return;
+      document.querySelectorAll('.audit-action-menu.open').forEach(close);
+      box.classList.add('open');trigger.setAttribute('aria-expanded','true');
+      list.style.boxSizing=position?'border-box':'';
+      list.style.left='8px';list.style.top='8px';list.showPopover();
+      const anchor=trigger.getBoundingClientRect(),popup=list.getBoundingClientRect();
+      const left=Math.max(8,Math.min(position?position.x:anchor.right-popup.width,window.innerWidth-popup.width-8));
+      const below=position?position.y:anchor.bottom+4;
+      const top=position?Math.max(8,Math.min(below,window.innerHeight-popup.height-8)):below+popup.height<=window.innerHeight-8?below:Math.max(8,Math.min(anchor.top-popup.height-4,window.innerHeight-popup.height-8));
+      list.style.left=left+'px';list.style.top=top+'px';
+      list.querySelector('button:not(:disabled),a')?.focus({preventScroll:true});
+    }
+    document.getElementById('projects-container')?.addEventListener('contextmenu',event=>{
+      if(currentWorkspaceView!=='overview'||event.pointerType==='touch')return;
+      const row=event.target.closest?.('tr[data-milestone-row="true"][data-inline-milestone-id]');
+      if(!row||!row.dataset.inlineMilestoneId||!row.dataset.inlineMilestoneProjectId)return;
+      const box=row.querySelector('.audit-action-menu');
+      const trigger=box?.querySelector('.audit-action-trigger');
+      if(!trigger||trigger.disabled||trigger.getAttribute('aria-disabled')==='true')return;
+      event.preventDefault();event.stopPropagation();
+      openMilestoneActionsMenu(box,{x:event.clientX,y:event.clientY});
+    });
     window.addEventListener('resize',()=>document.querySelectorAll('.audit-action-menu.open').forEach(close));
     document.addEventListener('scroll',event=>document.querySelectorAll('.audit-action-menu.open').forEach(box=>{if(!box.querySelector('.audit-action-list')?.contains(event.target))close(box)}),true);
     function run(){document.querySelectorAll('table').forEach(enhanceTable);enhanceActions()}
