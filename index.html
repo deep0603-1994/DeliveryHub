@@ -9990,6 +9990,7 @@
     let referenceDate = getReferenceDate(milestones[sourceIndex]);
     const trackId = milestones[sourceIndex].trackId;
     const updates = [];
+    const impactSnapshots=options.impactBelow&&!options.calculateOnly?new Map(milestones.map(milestone=>[Number(milestone.id),{...milestone}])):null;
     const kpiMilestonesById = new Map(
       options.calculateOnly ? [] : kpiMilestoneRows.map(row => [Number(row.id), row])
     );
@@ -10079,6 +10080,38 @@
     }
 
     if (options.calculateOnly) return updates;
+
+    if(impactSnapshots){
+      const aliases={start_date:'startDate',end_date:'endDate',deadline:'deadline',status:'status',deviation_days:'deviationDays',reference_offset_days:'referenceOffsetDays',days:'days',remarks:'remarks'};
+      const changed=updates.filter(({milestone,payload})=>{
+        const before=impactSnapshots.get(Number(milestone.id));
+        return Object.entries(payload).some(([field,value])=>String(before[aliases[field]]??'')!==String(value??''));
+      });
+      if(!changed.length)return true;
+      try{
+        const expected=changed.map(({milestone})=>{
+          const before=impactSnapshots.get(Number(milestone.id));
+          return {id:Number(milestone.id),start_date:before.startDate||null,end_date:before.endDate||null,deadline:before.deadline||null,completion_date:before.completionDate||null};
+        });
+        const changes=changed.map(({milestone,payload})=>({id:Number(milestone.id),...payload}));
+        const {data,error}=await supabaseClient.rpc('delivery_update_milestone_batch',{p_initiative_id:Number(project.id),p_expected:expected,p_changes:changes});
+        if(error)throw error;
+        const confirmed=new Map((Array.isArray(data)?data:[]).map(row=>[Number(row.id),row]));
+        if(confirmed.size!==changes.length||changes.some(change=>{const row=confirmed.get(change.id);return !row||Object.entries(change).some(([field,value])=>String(row[field]??'')!==String(value??''));}))throw new Error('Supabase did not confirm all affected Milestone dates. Refresh and retry.');
+        for(const {milestone} of changed)refreshMilestoneRowInPlace(project,milestone.id);
+        return true;
+      }catch(error){
+        for(const {milestone} of updates){
+          const before=impactSnapshots.get(Number(milestone.id));
+          for(const alias of Object.values(aliases))if(!Object.hasOwn(before,alias))delete milestone[alias];
+          Object.assign(milestone,before);
+          const kpi=kpiMilestonesById.get(Number(milestone.id));
+          if(kpi)for(const [field,alias]of Object.entries(aliases))kpi[field]=before[alias]??null;
+        }
+        showToast(`Unable to update following milestone dates: ${error.message}`,'error');
+        return false;
+      }
+    }
 
     const results = await Promise.allSettled(updates.map(({ milestone, payload }) =>
       supabaseClient.from('milestones')
@@ -29962,6 +29995,7 @@
       event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
       const start=Math.min(from,to),end=Math.max(from,to),selection=bulkWorkspaceSelection[target.entity];
       for(let index=start;index<=end;index++){const item=rows[index];if(authorized(item.entity,item.id,{project:item.project}))selection.add(item.id);}
+      queueMicrotask(()=>{box.checked=selection.has(target.id);});
       anchor=currentAnchor;syncOnce(view);
     },true);
     for(const name of ['renderProjects','renderFlatWorkspacePage','renderDailyTrackerPage']){const previous=window[name];if(typeof previous==='function')window[name]=function(...args){clearAnchor();return previous.apply(this,args);};}
