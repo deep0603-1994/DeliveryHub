@@ -9989,6 +9989,7 @@
 
     let referenceDate = getReferenceDate(milestones[sourceIndex]);
     const trackId = milestones[sourceIndex].trackId;
+    const restrictToTrack = !options.impactBelow || shouldRenderInitiativeAsAgile(project);
     const updates = [];
     const impactSnapshots=options.impactBelow&&!options.calculateOnly?new Map(milestones.map(milestone=>[Number(milestone.id),{...milestone}])):null;
     const kpiMilestonesById = new Map(
@@ -10002,7 +10003,7 @@
     for (let index = sourceIndex + 1; index < milestones.length; index++) {
       const milestone = milestones[index];
 
-      if (!isSameTrack(milestone.trackId, trackId)) continue;
+      if (restrictToTrack && !isSameTrack(milestone.trackId, trackId)) continue;
       if (['deleted', 'archived'].includes(String(milestone.recordStatus || '').trim().toLowerCase())) continue;
       if (isMilestoneScheduleImpactProtected(milestone)) {
         referenceDate = getReferenceDate(milestone) || referenceDate;
