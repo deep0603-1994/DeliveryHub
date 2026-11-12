@@ -30488,7 +30488,268 @@
     updateDeliveryThemeToggle();
     updateDeliveryThemeCharts();
   </script>
-  <script src="initiative-resequence.js?v=20261105-drag-preview-2"></script>
+  <script>
+  (() => {
+    const locks = window._programSequenceSaveLocks ||= new Set();
+    const pendingEchoes = new Map();
+    const animations = new Map();
+    let preview = null;
+    let previewFrame = 0;
+    let pendingPreview = null;
+    const previewStyle = document.createElement('style');
+    previewStyle.textContent = '.initiative-order-preview{overflow-anchor:none}.initiative-order-gap{box-sizing:border-box;border:2px dashed #0284c7;border-radius:8px;background:rgba(14,165,233,.08);pointer-events:auto;flex-shrink:0}.initiative-order-gap[data-saving]{border-style:solid;background:rgba(14,165,233,.12)}';
+    document.head.appendChild(previewStyle);
+    const auditFields = new Set(['sequence_no','updated_at','modified_at','modified_time','modified_by','modified_by_name','updated_by','updated_by_name']);
+    const active = row => !['deleted', 'archived'].includes(String(row.recordStatus || '').trim().toLowerCase());
+    const listFor = programId => document.getElementById(`program-initiatives-${Number(programId)}`);
+    const orderedFor = programId => getOrderedInitiativeTracks({ tracks: projects.filter(row => Number(row.programId) === Number(programId) && active(row)) });
+    function blockReason(programId) {
+      const ordered = orderedFor(programId);
+      if (!Number(programId) || !ordered.length || ordered.some(row => !canEditInitiative(row))) return 'You do not have permission to reorder these Initiatives.';
+      const reason = trackReorderBlockReason({ ...ordered[0], tracks: [] });
+      if (reason) return reason.replace(/Tracks/g, 'Initiatives').replace(/Track/g, 'Initiative');
+      const list = listFor(programId);
+      const displayed=new Set([...(list?.querySelectorAll(':scope > [data-initiative-order-id]')||[])].map(card=>Number(card.dataset.initiativeOrderId)));
+      if (!list || ordered.some(row => !displayed.has(Number(row.id)))) return 'Show all active Initiatives in this Program before reordering.';
+      if (locks.has(Number(programId))) return 'Saving Initiative order. Please wait.';
+      return '';
+    }
+    function decorate(root = document.getElementById('projects-container')) {
+      if (!root || currentWorkspaceView !== 'overview') return;
+      const orders = new Map();
+      const records=new Map(projects.map(row=>[Number(row.id),row]));
+      root.querySelectorAll('[data-initiative-order-id]').forEach(card => {
+        const id = Number(card.dataset.initiativeOrderId), programId = Number(card.dataset.initiativeOrderProgramId);
+        const record = records.get(id);
+        if (!programId || !record || !active(record) || !canEditInitiative(record)) return;
+        let controls = card.querySelector(':scope > div .initiative-reorder-controls');
+        if (!controls) {
+          const header=card.firstElementChild;
+          const heading = header?.querySelector('.delivery-card-heading');
+          if (!heading) return;
+          controls = document.createElement('span');
+          controls.className = 'initiative-reorder-controls inline-flex shrink-0 items-center mt-0.5';
+          controls.innerHTML = '<button type="button" draggable="true" data-initiative-drag-handle title="Drag to reorder Initiative" aria-label="Drag to reorder Initiative" class="p-1 text-slate-500 hover:text-slate-700 rounded focus:outline-none drag-handle"><i data-lucide="move" class="w-4 h-4"></i></button>';
+          heading.prepend(controls);
+          lucide.createIcons({ root: controls });
+        }
+        if (!orders.has(programId)) orders.set(programId, { ordered: orderedFor(programId), reason: blockReason(programId) });
+        const { reason } = orders.get(programId);
+        const drag = controls.querySelector('[data-initiative-drag-handle]');
+        drag.disabled = Boolean(reason); drag.draggable = !reason; drag.title = reason || 'Drag to reorder Initiative';
+      });
+    }
+    function capturePositions(list) {
+      const positions = new Map();
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return positions;
+      for (const card of list.children) {
+        if (!card.dataset.initiativeOrderId) continue;
+        const rect = card.getBoundingClientRect();
+        if (rect.bottom >= 0 && rect.top <= innerHeight) positions.set(card, rect.top);
+      }
+      return positions;
+    }
+    function cancelAnimations() {
+      for (const animation of animations.values()) animation.cancel();
+      animations.clear();
+    }
+    function animatePositions(positions) {
+      const changes = [];
+      for (const [card, top] of positions) {
+        if (!card.isConnected) continue;
+        const delta = top - card.getBoundingClientRect().top;
+        if (Math.abs(delta) > 1) changes.push({ card, delta });
+      }
+      for (const { card, delta } of changes) {
+        const animation = card.animate([{ transform: `translateY(${delta}px)` }, { transform: 'translateY(0)' }], { duration: 160, easing: 'cubic-bezier(.2,.8,.2,1)' });
+        animations.set(card, animation);
+        animation.onfinish = () => { if (animations.get(card) === animation) animations.delete(card); };
+      }
+    }
+    function hideGap() {
+      if (!preview?.gap.isConnected) return;
+      const positions = capturePositions(preview.list);
+      cancelAnimations();
+      preview.gap.remove();
+      preview.targetId = null;
+      animatePositions(positions);
+    }
+    function finishPreview() {
+      if (previewFrame) cancelAnimationFrame(previewFrame);
+      previewFrame = 0; pendingPreview = null;
+      if (!preview) return;
+      hideGap();
+      preview.list.classList.remove('initiative-order-preview');
+      preview.card.classList.remove('track-order-dragging');
+      preview = null;
+    }
+    function updatePreview() {
+      previewFrame = 0;
+      const next = pendingPreview; pendingPreview = null;
+      if (!preview || preview.saving || !next) return;
+      const { target, clientY } = next;
+      if (target === preview.gap) return;
+      if (!target?.isConnected || Number(target.dataset.initiativeOrderProgramId) !== preview.programId) { hideGap(); return; }
+      if (target === preview.card) { hideGap(); return; }
+      const rect = target.getBoundingClientRect();
+      const after = clientY > rect.top + rect.height / 2;
+      const targetId = Number(target.dataset.initiativeOrderId);
+      if (preview.targetId === targetId && preview.after === after) return;
+      const cards = [...preview.list.children].filter(card => card.dataset.initiativeOrderId);
+      const sourceIndex = cards.indexOf(preview.card), targetIndex = cards.indexOf(target);
+      if (targetIndex + (after ? 1 : 0) === sourceIndex || targetIndex + (after ? 1 : 0) === sourceIndex + 1) { hideGap(); return; }
+      const positions = capturePositions(preview.list);
+      cancelAnimations();
+      preview.list.insertBefore(preview.gap, after ? target.nextSibling : target);
+      preview.targetId = targetId; preview.after = after;
+      animatePositions(positions);
+    }
+    function clearDrag() {
+      window._draggingInitiative = null;
+      if (!preview?.saving) finishPreview();
+      document.querySelectorAll('[data-initiative-order-id].track-order-dragging,[data-initiative-order-id].track-order-drop-before,[data-initiative-order-id].track-order-drop-after')
+        .forEach(card => card.classList.remove('track-order-dragging', 'track-order-drop-before', 'track-order-drop-after'));
+    }
+    async function move(programId, sourceId, targetId, afterTarget, origin) {
+      if (!targetId || Number(sourceId) === Number(targetId)) return false;
+      const reason = blockReason(programId);
+      if (reason) { showToast(reason, 'info'); return false; }
+      const previous = orderedFor(programId), ordered = previous.slice();
+      const sourceIndex = ordered.findIndex(row => Number(row.id) === Number(sourceId));
+      const targetIndex = ordered.findIndex(row => Number(row.id) === Number(targetId));
+      if (sourceIndex < 0 || targetIndex < 0) return false;
+      const [source] = ordered.splice(sourceIndex, 1);
+      const adjustedTarget = ordered.findIndex(row => Number(row.id) === Number(targetId));
+      ordered.splice(adjustedTarget + (afterTarget ? 1 : 0), 0, source);
+      if (ordered.every((row, index) => row === previous[index])) return false;
+      const rawSequence = row => Object.hasOwn(row, 'persistedSequenceNo') ? row.persistedSequenceNo : row.sequenceNo;
+      const expected = previous.map(row => ({ id: Number(row.id), sequence_no: rawSequence(row) ?? null }));
+      const changes = ordered.flatMap((row, index) => Number(rawSequence(row)) === index + 1 ? [] : [{ id: Number(row.id), sequence_no: index + 1 }]);
+      let view = null;
+      const highWater=Math.max(previous.length,...kpiInitiativeRows.filter(row=>Number(row.program_id)===Number(programId)).map(row=>Number(row.sequence_no)||0));
+      const temporary=new Map(changes.slice().sort((first,second)=>first.id-second.id).map((row,index)=>[row.id,highWater+index+1]));
+      for(const [id,echo] of pendingEchoes)if(echo.until<Date.now())pendingEchoes.delete(id);
+      changes.forEach(row=>{
+        const baseline=kpiInitiativeRows.find(item=>Number(item.id)===row.id);
+        if(baseline)pendingEchoes.set(row.id,{programId:Number(programId),baseline:{...baseline},finalSequence:row.sequence_no,positions:new Set([row.sequence_no,temporary.get(row.id)]),until:Date.now()+15000});
+      });
+      locks.add(Number(programId)); decorate(listFor(programId));
+      try {
+        const result = await supabaseClient.rpc('delivery_resequence_initiatives', { p_program_id: Number(programId), p_expected: expected, p_changes: changes });
+        if (result.error) throw new Error(['PGRST202', '42883'].includes(result.error.code) ? 'Run supabase-migration-initiative-resequence.sql in Supabase before reordering.' : result.error.message);
+        const confirmed = new Map((Array.isArray(result.data) ? result.data : []).map(row => [Number(row.id), row]));
+        if (!Array.isArray(result.data)||result.data.length!==changes.length||confirmed.size !== changes.length || changes.some(row => Number(confirmed.get(row.id)?.program_id) !== Number(programId) || Number(confirmed.get(row.id)?.sequence_no) !== row.sequence_no)) throw new Error('Supabase did not confirm the Initiative order. Refresh before retrying.');
+        const records = new Map(projects.map(row => [Number(row.id), row]));
+        changes.forEach(row => {
+          const record = records.get(row.id);
+          if (record) { record.sequenceNo = row.sequence_no; record.persistedSequenceNo = row.sequence_no; }
+          const kpi = kpiInitiativeRows.find(item => Number(item.id) === row.id);
+          if (kpi) kpi.sequence_no = row.sequence_no;
+        });
+        const list = listFor(programId);
+        if (list) {
+          view = captureDeliveryViewState(origin, { layoutOnly: true });
+          view.anchor = null; view.neighbors = []; view.milestoneId = null;
+          const cards = new Map([...list.children].map(card => [Number(card.dataset.initiativeOrderId), card]));
+          const positions = capturePositions(list);
+          cancelAnimations();
+          if (preview?.programId === Number(programId)) {
+            preview.gap.remove();
+            preview.list.classList.remove('initiative-order-preview');
+          }
+          const fragment = document.createDocumentFragment();
+          ordered.forEach((row, index) => {
+            const card = cards.get(Number(row.id));
+            if (!card) return;
+            const title = card.querySelector(':scope > div .delivery-card-heading h2');
+            if (title) title.textContent = `Initiative ${index + 1}. ${row.name}`;
+            fragment.appendChild(card);
+          });
+          list.appendChild(fragment);
+          animatePositions(positions);
+        }
+        showToast('Initiative order saved.', 'success');
+        return true;
+      } catch (error) {
+        changes.forEach(row=>pendingEchoes.delete(row.id));
+        showToast(`Unable to save Initiative order: ${error.message}`, 'error');
+        return false;
+      } finally {
+        if (preview?.programId === Number(programId)) { preview.saving = false; finishPreview(); }
+        locks.delete(Number(programId)); decorate(listFor(programId));
+        if (view) restoreDeliveryViewState(view, { restoreFocus: false, defer: false });
+      }
+    }
+    document.addEventListener('dragstart', event => {
+      const handle = event.target.closest?.('[data-initiative-drag-handle]');
+      if (!handle) return;
+      const card = handle.closest('[data-initiative-order-id]'), programId = Number(card?.dataset.initiativeOrderProgramId);
+      const reason = blockReason(programId);
+      if (reason || handle.disabled) { event.preventDefault(); return; }
+      event.stopPropagation();
+      finishPreview();
+      const list = listFor(programId), gap = document.createElement('div');
+      gap.className = 'initiative-order-gap';
+      gap.dataset.initiativeDropGap = 'true';
+      gap.setAttribute('aria-hidden', 'true');
+      gap.style.height = `${Math.min(card.getBoundingClientRect().height, 180)}px`;
+      preview = { list, card, gap, programId, targetId: null, after: false, saving: false };
+      list.classList.add('initiative-order-preview');
+      window._draggingInitiative = { programId, id: Number(card.dataset.initiativeOrderId), origin: handle };
+      event.dataTransfer?.setData('text/plain', `initiative:${programId}:${card.dataset.initiativeOrderId}`);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+      card.classList.add('track-order-dragging');
+    }, true);
+    document.addEventListener('dragover', event => {
+      const dragging = window._draggingInitiative, target = event.target.closest?.('[data-initiative-order-id],[data-initiative-drop-gap]');
+      if (!dragging || !target) return;
+      event.preventDefault(); event.stopPropagation();
+      const sameProgram = target === preview?.gap || Number(target.dataset.initiativeOrderProgramId) === dragging.programId;
+      pendingPreview = { target, clientY: event.clientY };
+      if (!previewFrame) previewFrame = requestAnimationFrame(() => {
+        const next = pendingPreview;
+        updatePreview();
+        if (next && window._draggingInitiative && (next.target === preview?.gap || Number(next.target.dataset.initiativeOrderProgramId) === dragging.programId)) autoScrollMilestoneDropContainer({ clientY: next.clientY }, next.target);
+      });
+      if (event.dataTransfer) event.dataTransfer.dropEffect = sameProgram ? 'move' : 'none';
+    }, true);
+    document.addEventListener('drop', event => {
+      const dragging = window._draggingInitiative, target = event.target.closest?.('[data-initiative-order-id],[data-initiative-drop-gap]');
+      if (!dragging || !target) return;
+      event.preventDefault(); event.stopPropagation();
+      if (previewFrame) cancelAnimationFrame(previewFrame);
+      updatePreview();
+      const sameProgram = target === preview?.gap || Number(target.dataset.initiativeOrderProgramId) === dragging.programId;
+      if (!sameProgram) { clearDrag(); return showToast('Initiatives can only be reordered within the same Program.', 'info'); }
+      if (!preview?.targetId) { clearDrag(); return; }
+      const targetId = preview.targetId, after = preview.after;
+      preview.saving = true; preview.gap.dataset.saving = 'true';
+      window._draggingInitiative = null;
+      move(dragging.programId, dragging.id, targetId, after, dragging.origin).finally(() => {
+        if (preview?.programId === dragging.programId) { preview.saving = false; finishPreview(); }
+      });
+    }, true);
+    document.addEventListener('dragend', clearDrag, true);
+    function acceptRealtime(payload){
+      if(payload?.table!=='initiatives'||payload.eventType!=='UPDATE')return false;
+      const row=payload.new,echo=pendingEchoes.get(Number(row?.id));
+      if(!echo)return false;
+      if(echo.until<Date.now()){pendingEchoes.delete(Number(row.id));return false;}
+      const accepted=Number(row.program_id)===echo.programId&&echo.positions.has(Number(row.sequence_no))&&Object.keys(row).every(field=>auditFields.has(field)||JSON.stringify(row[field])===JSON.stringify(echo.baseline[field]));
+      if(accepted&&Number(row.sequence_no)===echo.finalSequence){
+        const kpi=kpiInitiativeRows.find(item=>Number(item.id)===Number(row.id));
+        if(kpi)for(const field of auditFields)if(field!=='sequence_no'&&Object.hasOwn(row,field))kpi[field]=row[field];
+        pendingEchoes.delete(Number(row.id));
+      }
+      return accepted;
+    }
+    const render = window.renderProjects;
+    window.renderProjects = function(...args) { const result = render.apply(this, args); decorate(); return result; };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => decorate(), { once: true });
+    else decorate();
+    window.deliveryInitiativeReorder = { move, decorate, clearDrag, orderedFor, blockReason, acceptRealtime };
+  })();
+  </script>
   <script src="milestone-dependency.js"></script>
   <style id="delivery-action-feedback-style">
   #delivery-action-loading[hidden]{display:none!important}
