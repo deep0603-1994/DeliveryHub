@@ -8593,7 +8593,7 @@
           },
           initiative: {
             done: ['bg-emerald-50 rounded-2xl border-2 border-emerald-300 shadow-sm overflow-hidden','bg-gradient-to-r from-emerald-500 to-green-600 text-white'],
-            pending: ['bg-amber-50 rounded-2xl border-2 border-orange-300 shadow-sm overflow-hidden','bg-gradient-to-r from-amber-500 to-orange-600 text-white'],
+            pending: ['bg-red-50 rounded-2xl border-2 border-red-300 shadow-sm overflow-hidden','bg-gradient-to-r from-red-500 to-rose-600 text-white'],
             wip: ['bg-amber-50 rounded-2xl border-2 border-orange-300 shadow-sm overflow-hidden','bg-gradient-to-r from-amber-500 to-orange-600 text-white']
           },
           track: {
@@ -8625,7 +8625,7 @@
               ? ['border-sky-200 border-l-sky-500 bg-white','bg-sky-50 border-sky-200']
               : ['hover:bg-slate-50/80','',''];
         const themeState = level === 'initiative'
-          ? state === 'done' ? 'done' : ['', 'pending', 'in-queue', 'tbd'].includes(state) ? 'pending' : 'wip'
+          ? state === 'done' ? 'done' : state === 'pending' ? 'pending' : 'wip'
           : state;
         const selected = themes[level]?.[themeState] || fallback;
         return { card:selected[0], header:selected[1], row:selected[0] };
