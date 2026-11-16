@@ -764,7 +764,7 @@
             <input
     type="text"
     id="filter-search"
-    oninput="resetDeliveryPagination()" placeholder="Search project, CR, owner, vertical, impact, milestone..." 
+    oninput="queueOverviewSearch()" placeholder="Search project, CR, owner, vertical, impact, milestone..." 
               class="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
           </div>
           <div class="flex flex-wrap gap-2">
@@ -3851,6 +3851,19 @@
     return latest;
   }
 
+  function calculateInitiativeActualEndDate(initiative){
+    const completed=[];
+    for(const milestone of initiative.milestones||[]){
+      if(['deleted','archived'].includes(String(milestone.recordStatus||'').trim().toLowerCase()))continue;
+      if(getPersistedMilestoneStatus(milestone)==='On-Hold')continue;
+      const status=getEffectiveMilestoneStatus(milestone);
+      if(status==='On-Hold')continue;
+      if(status!=='Done')return null;
+      completed.push(milestone);
+    }
+    return completed.length?calculateHierarchyActualEndDate(completed,'endDate'):undefined;
+  }
+
   async function synchronizeHierarchyActualEndDates(initiatives=projects){
     async function persist(table,record,date){
       if(date===undefined||(record.actualEndDate||null)===date)return;
@@ -3861,7 +3874,7 @@
       document.querySelectorAll(`[data-hierarchy-actual-end-entity="${table}"][data-hierarchy-actual-end-id="${Number(record.id)}"]`).forEach(element=>{element.textContent=formatDate(record.actualEndDate);});
     }
     const active=(initiatives||[]).filter(initiative=>!['deleted','archived'].includes(String(initiative.recordStatus||'').trim().toLowerCase()));
-    await Promise.all(active.map(initiative=>persist('initiatives',initiative,calculateHierarchyActualEndDate(initiative.milestones,'completionDate'))));
+    await Promise.all(active.map(initiative=>persist('initiatives',initiative,calculateInitiativeActualEndDate(initiative))));
     const affected=new Set(active.map(initiative=>Number(initiative.programId)));
     await Promise.all(programs.filter(program=>affected.has(Number(program.id))&&!['deleted','archived'].includes(String(program.recordStatus||'').trim().toLowerCase())).map(program=>persist('programs',program,calculateHierarchyActualEndDate(projects.filter(initiative=>Number(initiative.programId)===Number(program.id)),'actualEndDate'))));
   }
@@ -4097,10 +4110,16 @@
         if (normalizeMilestoneStatus(initiative.status) === 'On-Hold') return 'On-Hold';
         const status = evaluateProjectStatus(initiative.name, initiative.revisedStartDate || initiative.startDate, getEffectiveEndDate(initiative.targetEndDate, initiative.revisedEndDate), initiative.actualEndDate);
         if (!status) return status;
-        const hasPendingAction = (initiative.milestones || []).some(milestone =>
-          !['deleted', 'archived'].includes(String(milestone.recordStatus || milestone.record_status || 'active').trim().toLowerCase()) &&
-          getEffectiveMilestoneStatus(milestone) === 'Pending'
-        );
+        const today = localToday();
+        const hasPendingAction = (initiative.milestones || []).some(milestone => {
+          if (['deleted', 'archived'].includes(String(milestone.recordStatus || milestone.record_status || 'active').trim().toLowerCase())) return false;
+          if (getEffectiveMilestoneStatus(milestone) === 'Pending') return true;
+          if (hasMilestoneCompletion(milestone)) return false;
+          const endDate = milestone.endDate || milestone.end_date || '';
+          const deadline = milestone.deadline || '';
+          return (/^\d{4}-\d{2}-\d{2}$/.test(endDate) && endDate < today) ||
+            (/^\d{4}-\d{2}-\d{2}$/.test(deadline) && deadline < today);
+        });
         if (hasPendingAction) return 'Pending';
         if (status !== 'Pending') return status;
         const startDate = initiative.revisedStartDate || initiative.startDate || '';
@@ -9486,7 +9505,7 @@
         const project = projects.find(p => Number(p.id) === Number(initiativeId));
         if (!project) return true;
 
-        const toUpdate = (project.milestones || []).filter(m => Number(m.id) > 0 && Number(m.recordStatus) !== 0).filter(m => Number(m.persistedSequenceNo || 0) !== Number(m.sequenceNo || 0));
+        const toUpdate = (project.milestones || []).filter(m => Number(m.id) > 0 && !['deleted','archived'].includes(String(m.recordStatus || 'active').trim().toLowerCase())).filter(m => Number(m.persistedSequenceNo || 0) !== Number(m.sequenceNo || 0));
         if (!toUpdate.length) return true;
 
         window._initiativeSequenceSaveLocks.add(initiativeId);
@@ -10638,7 +10657,24 @@
     `;
   }
 
+  let overviewSearchInputTimer=0;
+  function queueOverviewSearch() {
+    clearTimeout(overviewSearchInputTimer);
+    const query=document.getElementById('filter-search')?.value||'';
+    if(!query.trim()){
+      overviewSearchInputTimer=0;
+      resetDeliveryPagination();
+      return;
+    }
+    overviewSearchInputTimer=setTimeout(()=>{
+      overviewSearchInputTimer=0;
+      if(document.getElementById('filter-search')?.value===query)resetDeliveryPagination();
+    },250);
+  }
+
   function resetDeliveryPagination() {
+    clearTimeout(overviewSearchInputTimer);
+    overviewSearchInputTimer=0;
     deliveryCurrentPage = 1;
     renderProjects();
   }
@@ -11318,10 +11354,14 @@
       trackerFilterMatches('filter-impact',impactSelections.values(program.impactCategory),impactFilter) ||
       childMatches;
 
+    const matchesRecordStatus =
+      matchesRecordStatusFilter(program.recordStatus);
+
     return (
       (programMatchesSearch || childMatches) &&
       matchesVertical &&
-      matchesImpact
+      matchesImpact &&
+      matchesRecordStatus
     );
   }
 
@@ -21468,6 +21508,8 @@
     let observedBar=null;
     const resizeObserver=null; // Disabled: observing the filter bar itself caused expand/collapse feedback loops.
     let refreshFrame=0;
+    let barStateUpdateFrame=0;
+    const barStateCache=new WeakMap();
     function scheduleRefresh(){if(refreshFrame)cancelAnimationFrame(refreshFrame);refreshFrame=requestAnimationFrame(()=>{refreshFrame=0;enhanceCurrentPage();});}
     function currentPageRoot(key=pageKey()){
       if(key==='overview')return document.querySelector('#main-content > main');
@@ -21546,7 +21588,17 @@
       else if(key==='todo'){renderTodoListPage();}
       scheduleRefresh();
     };
-    window.toggleCurrentFilterBar=function(){const key=pageKey(),bar=findBar(key);if(!bar)return;expandedState[key]=!expandedState[key];sessionStorage.setItem('deliveryHubFilterBarExpanded',JSON.stringify(expandedState));applyBarState(bar,key);};
+    window.toggleCurrentFilterBar=function(event){
+      if(event) {
+        event.stopPropagation?.();
+        event.preventDefault?.();
+      }
+      const key=pageKey(),bar=findBar(key);
+      if(!bar)return;
+      expandedState[key]=!expandedState[key];
+      sessionStorage.setItem('deliveryHubFilterBarExpanded',JSON.stringify(expandedState));
+      applyBarState(bar,key);
+    };
     function findBar(key){
       if(key==='overview')return currentPageRoot(key)?.querySelector('#filter-search')?.closest('.bg-white');
       if(key.startsWith('flat:'))return currentPageRoot(key)?.querySelector('#flat-search')?.closest('.bg-white');
@@ -21554,10 +21606,41 @@
       if(key==='analytics')return document.getElementById('analytics-filters')?.closest('.bg-white');
       if(key==='todo')return document.getElementById('todo-search')?.closest('.bg-white');
     }
-    function applyBarState(bar,key){const controls=[...bar.querySelectorAll('input,select,button')].filter(x=>!x.closest('.delivery-filter-actions'));const firstTop=controls[0]?.offsetTop??0;const overflow=controls.some(x=>x.offsetTop>firstTop+4);const toggle=bar.querySelector('.delivery-filter-toggle');if(toggle)toggle.classList.toggle('hidden',!overflow&&!expandedState[key]);bar.classList.toggle('is-collapsed',overflow&&!expandedState[key]);if(toggle){toggle.setAttribute('aria-expanded',String(Boolean(expandedState[key])));toggle.innerHTML=`<i data-lucide="chevron-${expandedState[key]?'up':'down'}" class="w-4 h-4"></i>${expandedState[key]?'Collapse Filters':'Filters'}`;}const count=activeCount(key),summary=bar.querySelector('.delivery-active-filter-count'),reset=bar.querySelector('.delivery-filter-reset');if(summary)summary.textContent=count?`${count} filter${count===1?'':'s'} active`:'';if(reset)reset.disabled=count===0;}
-    function enhanceBar(key){const bar=findBar(key);if(!bar||bar.dataset.sharedOverviewFilter==='true')return;bar.dataset.deliveryFilterPage=key.startsWith('flat:')?'flat':key;bar.dataset.deliveryControlPage=key;bar.classList.add('delivery-filter-bar');if(!bar.querySelector('.delivery-filter-actions')){const actions=document.createElement('div');actions.className='delivery-filter-actions flex items-center gap-2';actions.innerHTML=`<button type="button" onclick="resetCurrentPageFilters()" class="delivery-filter-reset px-3 py-2 text-xs font-semibold rounded-lg border bg-white"><i data-lucide="rotate-ccw" class="w-4 h-4"></i>Reset Filters</button><button type="button" onclick="toggleCurrentFilterBar()" aria-controls="${bar.id||key+'-filters'}" class="delivery-filter-toggle px-3 py-2 text-xs font-semibold rounded-lg border bg-white"></button><button type="button" onclick="toggleCurrentFilterBar()" class="delivery-active-filter-count px-2 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700"></button>`;bar.appendChild(actions);}
-      [...bar.querySelectorAll('select')].forEach(select=>{select.title=select.selectedOptions?.[0]?.textContent?.trim()||select.title;});
-      if(observedBar!==bar){if(observedBar)resizeObserver?.unobserve(observedBar);observedBar=bar;resizeObserver?.observe(bar);}requestAnimationFrame(()=>applyBarState(bar,key));
+    function applyBarState(bar,key){
+      const cached=barStateCache.get(bar);
+      const controls=[...bar.querySelectorAll('input,select,button')].filter(x=>!x.closest('.delivery-filter-actions'));
+      const firstTop=controls[0]?.offsetTop??0;
+      const overflow=controls.some(x=>x.offsetTop>firstTop+4);
+      const expanded=Boolean(expandedState[key]);
+      const state={overflow,expanded};
+      if(cached && cached.overflow===state.overflow && cached.expanded===state.expanded) return;
+      barStateCache.set(bar,state);
+      const toggle=bar.querySelector('.delivery-filter-toggle');
+      if(toggle) {
+        toggle.classList.toggle('hidden',!overflow&&!expanded);
+        toggle.setAttribute('aria-expanded',String(expanded));
+        toggle.innerHTML=`<i data-lucide="chevron-${expanded?'up':'down'}" class="w-4 h-4"></i>${expanded?'Collapse Filters':'Filters'}`;
+      }
+      bar.classList.toggle('is-collapsed',overflow&&!expanded);
+      const count=activeCount(key),summary=bar.querySelector('.delivery-active-filter-count'),reset=bar.querySelector('.delivery-filter-reset');
+      if(summary)summary.textContent=count?`${count} filter${count===1?'':'s'} active`:'';
+      if(reset)reset.disabled=count===0;
+    }
+    function enhanceBar(key){
+      const bar=findBar(key);
+      if(!bar||bar.dataset.sharedOverviewFilter==='true')return;
+      bar.dataset.deliveryFilterPage=key.startsWith('flat:')?'flat':key;
+      bar.dataset.deliveryControlPage=key;
+      bar.classList.add('delivery-filter-bar');
+      if(!bar.querySelector('.delivery-filter-actions')){
+        const actions=document.createElement('div');
+        actions.className='delivery-filter-actions flex items-center gap-2';
+        actions.innerHTML=`<button type="button" onclick="resetCurrentPageFilters()" class="delivery-filter-reset px-3 py-2 text-xs font-semibold rounded-lg border bg-white"><i data-lucide="rotate-ccw" class="w-4 h-4"></i>Reset Filters</button><button type="button" onclick="toggleCurrentFilterBar(event)" aria-controls="${bar.id||key+'-filters'}" class="delivery-filter-toggle px-3 py-2 text-xs font-semibold rounded-lg border bg-white"></button><button type="button" onclick="toggleCurrentFilterBar(event)" class="delivery-active-filter-count px-2 py-1 text-xs font-semibold rounded-full bg-indigo-50 text-indigo-700"></button>`;
+        bar.appendChild(actions);
+      }      [...bar.querySelectorAll('select')].forEach(select=>{select.title=select.selectedOptions?.[0]?.textContent?.trim()||select.title;});
+      if(observedBar!==bar){if(observedBar)resizeObserver?.unobserve(observedBar);observedBar=bar;resizeObserver?.observe(bar);}
+      if(barStateUpdateFrame)cancelAnimationFrame(barStateUpdateFrame);
+      barStateUpdateFrame=requestAnimationFrame(()=>{barStateUpdateFrame=0;applyBarState(bar,key);});
     }
     function enhanceCurrentPage(){installFlatToggle();enhanceBar(pageKey());if(window.lucide)lucide.createIcons();}
     const priorShow=window.showWorkspaceView;window.showWorkspaceView=function(){const result=priorShow.apply(this,arguments);requestAnimationFrame(enhanceCurrentPage);return result;};
@@ -22335,7 +22418,7 @@
     function allControlHosts(bar){const controls=[...bar.querySelectorAll('input,select')].filter(el=>!el.closest('.unified-filter-primary'));return [...new Set(controls.map(el=>directHost(el,bar)))];}
     function setAccessible(node,enabled){node.toggleAttribute('inert',!enabled);node.setAttribute('aria-hidden',String(!enabled));node.querySelectorAll('input,select,button,a,[tabindex]').forEach(el=>{if(!enabled){if(!el.hasAttribute('data-unified-tabindex'))el.setAttribute('data-unified-tabindex',el.getAttribute('tabindex')??'');el.setAttribute('tabindex','-1');}else if(el.hasAttribute('data-unified-tabindex')){const old=el.getAttribute('data-unified-tabindex');old===''?el.removeAttribute('tabindex'):el.setAttribute('tabindex',old);el.removeAttribute('data-unified-tabindex');}});}
     function activeCount(key){return Object.entries(defaults[key]||{}).reduce((n,[id,def])=>{const el=document.getElementById(id);if(!el)return n;const value=String(el.value??'');if(/search/i.test(id))return n;return n+(value!==String(def)?1:0);},0);}
-    function update(bar,key){const expanded=Boolean(state[key]);bar.classList.toggle('is-collapsed',!expanded);bar.classList.toggle('is-expanded',expanded);const secondary=bar.querySelector('.unified-filter-secondary');if(secondary)setAccessible(secondary,expanded);const toggle=bar.querySelector('.unified-filter-toggle');if(toggle){toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',expanded?'Collapse filter bar':'Expand filter bar');toggle.title=expanded?'Hide additional filters':'Show all filters';toggle.innerHTML='<i data-lucide="chevron-'+(expanded?'up':'down')+'" class="w-4 h-4" aria-hidden="true"></i>';}const count=activeCount(key),indicator=bar.querySelector('.unified-filter-count');if(indicator){indicator.textContent=count+(count===1?' filter active':' filters active');indicator.classList.toggle('is-active',!expanded&&count>0);indicator.tabIndex=!expanded&&count>0?0:-1;}if(window.lucide)lucide.createIcons();}
+    function update(bar,key){if(key==='overview'&&bar.dataset.deliveryOverviewFilterStructure==='v1')return;const expanded=Boolean(state[key]);bar.classList.toggle('is-collapsed',!expanded);bar.classList.toggle('is-expanded',expanded);const secondary=bar.querySelector('.unified-filter-secondary');if(secondary)setAccessible(secondary,expanded);const toggle=bar.querySelector('.unified-filter-toggle');if(toggle){toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',expanded?'Collapse filter bar':'Expand filter bar');toggle.title=expanded?'Hide additional filters':'Show all filters';toggle.innerHTML='<i data-lucide="chevron-'+(expanded?'up':'down')+'" class="w-4 h-4" aria-hidden="true"></i>';}const count=activeCount(key),indicator=bar.querySelector('.unified-filter-count');if(indicator){indicator.textContent=count+(count===1?' filter active':' filters active');indicator.classList.toggle('is-active',!expanded&&count>0);indicator.tabIndex=!expanded&&count>0?0:-1;}if(window.lucide)lucide.createIcons();}
     function resetPage(key){state[key]=false;sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));if(key==='overview'){Object.entries(defaults.overview).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v;});activeKpiFilter=null;deliveryCurrentPage=1;renderProjects();}else if(key==='flat'){Object.entries(defaults.flat).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v;});flatListCurrentPage=1;activeFlatKpiFilter=null;renderFlatWorkspacePage();}else if(key==='daily'){if(typeof resetProjectTrackerFilters==='function')resetProjectTrackerFilters();else renderDailyTrackerPage();}else if(key==='analytics'){if(typeof resetAnalyticsFilters==='function')resetAnalyticsFilters();}else if(key==='todo'){const el=document.getElementById('todo-search');if(el)el.value='';renderTodoListPage();}requestAnimationFrame(enhanceCurrent);}
     function choosePrimary(key,controls){const search=controls.find(el=>/search/i.test(el.id||''));const preferred={overview:['filter-status','filter-record-status'],flat:['flat-status-filter','flat-record-status'],daily:['daily-status-filter','daily-owner-filter'],analytics:['analytics-status','analytics-record-status'],todo:[]}[key]||[];const important=preferred.map(id=>document.getElementById(id)).find(Boolean);return{search,important};}
     function enhanceBar(bar,key){if(!bar)return;bar.dataset.deliveryFilterPage=key;bar.classList.add('unified-filter-container');bar.classList.remove('delivery-filter-bar','uniformStandardFilterPositioning','strict-one-row','compact-collapsed-width','filter-collapse-ready');bar.style.removeProperty('display');bar.style.removeProperty('height');bar.style.removeProperty('max-height');bar.querySelectorAll('.delivery-filter-actions,.analytics-parameter-header').forEach(node=>node.remove());let primary=bar.querySelector(':scope > .unified-filter-primary'),secondary=bar.querySelector(':scope > .unified-filter-secondary');if(!primary){primary=document.createElement('div');primary.className='unified-filter-primary';secondary=document.createElement('div');secondary.className='unified-filter-secondary';const controls=[...bar.querySelectorAll('input,select')].filter(el=>!el.closest('.unified-filter-primary,.unified-filter-secondary'));const hosts=[...new Set(controls.map(el=>directHost(el,bar)))];const selected=choosePrimary(key,controls);const searchHost=selected.search?directHost(selected.search,bar):null;const importantHost=selected.important?directHost(selected.important,bar):null;if(searchHost){searchHost.classList.add('unified-search-host');primary.appendChild(searchHost);}if(importantHost&&importantHost!==searchHost){importantHost.classList.add('unified-primary-filter-host');primary.appendChild(importantHost);}const spacer=document.createElement('span');spacer.className='unified-filter-spacer';primary.appendChild(spacer);const indicator=document.createElement('button');indicator.type='button';indicator.className='unified-filter-count';indicator.onclick=()=>{state[key]=true;sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));update(bar,key);};indicator.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();indicator.click();}};primary.appendChild(indicator);let reset=[...bar.querySelectorAll('button')].find(button=>/reset filters/i.test(button.textContent||'')||button.classList.contains('delivery-filter-reset')||button.classList.contains('analytics-parameter-reset'));if(!reset){reset=document.createElement('button');reset.type='button';reset.innerHTML='<i data-lucide="rotate-ccw" class="w-4 h-4"></i><span>Reset Filters</span>';}reset.className='unified-filter-reset';reset.onclick=()=>resetPage(key);primary.appendChild(reset);let toggle=[...bar.querySelectorAll('button')].find(button=>button.classList.contains('delivery-filter-toggle')||button.classList.contains('analytics-parameter-toggle'));if(!toggle){toggle=document.createElement('button');toggle.type='button';}toggle.className='unified-filter-toggle';toggle.onclick=()=>{state[key]=!Boolean(state[key]);sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));update(bar,key);};primary.appendChild(toggle);hosts.forEach(host=>{if(host!==searchHost&&host!==importantHost&&!host.contains(reset)&&!host.contains(toggle))secondary.appendChild(host);});bar.replaceChildren(primary,secondary);initialized.add(bar);}else{allControlHosts(bar).forEach(host=>{if(!host.closest('.unified-filter-primary,.unified-filter-secondary'))secondary.appendChild(host);});}update(bar,key);}
@@ -26240,6 +26323,11 @@
   .report-preview table{border-collapse:collapse;min-width:100%;font-size:.75rem}
   .report-preview th,.report-preview td{padding:.6rem;border-bottom:1px solid #e2e8f0;border-right:1px solid #e2e8f0;white-space:pre-line;min-width:130px;max-width:280px;overflow-wrap:anywhere;vertical-align:top}
   .report-preview th{position:sticky;top:0;background:#f0fdfa;text-align:left;z-index:1}
+  .report-pivot-tools{display:flex;gap:.5rem;align-items:center;padding:.6rem;flex-wrap:wrap}
+  .report-pivot-subtotal{font-weight:700;background:rgba(13,148,136,.07)}
+  .report-pivot-total{font-weight:700;border-top:2px solid #94a3b8}
+  #delivery-reports .report-pivot-toggle{padding:.1rem .35rem;margin-right:.35rem;min-width:1.6rem}
+  .report-chart{position:relative;height:400px;min-width:280px;padding:1rem}
   #report-template-label[hidden]{display:none!important}
   .report-preview-pager{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:.75rem;padding:.6rem .75rem;background:#f8fafc;border-top:1px solid #cbd5e1;font-size:.72rem;color:#475569}
   .report-preview-pager>div{display:flex;align-items:center;gap:.5rem}.report-preview-pager button{padding:.3rem .55rem!important}.report-preview-pager button:disabled{opacity:.45;cursor:not-allowed}
@@ -26331,7 +26419,7 @@
       const fields=entityFieldCatalog(source),primary={program:'program.program_name',initiative:'initiative.title',track:'track.track_name',milestone:'milestone.actions',support_ticket:'ticket.RequestID'}[source],idField={program:'program.id',initiative:'initiative.id',track:'track.id',milestone:'milestone.id',support_ticket:'ticket.RequestID'}[source];
       return {version:4,reportType,dataSource:source,primarySource:source,joinedSources:[],relationships:[],groupId:'',rows:fields.some(field=>field.id===primary)?[primary]:[],columns:[],values:fields.some(field=>field.id===idField)?[idField]:[],stageValue:'',dateField:'',aggregationRules:{[idField]:'count'},filters:source==='support_ticket'?[]:['scope'],filterValues:{scope:'active',search:''},templateId:'',manualMilestoneIds:[],fieldOrder:{rows:fields.some(field=>field.id===primary)?[primary]:[],columns:[],values:fields.some(field=>field.id===idField)?[idField]:[],filters:source==='support_ticket'?[]:['scope']}};
     }
-    function normalizeConfig(config){config.dataSource=config.dataSource||'template';if(config.fieldOrder&&config.dataSource!=='template')for(const zone of ['rows','columns','values','filters'])if(Array.isArray(config.fieldOrder[zone]))config[zone]=config.fieldOrder[zone].slice();return config;}
+    function normalizeConfig(config){config.dataSource=config.dataSource||'template';config.layout||='table';config.chartType||='bar';if(config.fieldOrder&&config.dataSource!=='template')for(const zone of ['rows','columns','values','filters'])if(Array.isArray(config.fieldOrder[zone]))config[zone]=config.fieldOrder[zone].slice();if(!config.rows?.includes(config.chartCategory))config.chartCategory=config.rows?.[0]||'';return config;}
     const state={config:null,saved:[],selected:null,editing:true,templates:[],templateRows:new Map(),templateCatalogPromise:null,metadataPromise:null,metadataVersion:0,data:null,result:null,busy:false,drag:null,relationshipDrag:null,fieldSearch:'',collapsedFieldSources:new Set(),collapseAllFields:false,relationshipResizeInstalled:false,user:null,request:0,openRequest:0,channel:null,refreshTimer:null,filterTimer:0,view:'report_builder',pages:{report_builder:null,custom_reports:null},scrolls:{},catalog:{search:'',template:'',dateField:''},catalogError:''};
     const clone=value=>JSON.parse(JSON.stringify(value));
     const key=value=>value==null?'':String(value);
@@ -26340,6 +26428,25 @@
     const editable=()=>admin()&&state.view==='report_builder'&&state.editing&&!state.busy;
     const defaults=(source='template')=>source==='template'?({version:3,reportType,dataSource:'template',primarySource:'template',joinedSources:[],relationships:[],groupId:'',rows:Object.keys(rowFields),columns:['plannerTypes'],values:['deadline'],stageValue:'deadline',dateField:'deadline',aggregationRules:{deadline:'latest'},selectedMilestoneFields:[],sorting:{program:'asc',initiative:'asc',date:'asc',missingDates:'last',initiativeId:'asc',milestoneId:'asc'},filters:Object.keys(filterFields),templateId:'',filterValues:{scope:'active',search:''},manualMilestoneIds:[],fieldOrder:{rows:Object.keys(rowFields),columns:['plannerTypes'],values:['deadline'],filters:Object.keys(filterFields)}}):defaultEntityConfig(source);
     const root=()=>document.getElementById('delivery-reports');
+    let reportChart=null;
+    const expandedPivotGroups=new Set();
+    function destroyReportChart(){if(reportChart){reportChart.destroy();reportChart=null;}}
+    function clearPreview(){destroyReportChart();document.getElementById('report-preview')?.replaceChildren();}
+    function reportUserName(value,users){
+      if(value==null||key(value).trim()==='')return null;
+      const raw=key(value).trim(),user=users.get(raw.toLowerCase());
+      return user?.full_name||user?.name||user?.email||raw;
+    }
+    function reportUserIndex(users){return new Map((users||[]).flatMap(user=>[user.name,user.full_name,user.email,user.id,user.auth_user_id].filter(value=>value!=null&&value!=='').map(value=>[key(value).trim().toLowerCase(),user])));}
+    function normalizeReportUserFilters(config,fields,records,users){
+      for(const field of fields){
+        if(field.type!=='user'||field.source==='support_ticket'||!config.filters.includes(field.id))continue;
+        const selected=config.filterValues?.[field.id];if(!selected)continue;
+        const choices=new Set(records.map(record=>key(record.values[field.id])));
+        const resolve=value=>{if(choices.has(key(value))||!key(value).startsWith('User #'))return value;const name=reportUserName(key(value).slice(6),users);return choices.has(name)?name:value;};
+        config.filterValues[field.id]=Array.isArray(selected)?selected.map(resolve):resolve(selected);
+      }
+    }
     function message(text,error=false){const element=document.getElementById('report-message');if(element){element.textContent=text;element.dataset.error=key(error);}}
     function fieldTypeFamily(definition){return ['enum','status','user'].includes(definition?.type)?'text':definition?.type||'';}
     function validateJoinPlan(config){
@@ -26391,9 +26498,19 @@
         if(!Array.isArray(config[zone])||config[zone].some(field=>!allowed.includes(field))||new Set(config[zone]).size!==config[zone].length)throw new Error('Invalid or duplicate '+zone+' fields for '+dataSourceLabel(config.dataSource)+'.');
       }
       const entityFields=new Map(reportFieldCatalog(config).map(field=>[field.id,field]));
+      if(!['table','pivot','chart'].includes(config.layout))throw new Error('Choose a supported report layout.');
+      if(!['bar','line','doughnut'].includes(config.chartType))throw new Error('Choose Bar, Line or Doughnut.');
+      if(config.layout!=='table'&&!config.rows.length)throw new Error('Add at least one field to Rows for a collapsible or graphical report.');
       for(const [field,mode] of Object.entries(config.aggregationRules||{})){
         const definition=config.dataSource==='template'?{label:valueFields[field],type:isDateValueField(field)?'date':'text'}:entityFields.get(field),validModes=config.dataSource==='template'?Object.keys(aggregations):definition?.type==='numeric'?['sum','average','minimum','maximum','first_sequence','last_sequence','all','count']:definition?.type==='date'?['earliest','latest','first_sequence','last_sequence','all','count']:['first_sequence','last_sequence','all','count'];
         if(!definition||!validModes.includes(mode))throw new Error('Invalid aggregation for '+(definition?.label||field)+'.');
+      }
+      if(config.layout==='chart'){
+        const chartFields=config.dataSource==='template'?[...config.values,...config.columns.filter(field=>field.startsWith('milestone.')).map(field=>field.slice(10))]:config.values;
+        for(const field of chartFields){
+          const definition=entityFields.get(field),mode=config.aggregationRules?.[field]||(config.dataSource==='template'?config.aggregation||defaultAggregation(field):entityDefaultAggregation(definition));
+          if(mode!=='count'&&(config.dataSource==='template'||definition?.type!=='numeric'||!['sum','average','minimum','maximum','first_sequence','last_sequence'].includes(mode)))throw new Error('Graphical reports require numeric Values. Choose Count, or a numeric field with a numeric aggregation.');
+        }
       }
       if(config.filterValues?.from&&config.filterValues?.to&&config.filterValues.from>config.filterValues.to)throw new Error('Date range start must not be after its end.');
       if(config.dataSource!=='template')for(const field of config.filters){const definition=entityFields.get(field),range=config.filterValues?.[field];if(!definition||!range||typeof range!=='object')continue;if(definition.type==='date'&&range.from&&range.to&&range.from>range.to)throw new Error(definition.label+' start date must not be after its end date.');if(definition.type==='numeric'&&range.min!==''&&range.max!==''&&range.min!=null&&range.max!=null&&Number(range.min)>Number(range.max))throw new Error(definition.label+' minimum must not exceed its maximum.');}
@@ -26409,7 +26526,7 @@
       const programMap=new Map(data.programs.map(row=>[key(row.id),row]));
       const initiatives=new Map(data.initiatives.map(row=>[key(row.id),normalizeInitiative(row)])),tracks=new Map((data.tracks||[]).map(row=>[key(row.id),row])),users=new Map();
       const workflow=typeof getMilestoneWorkflowReportState==='function'?getMilestoneWorkflowReportState():null;
-      for(const user of data.users||[])for(const name of [user.full_name,user.name,user.email,user.id])if(name!=null)users.set(key(name).trim().toLowerCase(),user);
+      for(const [id,user] of reportUserIndex(data.users))users.set(id,user);
       const byInitiative=new Map(),used=new Set(),relevant=new Map(),filterOptions=new Map(config.filters.filter(field=>field.startsWith('milestone.')).map(field=>[field,new Map()]));
       const selectedManual=new Set((config.manualMilestoneIds||[]).map(key));
       const filters=config.filterValues||{},search=key(filters.search).trim().toLocaleLowerCase(),enabled=new Set(config.filters),scope=enabled.has('scope')?(filters.scope||'active'):'active',dateField=config.dateField||(dateFields[config.values[0]]?config.values[0]:'deadline'),sortDateField=config.sorting?.dateField||(dateFields[config.stageValue]?config.stageValue:dateFields[config.values[0]]?config.values[0]:dateField);
@@ -26479,7 +26596,7 @@
         if(!used.has(initiativeId)||!allowedVertical(initiative.vertical)||!inScope(raw,scope))continue;
         const program=programMap.get(key(initiative.programId));
         const status=analyticsStatus(initiative);
-        const dimension={program:program?.program_name||program?.name||'Unmapped',initiative:initiative.name,type:initiative.type,vertical:initiative.vertical,owner:initiative.businessOwner,assigned:initiative.assignedTo,status,...Object.fromEntries(engineerAssignments.fields.flatMap(field=>[[field,engineerAssignments.display(raw[field])],['program_'+field,engineerAssignments.display(program?.[field])]]))};
+        const dimension={program:program?.program_name||program?.name||'Unmapped',initiative:initiative.name,type:initiative.type,vertical:initiative.vertical,owner:initiative.businessOwner,assigned:initiative.assignedTo,status,...Object.fromEntries(engineerAssignments.fields.flatMap(field=>[[field,reportUserName(raw[field],users)||'Not Assigned'],['program_'+field,reportUserName(program?.[field],users)||'Not Assigned']]))};
         if(engineerAssignments.fields.some(field=>[[field,raw[field]],['program_'+field,program?.[field]]].some(([filter,value])=>enabled.has(filter)&&filters[filter]&&(filters[filter]==='__unassigned__'?value!=null:String(value??'')!==String(filters[filter])))))continue;
         if(enabled.has('template')&&filters.template&&filters.template!==templateId)continue;
         if(['program','initiative','vertical','owner','status'].some(field=>enabled.has(field)&&filters[field]&&key(field==='program'?initiative.programId:field==='initiative'?initiative.id:dimension[field])!==filters[field]))continue;
@@ -26490,7 +26607,8 @@
         reportRows.push({values:[...config.rows.map(field=>field.startsWith('milestone.')?aggregate(milestones,field.slice(10)):key(dimension[field])||'-'),...cells],program:dimension.program,initiative:dimension.initiative,date:dates.length?Math.min(...dates):Infinity,initiativeId,milestoneId:milestones.map(row=>key(row.id)).sort((left,right)=>left.localeCompare(right,undefined,{numeric:true}))[0]||''});
       }
       const compareText=(left,right)=>key(left).localeCompare(key(right),undefined,{sensitivity:'base',numeric:true});reportRows.sort((left,right)=>compareText(left.program,right.program)||compareText(left.initiative,right.initiative)||(left.date===right.date?0:left.date-right.date)||compareText(left.initiativeId,right.initiativeId)||compareText(left.milestoneId,right.milestoneId));const rows=reportRows.map(row=>row.values);
-      return {headers,rows,dateField:config.values[0],templateId,plannerTypeIds:plannerTypes.map(type=>key(type.id)),valueFields:config.values,filterOptions:Object.fromEntries([...filterOptions].map(([field,options])=>[field,[...options.entries()]]))};
+      const result={headers,rows,dateField:config.values[0],templateId,plannerTypeIds:plannerTypes.map(type=>key(type.id)),valueFields:config.values,filterOptions:Object.fromEntries([...filterOptions].map(([field,options])=>[field,[...options.entries()]]))};
+      return addReportPresentation(result,config,reportRows,row=>row.values.slice(0,config.rows.length),records=>columnDefs.map(column=>aggregate(records.flatMap(row=>column.standard?relevant.get(row.initiativeId)||[]:byInitiative.get(row.initiativeId)?.get(column.cellKey)||[]),column.field)));
     }
     function buildEntityReport(config,data,allowedVertical=()=>true){
       checkConfig(config);
@@ -26512,6 +26630,13 @@
         if(search&&!definitions.some(definition=>key(valueOf(record,definition.id)).toLocaleLowerCase().includes(search)))return false;
         return config.filters.every(field=>matchesFilter(record,field));
       });
+      if(config.layout==='chart')for(const field of config.values){
+        if((config.aggregationRules?.[field]||entityDefaultAggregation(catalog.get(field)))==='count')continue;
+        for(const record of sourceRows){
+          const value=valueOf(record,field);if(value==null||value==='')continue;
+          if(!['number','string'].includes(typeof value)||!key(value).trim()||!Number.isFinite(Number(value)))throw new Error('Graphical reports require numeric Values; "'+(catalog.get(field)?.label||field)+'" contains nonnumeric data.');
+        }
+      }
       const format=(value,definition)=>{
         if(value==null||value==='')return '-';
         if(definition.type==='date')return String(value).slice(0,10);
@@ -26520,9 +26645,9 @@
       };
       const aggregate=(records,field)=>{
         const definition=catalog.get(field),owner=sourceForField(field),seenSourceIds=new Set(),measureRecords=records.filter(record=>{const id=record.sourceIds?.[owner];if(!id)return true;if(seenSourceIds.has(id))return false;seenSourceIds.add(id);return true;}),values=measureRecords.map(record=>valueOf(record,field)).filter(value=>value!=null&&value!=='');
-        if((config.aggregationRules?.[field]||'count')==='count')return String(values.length);
+        const mode=config.aggregationRules?.[field]||entityDefaultAggregation(definition);
+        if(mode==='count')return String(values.length);
         if(!values.length)return '-';
-        const mode=config.aggregationRules?.[field]||(['numeric'].includes(definition.type)?'sum':definition.type==='date'?'latest':'all');
         if(['sum','average','minimum','maximum'].includes(mode)){
           const numbers=values.map(Number).filter(Number.isFinite);if(!numbers.length)return '-';
           const result=mode==='sum'?numbers.reduce((sum,value)=>sum+value,0):mode==='average'?numbers.reduce((sum,value)=>sum+value,0)/numbers.length:mode==='minimum'?Math.min(...numbers):Math.max(...numbers);
@@ -26550,7 +26675,48 @@
       rows.sort((left,right)=>left.slice(0,rowFields.length).join('\u0000').localeCompare(right.slice(0,rowFields.length).join('\u0000'),undefined,{numeric:true,sensitivity:'base'}));
       const filterOptions={};
       for(const field of config.filters){const definition=catalog.get(field);if(!definition||!['enum','status','user'].includes(definition.type))continue;filterOptions[field]=[...new Set((data.entityRows||[]).map(record=>valueOf(record,field)).filter(value=>value!=null&&value!=='').map(String))].sort((left,right)=>left.localeCompare(right,undefined,{numeric:true})).slice(0,200).map(value=>[value,value]);}
-      return {headers,rows,valueFields:config.values,filterOptions,dataSource:config.primarySource||config.dataSource,joinDiagnostics:data.joinDiagnostics||[]};
+      const summarize=records=>{
+        const buckets=new Map();
+        for(const record of records){const token=columnKey(record);if(!buckets.has(token))buckets.set(token,[]);buckets.get(token).push(record);}
+        return orderedColumns.flatMap(column=>config.values.map(field=>aggregate(buckets.get(column.key)||[],field)));
+      };
+      return addReportPresentation({headers,rows,valueFields:config.values,filterOptions,dataSource:config.primarySource||config.dataSource,joinDiagnostics:data.joinDiagnostics||[]},config,sourceRows,record=>rowFields.map(field=>valueOf(record,field)),summarize,(value,index)=>format(value,catalog.get(rowFields[index])));
+    }
+    function addReportPresentation(result,config,records,dimensions,summarize,format=key){
+      if(config.layout==='table')return result;
+      const categoryIndex=config.rows.indexOf(config.chartCategory),dimensionCount=config.layout==='chart'?1:config.rows.length,tree=new Map();
+      for(const record of records){
+        const values=dimensions(record),path=config.layout==='chart'?[values[categoryIndex]]:values;let children=tree,parentId=null;
+        for(let depth=0;depth<path.length;depth++){
+          const token=JSON.stringify(path[depth]??null);
+          if(!children.has(token)){const id=JSON.stringify(path.slice(0,depth+1));children.set(token,{id,parentId,depth,label:format(path[depth],config.layout==='chart'?categoryIndex:depth)||'-',records:[],children:new Map()});}
+          const node=children.get(token);node.records.push(record);parentId=node.id;children=node.children;
+        }
+      }
+      const nodes=[];
+      function visit(children){
+        const ordered=[...children.values()].sort((left,right)=>left.label.localeCompare(right.label,undefined,{numeric:true,sensitivity:'base'}));
+        for(const node of ordered){
+          nodes.push({id:node.id,parentId:node.parentId,depth:node.depth,label:node.label,hasChildren:node.children.size>0,values:[...Array(node.depth).fill(''),node.label,...Array(dimensionCount-node.depth-1).fill(''),...summarize(node.records)]});
+          visit(node.children);
+        }
+      }
+      visit(tree);
+      if(config.layout==='pivot'){
+        result.pivotRows=nodes;
+        if(records.length)result.pivotRows.push({id:'grand-total',parentId:null,depth:0,label:'Grand total',hasChildren:false,total:true,values:['Grand total',...Array(dimensionCount-1).fill(''),...summarize(records)]});
+      }else{
+        const measureHeaders=result.headers.slice(config.rows.length);
+        const datasets=measureHeaders.map((label,index)=>({label,data:nodes.map(node=>{
+          const raw=node.values[index+1];if(raw==null||raw===''||raw==='-')return null;
+          const value=Number(raw);if(!Number.isFinite(value))throw new Error('Graphical reports require numeric Values; "'+label+'" contains nonnumeric data.');
+          if(config.chartType==='doughnut'&&value<0)throw new Error('Doughnut charts cannot display negative values. Choose Bar or Line.');
+          return value;
+        })}));
+        result.chartData={labels:nodes.map(node=>node.label),datasets};
+        result.chartHeaders=[result.headers[categoryIndex],...measureHeaders];result.chartRows=nodes.map(node=>node.values);
+      }
+      return result;
     }
     async function allRows(table){const result=await fetchAllSupabaseRows(table);if(result.error)throw result.error;return result.data||[];}
     async function rowsByIds(table,columns,ids){
@@ -26587,7 +26753,7 @@
       const scope=reportScope(config),sourceRows=new Map(),workflow=typeof getMilestoneWorkflowReportState==='function'?getMilestoneWorkflowReportState():null;
       const needsPlanner=[...selectedBySource.values()].flat().some(field=>field.computed&&['milestone.planner_type_id','milestone.planner_type_group_id'].includes(field.id));
       if(needsPlanner&&window.milestonePlannerTypes&&!await window.milestonePlannerTypes.load())throw new Error(window.milestonePlannerTypes.state.error||'Milestone Planner Type metadata could not be loaded.');
-      const plannerTypes=new Map((window.milestonePlannerTypes?.state.values||[]).map(row=>[key(row.id),row])),plannerGroups=new Map((window.milestonePlannerTypes?.state.groups||[]).map(row=>[key(row.id),row])),users=new Map((userMaster||[]).flatMap(user=>[user.name,user.full_name,user.email,user.id].filter(Boolean).map(name=>[key(name).trim().toLowerCase(),user])));
+      const plannerTypes=new Map((window.milestonePlannerTypes?.state.values||[]).map(row=>[key(row.id),row])),plannerGroups=new Map((window.milestonePlannerTypes?.state.groups||[]).map(row=>[key(row.id),row])),users=reportUserIndex(userMaster);
       const extras={program:['sequence_no','vertical','is_active'],initiative:['sequence_no','vertical','program_id','record_status'],track:['sequence_no','display_order','initiative_id','record_status'],milestone:['sequence_no','initiative_id','track_id','record_status'],planner_template:['is_active']};
       function sourceColumns(source){
         const sourceFields=selectedBySource.get(source)||[],columns=[...new Set(['id',...sourceFields.filter(field=>field.column&&!field.computed).map(field=>field.column),...(extras[source]||[])])];
@@ -26635,7 +26801,7 @@
       }
       const entityRows=partials.map(partial=>{
         const values={};
-        for(const field of fields){const row=partial.sourceRows[field.source];if(!row){values[field.id]=null;continue;}if(!field.computed){const raw=sourceRowValue(field.source,row,field.id,field);values[field.id]=field.id==='milestone.planner_type_id'?plannerTypes.get(key(raw))?.value_name||raw:field.type==='user'&&field.source!=='support_ticket'&&typeof engineerAssignments!=='undefined'?engineerAssignments.display(raw):raw;continue;}
+        for(const field of fields){const row=partial.sourceRows[field.source];if(!row){values[field.id]=null;continue;}if(!field.computed){const raw=sourceRowValue(field.source,row,field.id,field);values[field.id]=field.id==='milestone.planner_type_id'?plannerTypes.get(key(raw))?.value_name||raw:field.type==='user'&&field.source!=='support_ticket'?reportUserName(raw,users):raw;continue;}
           if(field.id==='milestone.planner_type_group_id')values[field.id]=plannerGroups.get(key(plannerTypes.get(key(row.planner_type_id)?.group_id)?.id))?.group_name||null;
           else if(field.id==='milestone.is_critical')values[field.id]=row.is_critical??row.critical??(key(row.status)==='Critical'?true:workflow?.criticalIds.has(Number(row.id))??false);
           else if(field.id==='milestone.overall_deviation')values[field.id]=typeof getMilestoneTotalOverallDeviation==='function'?getMilestoneTotalOverallDeviation({...row,startDate:row.start_date,endDate:row.end_date,deviationDays:row.deviation_days}):row.deviation_days??null;
@@ -26646,6 +26812,7 @@
         const verticals=[...new Set(Object.values(partial.sourceRows).map(row=>row?.vertical).filter(Boolean))];const accessVertical=accessInitiatives.get(key(partial.sourceRows[rootSource]?.initiative_id))?.vertical;if(accessVertical&&!verticals.includes(accessVertical))verticals.push(accessVertical);
         return {...partial,values,__vertical:verticals[0]||'',__verticals:verticals};
       });
+      normalizeReportUserFilters(config,fields,entityRows,users);
       return {entityRows,joinDiagnostics:diagnostics,dataSource:rootSource,joinedSources:config.joinedSources.slice()};
     }
     async function loadEntityData(config){
@@ -26678,11 +26845,11 @@
       }
       if(rootAlias==='track'&&aliases.has('track'))trackRows.push(...rootRows);
       const initiativesById=new Map(initiativeRows.map(row=>[key(row.id),row])),programsById=new Map(programRows.map(row=>[key(row.id),row])),tracksById=new Map(trackRows.map(row=>[key(row.id),row]));
-      const workflow=typeof getMilestoneWorkflowReportState==='function'?getMilestoneWorkflowReportState():null,plannerTypes=new Map((window.milestonePlannerTypes?.state.values||[]).map(row=>[key(row.id),row])),plannerGroups=new Map((window.milestonePlannerTypes?.state.groups||[]).map(row=>[key(row.id),row])),users=new Map((userMaster||[]).flatMap(user=>[user.name,user.full_name,user.email,user.id].filter(Boolean).map(name=>[key(name).trim().toLowerCase(),user])));
+      const workflow=typeof getMilestoneWorkflowReportState==='function'?getMilestoneWorkflowReportState():null,plannerTypes=new Map((window.milestonePlannerTypes?.state.values||[]).map(row=>[key(row.id),row])),plannerGroups=new Map((window.milestonePlannerTypes?.state.groups||[]).map(row=>[key(row.id),row])),users=reportUserIndex(userMaster);
       const entityRows=rootRows.map(row=>{
         const initiative=rootAlias==='initiative'?row:initiativesById.get(key(row.initiative_id)),program=rootAlias==='program'?row:programsById.get(key(rootAlias==='initiative'?row.program_id:initiative?.program_id)),track=rootAlias==='track'?row:tracksById.get(key(row.track_id));
         const related={program,initiative,track,milestone:rootAlias==='milestone'?row:null},values={};
-        for(const field of selectedDefinitions){if(field.alias==='ticket')continue;const record=related[field.alias];if(!record)continue;if(!field.computed){const raw=record[field.column]??null;values[field.id]=field.id==='milestone.planner_type_id'?plannerTypes.get(key(raw))?.value_name||raw:field.type==='user'&&typeof engineerAssignments!=='undefined'?engineerAssignments.display(raw):raw;continue;}
+        for(const field of selectedDefinitions){if(field.alias==='ticket')continue;const record=related[field.alias];if(!record)continue;if(!field.computed){const raw=record[field.column]??null;values[field.id]=field.id==='milestone.planner_type_id'?plannerTypes.get(key(raw))?.value_name||raw:field.type==='user'?reportUserName(raw,users):raw;continue;}
           if(field.id==='milestone.planner_type_group_id')values[field.id]=plannerGroups.get(key(plannerTypes.get(key(row.planner_type_id)?.group_id)?.id))?.group_name||null;
           else if(field.id==='milestone.is_critical')values[field.id]=row.is_critical??row.critical??(key(row.status)==='Critical'?true:workflow?.criticalIds.has(Number(row.id))??false);
           else if(field.id==='milestone.overall_deviation')values[field.id]=typeof getMilestoneTotalOverallDeviation==='function'?getMilestoneTotalOverallDeviation({...row,startDate:row.start_date,endDate:row.end_date,deviationDays:row.deviation_days}):row.deviation_days??null;
@@ -26692,6 +26859,7 @@
         }
         return {values,__id:row.id,__sequence:Number(row.sequence_no||row.display_order||0),__scope:row,__vertical:row.vertical||initiative?.vertical||program?.vertical||''};
       });
+      normalizeReportUserFilters(config,selectedDefinitions,entityRows,users);
       return {entityRows};
     }
     async function loadTemplateCatalog(){
@@ -26709,13 +26877,17 @@
       }
       return state.metadataPromise;
     }
-    function invalidate(){state.metadataVersion++;state.templateCatalogPromise=null;state.metadataPromise=null;state.templateRows.clear();deliveryReportProvenanceCheck=null;state.result=null;state.resultData=null;state.resultConfig=null;if(root())document.getElementById('report-preview').replaceChildren();}
+    function invalidate(){state.metadataVersion++;state.templateCatalogPromise=null;state.metadataPromise=null;state.templateRows.clear();deliveryReportProvenanceCheck=null;state.result=null;state.resultData=null;state.resultConfig=null;clearPreview();}
     function label(zone,field){if(state.config?.dataSource!=='template')return field==='scope'?filterFields.scope:reportFieldCatalog(state.config).find(item=>item.id===field)?.groupLabel||field;return milestoneDimensions[field]||(zone==='rows'?rowFields[field]:zone==='values'?valueFields[field]:zone==='filters'?filterFields[field]:({plannerTypes:'Template Planner Types',templateMilestones:'Legacy Template Milestones',manualMilestones:'Selected Manual Milestones'})[field]);}
     function renderSettings(){
+      normalizeConfig(state.config);
+      let presentation=document.getElementById('report-presentation-settings');if(!presentation){presentation=document.createElement('div');presentation.id='report-presentation-settings';presentation.className='report-toolbar';presentation.setAttribute('data-builder-only','');root().querySelector('.report-layout').before(presentation);}
+      presentation.innerHTML=`<label>Report Layout<select id="report-layout">${[['table','Tabular'],['pivot','Collapsible Pivot'],['chart','Graphical']].map(([value,title])=>`<option value="${value}" ${state.config.layout===value?'selected':''}>${title}</option>`).join('')}</select></label>${state.config.layout==='chart'?`<label>Chart Type<select id="report-chart-type">${[['bar','Bar'],['line','Line'],['doughnut','Doughnut']].map(([value,title])=>`<option value="${value}" ${state.config.chartType===value?'selected':''}>${title}</option>`).join('')}</select></label><label>Category<select id="report-chart-category">${state.config.rows.map(field=>`<option value="${html(field)}" ${state.config.chartCategory===field?'selected':''}>${html(label('rows',field))}</option>`).join('')}</select></label><span>Use Count or numeric Values. Categories aggregate across the other Rows fields.</span>`:state.config.layout==='pivot'?'<span>Rows define the expandable hierarchy. Group subtotals use source records, not sums of displayed averages.</span>':''}`;
+      presentation.querySelectorAll('select').forEach(select=>select.disabled=!editable());
       let settings=document.getElementById('report-value-settings');if(!settings){settings=document.createElement('div');settings.id='report-value-settings';settings.className='report-toolbar';settings.setAttribute('data-builder-only','');root().querySelector('.report-layout').before(settings);}
       if(state.config.dataSource!=='template'){
         const fields=new Map(reportFieldCatalog(state.config).map(field=>[field.id,field]));
-        settings.innerHTML=state.config.values.map(field=>{const definition=fields.get(field);if(!definition)return '';const modes=definition.type==='numeric'?['sum','average','minimum','maximum','first_sequence','last_sequence','count']:definition.type==='date'?['earliest','latest','first_sequence','last_sequence','all','count']:['first_sequence','last_sequence','all','count'];return `<label>${html(definition.groupLabel)} Aggregation<select data-aggregation-field="${html(field)}">${modes.map(mode=>`<option value="${mode}" ${mode===(state.config.aggregationRules?.[field]||'all')?'selected':''}>${html(entityAggregations[mode])}</option>`).join('')}</select></label>`;}).join('');settings.querySelectorAll('select').forEach(select=>select.disabled=!editable());return;
+        settings.innerHTML=state.config.values.map(field=>{const definition=fields.get(field);if(!definition)return '';const modes=definition.type==='numeric'?['sum','average','minimum','maximum','first_sequence','last_sequence','count']:definition.type==='date'?['earliest','latest','first_sequence','last_sequence','all','count']:['first_sequence','last_sequence','all','count'];return `<label>${html(definition.groupLabel)} Aggregation<select data-aggregation-field="${html(field)}">${modes.map(mode=>`<option value="${mode}" ${mode===(state.config.aggregationRules?.[field]||entityDefaultAggregation(definition))?'selected':''}>${html(entityAggregations[mode])}</option>`).join('')}</select></label>`;}).join('');settings.querySelectorAll('select').forEach(select=>select.disabled=!editable());return;
       }
       state.config.aggregationRules||={};state.config.stageValue||=state.config.values[0]||'deadline';
       const fields=[...new Set([...state.config.values,...[...state.config.rows,...state.config.columns].filter(field=>field.startsWith('milestone.')).map(field=>field.slice(10))])];
@@ -26796,6 +26968,7 @@
     }
     function renderZones(){
       if(!root())return;
+      if(!state.result)destroyReportChart();
       renderRelationships();renderAvailableFields();
       for(const zone of ['rows','columns','values','filters'])document.getElementById('report-zone-'+zone).innerHTML=state.config[zone].map(field=>fieldMarkup(zone,field)).join('');
       const dataSource=document.getElementById('report-data-source');if(dataSource)dataSource.value=state.config.primarySource||state.config.dataSource||'template';
@@ -26835,7 +27008,8 @@
       const data=state.data||{initiatives:[],programs:[],milestones:[]},filters=state.config.filterValues,initiatives=data.initiatives.map(normalizeInitiative).filter(row=>isVerticalAllowed(row.vertical));
       const unique=values=>analyticsUnique(values).map(value=>[value,value]);
       const options={program:data.programs.map(row=>[row.id,row.program_name||row.name||row.id]),initiative:initiatives.map(row=>[row.id,row.name]),template:state.templates.map(row=>[row.id,row.template_name]),vertical:unique(initiatives.map(row=>row.vertical)),owner:unique(initiatives.map(row=>row.businessOwner)),status:unique(initiatives.map(analyticsStatus)),milestoneStatus:unique(data.milestones.map(row=>row.status)),scope:[['active','Active'],['archived','Archived'],['all','Active and Archived']]};
-      for(const field of engineerAssignments.fields)for(const [filter,records] of [[field,initiatives],['program_'+field,data.programs]])options[filter]=[['__unassigned__','Not Assigned'],...[...new Set(records.map(row=>row[field]).filter(value=>value!=null).map(String))].map(value=>[value,engineerAssignments.display(value)])];
+      const users=reportUserIndex(data.users||userMaster);
+      for(const field of engineerAssignments.fields)for(const [filter,records] of [[field,initiatives],['program_'+field,data.programs]])options[filter]=[['__unassigned__','Not Assigned'],...[...new Set(records.map(row=>row[field]).filter(value=>value!=null).map(String))].map(value=>[value,reportUserName(value,users)])];
       document.getElementById('report-filters').innerHTML=`<label class="shared-filter-search-label">Search Report Data<input id="report-filter-search" type="search" data-filter="search" value="${html(filters.search||'')}" placeholder="Search report data" aria-label="Search report data"></label>`+state.config.filters.map(field=>field==='dateRange'?`<label>From<input type="date" data-filter="from" value="${html(filters.from)}"></label><label>To<input type="date" data-filter="to" value="${html(filters.to)}"></label>`:`<label>${html(filterFields[field]||milestoneDimensions[field])}<select data-filter="${field}">${field==='scope'?options.scope.map(([value,text])=>`<option value="${value}" ${value===(filters.scope||'active')?'selected':''}>${text}</option>`).join(''):selectOptions(options[field]||state.result?.filterOptions?.[field]||[],filters[field])}</select></label>`).join('');
     }
     function preview({renderFilterControls=true}={}){
@@ -26844,14 +27018,27 @@
         const signature=JSON.stringify(state.config);
         if(!state.result||state.resultData!==state.data||state.resultConfig!==signature){
           const data=state.config.dataSource==='template'?{...state.data,templateRows:state.templateRows.get(key(state.config.templateId))||[],plannerTypes:window.milestonePlannerTypes?.state.values||[],plannerTypeGroups:window.milestonePlannerTypes?.state.groups||[]}:state.data;
-          state.result=build(state.config,data,isVerticalAllowed);state.resultData=state.data;state.resultConfig=signature;state.previewPage=1;
+          state.result=build(state.config,data,isVerticalAllowed);state.resultData=state.data;state.resultConfig=JSON.stringify(state.config);state.previewPage=1;expandedPivotGroups.clear();
         }
-        const result=state.result,preview=document.getElementById('report-preview'),isEntity=state.config.dataSource!=='template',pageSize=100,pages=Math.max(1,Math.ceil(result.rows.length/pageSize));state.previewPage=Math.min(Math.max(1,state.previewPage||1),pages);
-        const rows=isEntity?result.rows.slice((state.previewPage-1)*pageSize,state.previewPage*pageSize):result.rows;
-        preview.innerHTML=`<table><thead><tr>${result.headers.map(title=>`<th scope="col">${html(title)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map(row=>`<tr>${row.map(cell=>`<td>${html(cell)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="${result.headers.length}">${isEntity?'No matching records.':'No matching initiatives with verified template usage.'}</td></tr>`}</tbody></table>${isEntity?`<div class="report-preview-pager"><span>Showing ${result.rows.length?(state.previewPage-1)*pageSize+1:0}-${Math.min(state.previewPage*pageSize,result.rows.length)} of ${result.rows.length}</span><div><button type="button" data-action="preview-page" data-page="${Math.max(1,state.previewPage-1)}" ${state.previewPage===1?'disabled':''} aria-label="Previous report page">Previous</button><span>${state.previewPage} / ${pages}</span><button type="button" data-action="preview-page" data-page="${Math.min(pages,state.previewPage+1)}" ${state.previewPage===pages?'disabled':''} aria-label="Next report page">Next</button></div></div>`:''}`;
+        const result=state.result,preview=document.getElementById('report-preview'),isEntity=state.config.dataSource!=='template',pivot=state.config.layout==='pivot',chart=state.config.layout==='chart';
+        destroyReportChart();
+        const visible=new Set(),nodes=pivot?result.pivotRows.filter(node=>{if(node.parentId!==null&&(!visible.has(node.parentId)||!expandedPivotGroups.has(node.parentId)))return false;visible.add(node.id);return true;}):[],allRows=pivot?nodes.map(node=>node.values):chart?result.chartRows:result.rows,headers=chart?result.chartHeaders:result.headers,pageSize=100,paginate=isEntity||pivot||chart,pages=Math.max(1,Math.ceil(allRows.length/pageSize));state.previewPage=Math.min(Math.max(1,state.previewPage||1),pages);
+        const offset=paginate?(state.previewPage-1)*pageSize:0,rows=paginate?allRows.slice(offset,offset+pageSize):allRows;
+        const tools=pivot?'<div class="report-pivot-tools"><button type="button" data-action="pivot-expand">Expand All</button><button type="button" data-action="pivot-collapse">Collapse All</button><span>Group rows include subtotals. Expand a group to view its next Rows field.</span></div>':'';
+        preview.innerHTML=`${tools}${chart?'<div class="report-chart"><canvas id="report-chart-canvas" role="img" aria-label="Report chart; values are available in the table below"></canvas></div>':''}<table><thead><tr>${headers.map(title=>`<th scope="col">${html(title)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.map((row,index)=>{
+          const node=pivot?nodes[offset+index]:null;
+          return `<tr${node?` class="${node.total?'report-pivot-total':node.hasChildren?'report-pivot-subtotal':''}"`:''}>${row.map((cell,column)=>`<td>${node?.hasChildren&&column===node.depth?`<button type="button" class="report-pivot-toggle" data-pivot-id="${html(node.id)}" aria-expanded="${expandedPivotGroups.has(node.id)}" aria-label="${expandedPivotGroups.has(node.id)?'Collapse':'Expand'} ${html(node.label)}">${expandedPivotGroups.has(node.id)?'-':'+'}</button>`:''}${html(cell)}</td>`).join('')}</tr>`;
+        }).join(''):`<tr><td colspan="${headers.length}">${isEntity?'No matching records.':'No matching initiatives with verified template usage.'}</td></tr>`}</tbody></table>${paginate?`<div class="report-preview-pager"><span>Showing ${allRows.length?offset+1:0}-${Math.min(offset+pageSize,allRows.length)} of ${allRows.length}${pivot?' visible group/detail rows':''}</span><div><button type="button" data-action="preview-page" data-page="${Math.max(1,state.previewPage-1)}" ${state.previewPage===1?'disabled':''} aria-label="Previous report page">Previous</button><span>${state.previewPage} / ${pages}</span><button type="button" data-action="preview-page" data-page="${Math.min(pages,state.previewPage+1)}" ${state.previewPage===pages?'disabled':''} aria-label="Next report page">Next</button></div></div>`:''}`;
+        if(chart&&result.chartData.labels.length){
+          if(!window.Chart)throw new Error('Chart library failed to load. Reload the page or choose Tabular.');
+          if(!result.chartData.datasets.some(dataset=>dataset.data.some(value=>value!==null)))throw new Error('No numeric values are available to chart. Choose Count or adjust the filters.');
+          const doughnut=state.config.chartType==='doughnut',palette=['#0f766e','#2563eb','#b45309','#9333ea','#be123c','#4d7c0f','#0369a1','#c2410c'],data=clone(result.chartData);
+          data.datasets.forEach((dataset,index)=>{dataset.backgroundColor=doughnut?data.labels.map((_,i)=>palette[i%palette.length]):palette[index%palette.length];dataset.borderColor=doughnut?'#ffffff':palette[index%palette.length];dataset.borderWidth=doughnut?1:2;});
+          reportChart=new window.Chart(document.getElementById('report-chart-canvas'),{type:state.config.chartType,data,options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom'}},...(doughnut?{}:{scales:{y:{beginAtZero:true}}})}});
+        }
         if(renderFilterControls)renderFilters();
         const countLabel=isEntity?'record(s)':'initiative(s)',joinIssues=(result.joinDiagnostics||[]).filter(join=>join.unmatched>0).map(join=>`${dataSourceLabel(join.source)} → ${dataSourceLabel(join.target)}: ${join.unmatched} unmatched (${join.joinType})`);message(`${result.rows.length} ${countLabel} | ${state.config.values.map(field=>state.config.dataSource==='template'?valueFields[field]:reportFieldLabel(state.config,field)).join(', ')}${joinIssues.length?' | Join results: '+joinIssues.join('; '):''}${!isEntity&&state.config.columns.includes('plannerTypes')&&!result.plannerTypeIds.length?' | No mapped Planner Types. An Admin must confirm the legacy mappings, or choose Legacy Template Milestones.':''}`);
-      }catch(error){state.result=null;state.resultData=null;state.resultConfig=null;document.getElementById('report-preview').replaceChildren();message(error.message,true);}
+      }catch(error){state.result=null;state.resultData=null;state.resultConfig=null;clearPreview();message(error.message,true);}
     }
     async function loadSaved(){
       const result=await supabaseClient.from('report_definitions').select('*').eq('is_active',true).eq('report_type',reportType).order('report_name');
@@ -26966,7 +27153,7 @@
         const reportConfig=clone(state.config);if(reportConfig.dataSource!=='template')delete reportConfig.templateId;
         const payload={report_name:name,report_type:reportType,template_id:state.config.dataSource==='template'?key(state.config.templateId):null,report_config:reportConfig,is_active:true,modified_by:user.id,updated_at:new Date().toISOString(),...(window.milestonePlannerTypes?.state.ready?{planner_type_group_id:state.config.dataSource==='template'?state.config.groupId||null:null}:{})};
         const result=id?await supabaseClient.from('report_definitions').update(payload).eq('id',id).eq('is_active',true).select().single():await supabaseClient.from('report_definitions').insert({...payload,created_by:user.id}).select().single();
-        if(result.error)throw result.error;
+        if(result.error){if(result.error.code==='23502'&&/template_id/.test(result.error.message||''))throw new Error('The database still requires a template for entity reports. Ask an Admin to run supabase-migration-report-definitions-template.sql, then retry saving.');throw result.error;}
         state.selected=result.data.id;state.editing=false;document.getElementById('report-name').value=name;rememberPage();await loadSaved();message('Shared report saved.');
       }finally{state.busy=false;renderZones();}
     }
@@ -27014,6 +27201,11 @@
         if(button.dataset.collapseSource){const source=button.dataset.collapseSource;state.collapsedFieldSources.has(source)?state.collapsedFieldSources.delete(source):state.collapsedFieldSources.add(source);renderAvailableFields();lucide.createIcons();return;}
         if(button.dataset.action==='toggle-fields'){state.collapseAllFields=!state.collapseAllFields;button.title=state.collapseAllFields?'Expand field groups':'Collapse field groups';renderAvailableFields();lucide.createIcons();return;}
         if(button.dataset.action==='preview-page'){state.previewPage=Number(button.dataset.page)||1;preview({renderFilterControls:false});return;}
+        if(button.dataset.pivotId){const id=button.dataset.pivotId;expandedPivotGroups.has(id)?expandedPivotGroups.delete(id):expandedPivotGroups.add(id);preview({renderFilterControls:false});return;}
+        if(['pivot-expand','pivot-collapse'].includes(button.dataset.action)){
+          expandedPivotGroups.clear();if(button.dataset.action==='pivot-expand')for(const node of state.result?.pivotRows||[])if(node.hasChildren)expandedPivotGroups.add(node.id);
+          state.previewPage=1;preview({renderFilterControls:false});return;
+        }
         if(button.dataset.add){moveField(button.dataset.add,button.dataset.field,state.config[button.dataset.add].length);return;}
         if(button.dataset.remove&&editable()){state.config[button.dataset.remove]=state.config[button.dataset.remove].filter(field=>field!==button.dataset.field);if(button.dataset.remove==='values'&&state.config.stageValue===button.dataset.field)state.config.stageValue=state.config.values[0]||'';syncFieldOrder();renderZones();renderFilters();preview();return;}
         if(button.dataset.move&&editable()){const zone=button.dataset.zone,index=state.config[zone].indexOf(button.dataset.field);moveField(zone,button.dataset.field,index+Number(button.dataset.move));return;}
@@ -27040,6 +27232,10 @@
           const source=event.target.value;state.config=defaults(source);state.data=null;state.result=null;state.resultData=null;state.resultConfig=null;state.previewPage=1;document.getElementById('report-preview').replaceChildren();if(source==='template'){await metadata();document.getElementById('report-template').innerHTML='<option value="">Select template</option>'+state.templates.map(template=>`<option value="${html(template.id)}">${html(template.template_name)}${template.is_active===false?' (Archived)':''}</option>`).join('');}renderZones();renderFilters();message(source==='template'?'Choose a template and configure the roadmap.':'Choose fields for '+dataSourceLabel(source)+', then Run the report.');return;
         }
         if(event.target.id==='report-field-search'){state.fieldSearch=event.target.value;renderAvailableFields();lucide.createIcons();return;}
+        if(['report-layout','report-chart-type','report-chart-category'].includes(event.target.id)&&editable()){
+          const property={'report-layout':'layout','report-chart-type':'chartType','report-chart-category':'chartCategory'}[event.target.id];
+          state.config[property]=event.target.value;renderSettings();preview();return;
+        }
         if(event.target.id==='report-sort-date'&&editable()){state.config.sorting={...defaults().sorting,dateField:event.target.value};preview();return;}
         if(event.target.id==='report-type-group'&&editable()){state.config.groupId=event.target.value;preview();return;}
         if(event.target.id==='report-range-field'&&editable()){state.config.dateField=event.target.value;preview();return;}
@@ -27059,19 +27255,28 @@
       if(state.busy)throw new Error('Wait for the report to finish loading.');
       preview();if(!state.result)throw new Error('Run a valid report before exporting.');
       const result=clone(state.result),config=clone(state.config),title=document.getElementById('report-name').value.trim()||'Initiative-wise Milestone Roadmap';
+      const pivot=config.layout==='pivot',graphical=config.layout==='chart',chartImage=graphical&&reportChart?reportChart.toBase64Image():null;
+      if(pivot)result.rows=result.pivotRows.map(node=>node.values);
+      if(graphical){result.headers=result.chartHeaders;result.rows=result.chartRows;}
       const filename=title.replace(/[^a-z0-9_-]+/gi,'_')+'_'+new Date().toISOString().slice(0,10);
       const template=state.templates.find(row=>key(row.id)===config.templateId),entityFields=new Map(reportFieldCatalog(config).map(field=>[field.id,field.groupLabel])),fieldLabel=field=>config.dataSource==='template'?valueFields[field]||milestoneDimensions[field]||filterFields[field]||field:entityFields.get(field)||filterFields[field]||field,sources=[config.primarySource||config.dataSource,...(config.joinedSources||[])].map(dataSourceLabel).join(' + '),relationshipDetails=(config.relationships||[]).map(relation=>`${dataSourceLabel(relation.source)}.${fieldLabel(relation.sourceField)} → ${dataSourceLabel(relation.target)}.${fieldLabel(relation.targetField)} (${relation.cardinality}, ${relation.joinType})`).join('; ');
-      const details=`Data Sources: ${sources}${relationshipDetails?` | Relationships: ${relationshipDetails}`:''}${config.dataSource==='template'?` | Template: ${template?.template_name||config.templateId} | Group: ${window.milestonePlannerTypes?.state.groups.find(group=>key(group.id)===key(config.groupId))?.group_name||'All'}`:''} | Values: ${config.values.map(fieldLabel).join(', ')} | Aggregation: ${Object.entries(config.aggregationRules||{}).map(([field,mode])=>`${fieldLabel(field)}: ${(config.dataSource==='template'?aggregations:entityAggregations)[mode]||mode}`).join('; ')} | Search: ${config.filterValues.search||'All'} | Filters: ${config.filters.map(field=>field==='dateRange'?`${config.filterValues.from||'*'} to ${config.filterValues.to||'*'}`:`${fieldLabel(field)}: ${JSON.stringify(config.filterValues[field]??'All')}`).join('; ')}`;
+      const details=`Layout: ${pivot?'Collapsible Pivot (group subtotals)':graphical?'Graphical - '+config.chartType:'Tabular'} | Data Sources: ${sources}${relationshipDetails?` | Relationships: ${relationshipDetails}`:''}${config.dataSource==='template'?` | Template: ${template?.template_name||config.templateId} | Group: ${window.milestonePlannerTypes?.state.groups.find(group=>key(group.id)===key(config.groupId))?.group_name||'All'}`:''} | Values: ${config.values.map(fieldLabel).join(', ')} | Aggregation: ${Object.entries(config.aggregationRules||{}).map(([field,mode])=>`${fieldLabel(field)}: ${(config.dataSource==='template'?aggregations:entityAggregations)[mode]||mode}`).join('; ')} | Search: ${config.filterValues.search||'All'} | Filters: ${config.filters.map(field=>field==='dateRange'?`${config.filterValues.from||'*'} to ${config.filterValues.to||'*'}`:`${fieldLabel(field)}: ${JSON.stringify(config.filterValues[field]??'All')}`).join('; ')}`;
       const table=[result.headers,...result.rows];
       if(format==='excel'){
         const workbook=XLSX.utils.book_new(),sheet=XLSX.utils.aoa_to_sheet(table);
+        if(pivot){
+          if(config.rows.length>8)throw new Error('Excel outlines support at most eight Rows levels. Remove Rows fields or choose another export format.');
+          const visible=new Set();sheet['!outline']={above:true};
+          sheet['!rows']=[{},...result.pivotRows.map(node=>{const hidden=node.parentId!==null&&(!visible.has(node.parentId)||!expandedPivotGroups.has(node.parentId));if(!hidden)visible.add(node.id);return {level:node.depth,hidden,collapsed:node.hasChildren&&!expandedPivotGroups.has(node.id)};})];
+        }
         sheet['!cols']=result.headers.map(()=>({wch:28}));
-        XLSX.utils.book_append_sheet(workbook,sheet,(config.dataSource==='template'?'Milestone Roadmap':dataSourceLabel(config.dataSource)).slice(0,31));XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([[title],[details],['Exported',new Date().toISOString()]]),'Report Details');XLSX.writeFile(workbook,filename+'.xlsx');
+        XLSX.utils.book_append_sheet(workbook,sheet,(config.dataSource==='template'?'Milestone Roadmap':dataSourceLabel(config.dataSource)).slice(0,31));XLSX.utils.book_append_sheet(workbook,XLSX.utils.aoa_to_sheet([[title],[details],...(pivot?[['Excel outline with subtotals, not a native Excel PivotTable.']]:graphical?[['Chart data only in Excel; PDF, Word and PowerPoint also include the chart image.']]:[]),['Exported',new Date().toISOString()]]),'Report Details');XLSX.writeFile(workbook,filename+'.xlsx');
       }else if(format==='pdf'){
         if(!window.jspdf?.jsPDF)throw new Error('PDF library failed to load.');
         const pdf=new window.jspdf.jsPDF({orientation:'landscape',unit:'mm',format:'a4'}),width=277;
         const chunks=[];for(let offset=0;offset<result.headers.length;offset+=7)chunks.push(Array.from({length:Math.min(7,result.headers.length-offset)},(_,index)=>offset+index));
         let first=true;
+        if(chartImage){pdf.setFontSize(12);pdf.text(title,10,12,{maxWidth:width});pdf.addImage(chartImage,'PNG',10,25,width,150);first=false;}
         for(const columns of chunks){
           if(!first)pdf.addPage();first=false;
           const cellWidth=width/columns.length;
@@ -27083,11 +27288,13 @@
         pdf.save(filename+'.pdf');
       }else if(format==='word'){
         if(!window.docx)throw new Error('Word library failed to load.');
-        const {Document,Packer,Paragraph,Table,TableRow,TableCell,WidthType}=window.docx;
-        const documentFile=new Document({sections:[{properties:{page:{size:{orientation:'landscape',width:16838,height:11906}}},children:[new Paragraph({text:title,heading:'Title'}),new Paragraph(details),new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:table.map((row,index)=>new TableRow({tableHeader:index===0,children:row.map(cell=>new TableCell({children:key(cell).split('\n').map(text=>new Paragraph(text))}))}))})]}]});download(await Packer.toBlob(documentFile),filename+'.docx');
+        const {Document,Packer,Paragraph,Table,TableRow,TableCell,WidthType,ImageRun}=window.docx;
+        const image=chartImage?[new Paragraph({children:[new ImageRun({type:'png',data:Uint8Array.from(atob(chartImage.split(',')[1]),character=>character.charCodeAt(0)),transformation:{width:900,height:400}})]})]:[];
+        const documentFile=new Document({sections:[{properties:{page:{size:{orientation:'landscape',width:16838,height:11906}}},children:[new Paragraph({text:title,heading:'Title'}),new Paragraph(details),...image,new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:table.map((row,index)=>new TableRow({tableHeader:index===0,children:row.map(cell=>new TableCell({children:key(cell).split('\n').map(text=>new Paragraph(text))}))}))})]}]});download(await Packer.toBlob(documentFile),filename+'.docx');
       }else if(format==='powerpoint'){
         if(!window.PptxGenJS)throw new Error('PowerPoint library failed to load.');
         const presentation=new window.PptxGenJS();presentation.layout='LAYOUT_WIDE';presentation.author=currentUser.name||'';presentation.subject=details;presentation.title=title;
+        if(chartImage){const slide=presentation.addSlide();slide.addText(title,{x:.3,y:.2,w:12.7,h:.5,fontSize:18,color:'0F172A'});slide.addImage({data:chartImage,x:.3,y:1,w:12.7,h:5.6});}
         for(let offset=0;offset<result.headers.length;offset+=6){const columns=Array.from({length:Math.min(6,result.headers.length-offset)},(_,index)=>offset+index);for(let start=0;start<Math.max(1,result.rows.length);start+=12){const slide=presentation.addSlide();slide.addText(title,{x:.3,y:.2,w:12.7,h:.4,fontSize:18,color:'0F172A'});slide.addText(details,{x:.3,y:.7,w:12.7,h:.7,fontSize:8,color:'475569',fit:'shrink'});slide.addTable([columns.map(index=>({text:result.headers[index],options:{bold:true,fill:'E0F2F1'}})),...result.rows.slice(start,start+12).map(row=>columns.map(index=>row[index]))],{x:.3,y:1.5,w:12.7,fontSize:9,border:{pt:.5,color:'CBD5E1'},margin:.06,autoPage:true,autoPageRepeatHeader:true,autoPageSlideStartY:1.5});}}
         await presentation.writeFile({fileName:filename+'.pptx'});
       }else throw new Error('Unsupported export format.');
@@ -27120,7 +27327,7 @@
     window.loadPlanners=async function(){const result=await priorLoadPlanners.apply(this,arguments);const next=JSON.stringify(plannerTemplates.map(row=>[row.id,row.updated_at,row.is_active]));if(next!==fingerprint){fingerprint=next;invalidate();}return result;};
     const priorLoadInitiatives=window.loadInitiativesFromSupabase;
     window.loadInitiativesFromSupabase=async function(){const result=await priorLoadInitiatives.apply(this,arguments);try{if(result!==false&&state.data&&state.config?.dataSource==='template'&&currentUser){state.data.initiatives=kpiInitiativeRows.slice();state.data.milestones=kpiMilestoneRows.slice();if(!state.busy&&root()&&['report_builder','custom_reports'].includes(currentWorkspaceView)){state.result=null;state.resultData=null;state.resultConfig=null;await metadata();renderFilters();preview();}}}catch(error){state.result=null;state.resultData=null;state.resultConfig=null;document.getElementById('report-preview')?.replaceChildren();message('Report refresh failed: '+error.message,true);}return result;};
-    supabaseClient.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT'){state.user=null;state.data=null;state.result=null;state.saved=[];state.pages={report_builder:null,custom_reports:null};state.catalog={search:'',template:'',dateField:''};state.request++;state.openRequest++;state.metadataPromise=null;clearTimeout(state.refreshTimer);if(state.channel)supabaseClient.removeChannel(state.channel);state.channel=null;root()?.remove();const page=document.getElementById('custom-reports-page');if(page){page.querySelector('#report-catalog-table')?.replaceChildren();page.querySelector('#report-catalog-status')?.replaceChildren();}hideReportPages();}});
+    supabaseClient.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT'){destroyReportChart();expandedPivotGroups.clear();state.user=null;state.data=null;state.result=null;state.saved=[];state.pages={report_builder:null,custom_reports:null};state.catalog={search:'',template:'',dateField:''};state.request++;state.openRequest++;state.metadataPromise=null;clearTimeout(state.refreshTimer);if(state.channel)supabaseClient.removeChannel(state.channel);state.channel=null;root()?.remove();const page=document.getElementById('custom-reports-page');if(page){page.querySelector('#report-catalog-table')?.replaceChildren();page.querySelector('#report-catalog-status')?.replaceChildren();}hideReportPages();}});
   })();
   </script>
   <script id="delivery-report-supabase-sql" type="text/plain">
@@ -27129,7 +27336,7 @@
     id uuid primary key default gen_random_uuid(),
     report_name text not null check (length(trim(report_name)) between 1 and 160),
     report_type text not null,
-    template_id text not null,
+    template_id text,
     report_config jsonb not null check (jsonb_typeof(report_config) = 'object'),
     is_active boolean not null default true,
     created_by uuid not null references auth.users(id),
@@ -28643,11 +28850,19 @@
       const secondary=bar.querySelector('.unified-filter-secondary');
       const controls=[...bar.querySelectorAll('.unified-filter-primary input,.unified-filter-primary select')].filter(control=>!control.closest('.strict-filter-hidden'));
       const items=[...new Set(controls.map(control=>control.closest('.unified-search-host')||control))];
+      const collapsed=bar.classList.contains('is-collapsed');
+      bar.classList.toggle('is-expanded',!collapsed);
+      secondary?.toggleAttribute('inert',collapsed);
+      secondary?.setAttribute('aria-hidden',String(collapsed));
+      if(!collapsed)bar.querySelectorAll('[data-unified-tabindex]').forEach(control=>{
+        const previous=control.getAttribute('data-unified-tabindex');
+        previous===''?control.removeAttribute('tabindex'):control.setAttribute('tabindex',previous);
+        control.removeAttribute('data-unified-tabindex');
+      });
       if(window.matchMedia('(max-width: 640px)').matches){
         [bar,primary,actions,reset,toggle,spacer,legacyActions,secondary,...items,...controls,...[...(secondary?.querySelectorAll('select,.delivery-date-range-control')||[])]].forEach(restoreStyle);
         return;
       }
-      const collapsed=bar.classList.contains('is-collapsed');
       [...bar.querySelectorAll(':scope > [data-date-range-page="overview"]')].forEach(host=>secondary?.appendChild(host));
       const seenDateIds=new Set();
       secondary?.querySelectorAll('.delivery-date-range-control').forEach(label=>{
