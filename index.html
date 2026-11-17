@@ -3631,6 +3631,7 @@
         tracks:
           (tracksByInitiative.get(Number(row.id)) || [])
             .map(track => ({
+    persistedOrderRow: {...track},
     id:
       Number(track.id),
 
@@ -4111,10 +4112,19 @@
         const status = evaluateProjectStatus(initiative.name, initiative.revisedStartDate || initiative.startDate, getEffectiveEndDate(initiative.targetEndDate, initiative.revisedEndDate), initiative.actualEndDate);
         if (!status) return status;
         const today = localToday();
+        const trackStatuses = new Map();
         const hasPendingAction = (initiative.milestones || []).some(milestone => {
           if (['deleted', 'archived'].includes(String(milestone.recordStatus || milestone.record_status || 'active').trim().toLowerCase())) return false;
-          if (getEffectiveMilestoneStatus(milestone) === 'Pending') return true;
+          const milestoneStatus = getEffectiveMilestoneStatus(milestone);
+          if (milestoneStatus === 'Pending') return true;
           if (hasMilestoneCompletion(milestone)) return false;
+          if (milestoneStatus === 'On-Hold') {
+            const track = (initiative.tracks || []).find(item => Number(item.id) === Number(milestone.trackId));
+            if (track) {
+              if (!trackStatuses.has(track.id)) trackStatuses.set(track.id, getTrackSummary(initiative, track).status);
+              if (trackStatuses.get(track.id) === 'Done') return false;
+            }
+          }
           const endDate = milestone.endDate || milestone.end_date || '';
           const deadline = milestone.deadline || '';
           return (/^\d{4}-\d{2}-\d{2}$/.test(endDate) && endDate < today) ||
@@ -9633,23 +9643,104 @@
     return { initiativeId: Number(match[1]), trackId: Number(match[2]) };
   }
 
+  const trackOrderAnimations = new Map(), trackOrderEchoes = new Map();
+  const trackOrderAuditFields = new Set(['sequence_no','display_order','updated_at','modified_at','modified_time','modified_by','modified_by_name','updated_by','updated_by_name']);
+  let trackOrderPreview = null, trackOrderPreviewFrame = 0, pendingTrackOrderPreview = null;
+  const trackOrderList = initiativeId => document.querySelector(`.track-order-list[data-track-order-list="${Number(initiativeId)}"]`);
+  function trackOrderBlockReason(project) {
+    const reason = trackReorderBlockReason(project);
+    if (reason) return reason;
+    if (window._trackSequenceSaveLocks?.has(Number(project.id))) return 'Saving Track order. Please wait.';
+    const list = trackOrderList(project.id);
+    const displayed = new Set([...(list?.children || [])].map(card => trackCardIdentity(card)?.trackId));
+    if (!list || (project.tracks || []).some(track => !displayed.has(Number(track.id)))) return 'Show all active Tracks in this Initiative before reordering.';
+    return '';
+  }
+  function captureTrackOrderPositions(list) {
+    const positions = new Map();
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return positions;
+    for (const card of list.children) {
+      if (!card.dataset.trackOrderId) continue;
+      const rect = card.getBoundingClientRect();
+      if (rect.bottom >= 0 && rect.top <= innerHeight) positions.set(card, rect.top);
+    }
+    return positions;
+  }
+  function cancelTrackOrderAnimations() {
+    for (const animation of trackOrderAnimations.values()) animation.cancel();
+    trackOrderAnimations.clear();
+  }
+  function animateTrackOrderPositions(positions) {
+    for (const [card, top] of positions) {
+      if (!card.isConnected) continue;
+      const delta = top - card.getBoundingClientRect().top;
+      if (Math.abs(delta) <= 1) continue;
+      const animation = card.animate([{transform:`translateY(${delta}px)`},{transform:'translateY(0)'}], {duration:160,easing:'cubic-bezier(.2,.8,.2,1)'});
+      trackOrderAnimations.set(card, animation);
+      animation.onfinish = () => { if (trackOrderAnimations.get(card) === animation) trackOrderAnimations.delete(card); };
+    }
+  }
+  function hideTrackOrderGap() {
+    if (!trackOrderPreview?.gap.isConnected) return;
+    const positions = captureTrackOrderPositions(trackOrderPreview.list);
+    cancelTrackOrderAnimations();
+    trackOrderPreview.gap.remove();
+    trackOrderPreview.targetId = null;
+    animateTrackOrderPositions(positions);
+  }
+  function finishTrackOrderPreview() {
+    if (trackOrderPreviewFrame) cancelAnimationFrame(trackOrderPreviewFrame);
+    trackOrderPreviewFrame = 0; pendingTrackOrderPreview = null;
+    if (!trackOrderPreview) return;
+    hideTrackOrderGap();
+    trackOrderPreview.list.classList.remove('track-order-preview');
+    trackOrderPreview.card.classList.remove('track-order-dragging');
+    trackOrderPreview = null;
+  }
+  function updateTrackOrderPreview() {
+    trackOrderPreviewFrame = 0;
+    const next = pendingTrackOrderPreview; pendingTrackOrderPreview = null;
+    if (!trackOrderPreview || trackOrderPreview.saving || !next) return;
+    const {target, clientY} = next, preview = trackOrderPreview;
+    if (target === preview.gap) return;
+    if (!target?.isConnected || Number(target.dataset.trackOrderInitiativeId) !== preview.initiativeId || target === preview.card) { hideTrackOrderGap(); return; }
+    const rect = target.getBoundingClientRect(), after = clientY > rect.top + rect.height / 2;
+    const targetId = Number(target.dataset.trackOrderId);
+    if (preview.targetId === targetId && preview.after === after) return;
+    const cards = [...preview.list.children].filter(card => card.dataset.trackOrderId);
+    const sourceIndex = cards.indexOf(preview.card), targetIndex = cards.indexOf(target);
+    if (targetIndex + (after ? 1 : 0) === sourceIndex || targetIndex + (after ? 1 : 0) === sourceIndex + 1) { hideTrackOrderGap(); return; }
+    const positions = captureTrackOrderPositions(preview.list);
+    cancelTrackOrderAnimations();
+    preview.list.insertBefore(preview.gap, after ? target.nextSibling : target);
+    preview.targetId = targetId; preview.after = after;
+    animateTrackOrderPositions(positions);
+  }
+
   function updateTrackOrderDom(project) {
-    const list = document.querySelector(`.track-order-list[data-track-order-list="${Number(project.id)}"]`);
+    const list = trackOrderList(project.id);
     if (!list) return;
+    const positions = captureTrackOrderPositions(list);
+    cancelTrackOrderAnimations();
+    if (trackOrderPreview?.initiativeId === Number(project.id)) trackOrderPreview.gap.remove();
     const cards = new Map([...list.querySelectorAll(':scope > [data-track-order-id]')].map(card => [Number(card.dataset.trackOrderId), card]));
+    const fragment = document.createDocumentFragment();
     for (const track of getOrderedInitiativeTracks(project)) {
       const card = cards.get(Number(track.id));
       if (!card) continue;
       const title = card.querySelector('.track-card-title');
       if (title) title.textContent = `Track ${track.sequenceNo} - ${track.name}`;
-      list.appendChild(card);
+      fragment.appendChild(card);
     }
+    list.appendChild(fragment);
+    animateTrackOrderPositions(positions);
     decorateTrackReorderControls();
   }
 
   function clearTrackDragState() {
     window._draggingTrack = null;
-    document.querySelectorAll('.track-order-dragging,.track-order-drop-before,.track-order-drop-after').forEach(card => card.classList.remove('track-order-dragging','track-order-drop-before','track-order-drop-after'));
+    if (!trackOrderPreview?.saving) finishTrackOrderPreview();
+    document.querySelectorAll('[data-track-order-id].track-order-dragging,[data-track-order-id].track-order-drop-before,[data-track-order-id].track-order-drop-after').forEach(card => card.classList.remove('track-order-dragging','track-order-drop-before','track-order-drop-after'));
   }
 
   function decorateTrackReorderControls() {
@@ -9675,13 +9766,13 @@
       }
       const tracks = getOrderedInitiativeTracks(project).filter(item => item.recordStatus !== 'deleted');
       const index = tracks.findIndex(item => Number(item.id) === Number(track.id));
-      const reason = trackReorderBlockReason(project);
+      const reason = trackOrderBlockReason(project);
       const saving = window._trackSequenceSaveLocks?.has(Number(project.id)) === true;
       const up = controls.querySelector('[data-track-move="up"]');
       const down = controls.querySelector('[data-track-move="down"]');
       const drag = controls.querySelector('[data-track-drag-handle]');
-      if (up) { up.disabled = Boolean(reason) || saving || index <= 0; up.title = reason || (index <= 0 ? 'Track is already first' : 'Move Track Up'); up.onclick = () => queueTrackSequenceMove(project.id, track.id, tracks[index - 1]?.id, false); }
-      if (down) { down.disabled = Boolean(reason) || saving || index < 0 || index >= tracks.length - 1; down.title = reason || (index >= tracks.length - 1 ? 'Track is already last' : 'Move Track Down'); down.onclick = () => queueTrackSequenceMove(project.id, track.id, tracks[index + 1]?.id, true); }
+      if (up) { up.disabled = Boolean(reason) || saving || index <= 0; up.title = reason || (index <= 0 ? 'Track is already first' : 'Move Track Up'); up.onclick = () => queueTrackSequenceMove(project.id, track.id, tracks[index - 1]?.id, false, up); }
+      if (down) { down.disabled = Boolean(reason) || saving || index < 0 || index >= tracks.length - 1; down.title = reason || (index >= tracks.length - 1 ? 'Track is already last' : 'Move Track Down'); down.onclick = () => queueTrackSequenceMove(project.id, track.id, tracks[index + 1]?.id, true, down); }
       if (drag) { drag.disabled = Boolean(reason) || saving; drag.draggable = !reason && !saving; drag.title = reason || 'Drag to reorder Track'; }
       if (reason) controls.setAttribute('aria-label', reason);
       else controls.removeAttribute('aria-label');
@@ -9689,82 +9780,77 @@
     if (window.lucide?.createIcons) window.lucide.createIcons();
   }
 
-  function queueTrackSequenceMove(initiativeId, sourceTrackId, targetTrackId, afterTarget) {
-    if (targetTrackId == null || Number(sourceTrackId) === Number(targetTrackId)) return;
+  async function queueTrackSequenceMove(initiativeId, sourceTrackId, targetTrackId, afterTarget, origin = null) {
+    if (targetTrackId == null || Number(sourceTrackId) === Number(targetTrackId)) return false;
     const project = projects.find(item => Number(item.id) === Number(initiativeId));
-    const reason = trackReorderBlockReason(project);
-    if (reason) return showToast(reason, 'info');
-    window._trackSequenceQueues ||= new Map();
-    let queue = window._trackSequenceQueues.get(Number(initiativeId));
-    if (!queue) { queue = { moves: [], timer: null }; window._trackSequenceQueues.set(Number(initiativeId), queue); }
-    queue.moves.push({ sourceTrackId: Number(sourceTrackId), targetTrackId: Number(targetTrackId), afterTarget: Boolean(afterTarget) });
-    clearTimeout(queue.timer);
-    queue.timer = setTimeout(() => flushTrackSequenceMoves(Number(initiativeId)), 160);
-  }
-
-  async function flushTrackSequenceMoves(initiativeId) {
-    const queue = window._trackSequenceQueues?.get(Number(initiativeId));
-    if (!queue?.moves.length) return;
+    const reason = trackOrderBlockReason(project);
+    if (reason) { showToast(reason, 'info'); return false; }
+    const previous = getOrderedInitiativeTracks(project), ordered = previous.slice();
+    const sourceIndex = ordered.findIndex(track => Number(track.id) === Number(sourceTrackId));
+    const targetIndex = ordered.findIndex(track => Number(track.id) === Number(targetTrackId));
+    if (sourceIndex < 0 || targetIndex < 0) { showToast('Track is unavailable. Refresh this Initiative before reordering.', 'error'); return false; }
+    const [source] = ordered.splice(sourceIndex, 1);
+    ordered.splice(ordered.findIndex(track => Number(track.id) === Number(targetTrackId)) + (afterTarget ? 1 : 0), 0, source);
+    if (ordered.every((track, index) => track === previous[index])) return false;
     window._trackSequenceSaveLocks ||= new Set();
-    if (window._trackSequenceSaveLocks.has(Number(initiativeId))) { queue.timer = setTimeout(() => flushTrackSequenceMoves(Number(initiativeId)), 160); return; }
-    const moves = queue.moves.splice(0);
-    const project = projects.find(item => Number(item.id) === Number(initiativeId));
-    const reason = trackReorderBlockReason(project);
-    if (reason) { queue.moves.length = 0; window._trackSequenceQueues.delete(Number(initiativeId)); return showToast(reason, 'info'); }
-    const originalTracks = [...(project.tracks || [])];
-    const originalValues = new Map(originalTracks.map(track => [Number(track.id), { sequenceNo: track.sequenceNo, displayOrder: track.displayOrder }]));
-    const ordered = getOrderedInitiativeTracks(project);
-    for (const move of moves) {
-      const sourceIndex = ordered.findIndex(track => Number(track.id) === move.sourceTrackId);
-      const targetIndex = ordered.findIndex(track => Number(track.id) === move.targetTrackId);
-      if (sourceIndex < 0 || targetIndex < 0) continue;
-      const [source] = ordered.splice(sourceIndex, 1);
-      const adjustedTargetIndex = ordered.findIndex(track => Number(track.id) === move.targetTrackId);
-      ordered.splice(adjustedTargetIndex + (move.afterTarget ? 1 : 0), 0, source);
-    }
-    if (ordered.every((track, index) => Number(track.id) === Number(originalTracks.slice().sort((a,b)=>Number(a.sequenceNo||a.displayOrder||0)-Number(b.sequenceNo||b.displayOrder||0))[index]?.id))) {
-      if (!queue.moves.length) window._trackSequenceQueues.delete(Number(initiativeId));
-      return;
-    }
     window._trackSequenceSaveLocks.add(Number(initiativeId));
     decorateTrackReorderControls();
-    const timestamp = new Date().toISOString();
-    const payload = ordered.map((track, index) => ({ id: Number(track.id), initiative_id: Number(initiativeId), sequence_no: index + 1, display_order: index + 1, updated_at: timestamp }));
+    const expected = previous.map(track => ({id:Number(track.id),sequence_no:track.persistedOrderRow ? track.persistedOrderRow.sequence_no ?? null : track.sequenceNo ?? null,display_order:track.persistedOrderRow ? track.persistedOrderRow.display_order ?? null : track.displayOrder ?? null}));
+    const highWater = Math.max(0, ...expected.flatMap(row => [Number(row.sequence_no)||0,Number(row.display_order)||0]));
+    for (const [id, echo] of trackOrderEchoes) if (echo.until < Date.now()) trackOrderEchoes.delete(id);
+    ordered.forEach((track, index) => {
+      if (track.persistedOrderRow) trackOrderEchoes.set(Number(track.id), {initiativeId:Number(initiativeId),baseline:{...track.persistedOrderRow},temporary:highWater+index+1,final:index+1,until:Date.now()+15000});
+    });
+    let view = null;
     try {
-      const highWater = Math.max(0, ...originalTracks.flatMap(track=>[Number(track.sequenceNo)||0,Number(track.displayOrder)||0])) + ordered.length + 1;
-      for(const [index,track] of ordered.entries()){
-        const temporaryOrder=highWater+index,result=await supabaseClient.from('milestone_tracks').update({sequence_no:temporaryOrder,display_order:temporaryOrder,updated_at:timestamp}).eq('id',Number(track.id));
-        if(result.error)throw result.error;
-      }
-      const results=await Promise.all(payload.map(row=>supabaseClient.from('milestone_tracks').update({sequence_no:row.sequence_no,display_order:row.display_order,updated_at:timestamp}).eq('id',row.id).select('id,initiative_id,sequence_no,display_order').single()));
-      const failed=results.find(result=>result.error);if(failed)throw failed.error;
-      const confirmed = new Map(results.map(result=>[Number(result.data?.id),result.data]));
-      for (const [index, track] of ordered.entries()) {
+      const result = await supabaseClient.rpc('reorder_milestone_tracks', {p_initiative_id:Number(initiativeId),p_track_ids:ordered.map(track => Number(track.id)),p_expected:expected});
+      if (result.error) throw new Error(['PGRST202','42883'].includes(result.error.code) ? 'Run supabase-migration-track-reorder.sql in Supabase before reordering Tracks.' : result.error.message);
+      const confirmed = new Map((Array.isArray(result.data) ? result.data : []).map(row => [Number(row.id), row]));
+      if (!Array.isArray(result.data) || result.data.length !== ordered.length || confirmed.size !== ordered.length || ordered.some((track,index) => {
         const row = confirmed.get(Number(track.id));
-        if (!row || Number(row.initiative_id) !== Number(initiativeId) || Number(row.sequence_no) !== index + 1 || Number(row.display_order) !== index + 1) throw new Error('Supabase returned an inconsistent Track order.');
+        return !row || Number(row.sequence_no) !== index+1 || Number(row.display_order) !== index+1 || row.initiative_id != null && Number(row.initiative_id) !== Number(initiativeId);
+      })) throw new Error('Supabase did not confirm the Track order. Refresh this Initiative before retrying.');
+      for (const [index, track] of ordered.entries()) {
         track.sequenceNo = index + 1;
         track.displayOrder = index + 1;
+        const row = confirmed.get(Number(track.id));
+        if (track.persistedOrderRow) Object.assign(track.persistedOrderRow, row);
+        if (row.updated_at) track.updatedAt = row.updated_at;
       }
       project.tracks = ordered;
+      view = captureDeliveryViewState(origin, {layoutOnly:true});
+      view.anchor = null; view.neighbors = []; view.milestoneId = null;
       updateTrackOrderDom(project);
       showToast('Track order saved.', 'success');
+      return true;
     } catch (error) {
-      try{
-        const rollbackHighWater=Math.max(0,...ordered.map(track=>Number(track.sequenceNo)||0),...originalTracks.flatMap(track=>[Number(track.sequenceNo)||0,Number(track.displayOrder)||0]))+ordered.length*2+1;
-        for(const [index,track] of ordered.entries()){const temporaryOrder=rollbackHighWater+index;await supabaseClient.from('milestone_tracks').update({sequence_no:temporaryOrder,display_order:temporaryOrder,updated_at:new Date().toISOString()}).eq('id',Number(track.id));}
-        for(const track of originalTracks){const values=originalValues.get(Number(track.id));await supabaseClient.from('milestone_tracks').update({sequence_no:Number(values.sequenceNo),display_order:Number(values.displayOrder),updated_at:new Date().toISOString()}).eq('id',Number(track.id));}
-      }catch(rollbackError){console.error('Track order rollback failed:',rollbackError);}
-      project.tracks = originalTracks;
-      originalTracks.forEach(track => Object.assign(track, originalValues.get(Number(track.id))));
-      updateTrackOrderDom(project);
+      ordered.forEach(track => trackOrderEchoes.delete(Number(track.id)));
       showToast(`Unable to save Track order: ${error?.message || error}`, 'error');
+      return false;
     } finally {
+      if (trackOrderPreview?.initiativeId === Number(initiativeId)) { trackOrderPreview.saving = false; finishTrackOrderPreview(); }
       window._trackSequenceSaveLocks.delete(Number(initiativeId));
       decorateTrackReorderControls();
-      if (queue.moves.length) { queue.timer = setTimeout(() => flushTrackSequenceMoves(Number(initiativeId)), 0); }
-      else window._trackSequenceQueues.delete(Number(initiativeId));
+      if (view) restoreDeliveryViewState(view, {restoreFocus:false,defer:false});
     }
   }
+
+  function acceptTrackOrderRealtime(payload) {
+    if (payload?.table !== 'milestone_tracks' || payload.eventType !== 'UPDATE') return false;
+    const row = payload.new, echo = trackOrderEchoes.get(Number(row?.id));
+    if (!echo) return false;
+    if (echo.until < Date.now()) { trackOrderEchoes.delete(Number(row.id)); return false; }
+    const final = Number(row.sequence_no) === echo.final && Number(row.display_order) === echo.final;
+    const temporary = Number(row.sequence_no) === echo.temporary && Number(row.display_order) === echo.temporary;
+    const accepted = Number(row.initiative_id) === echo.initiativeId && (final || temporary) && Object.keys(row).every(field => trackOrderAuditFields.has(field) || JSON.stringify(row[field]) === JSON.stringify(echo.baseline[field]));
+    if (accepted && final) {
+      const track = projects.find(project => Number(project.id) === echo.initiativeId)?.tracks?.find(track => Number(track.id) === Number(row.id));
+      if (track?.persistedOrderRow) for (const field of trackOrderAuditFields) if (Object.hasOwn(row,field) && !['sequence_no','display_order'].includes(field)) track.persistedOrderRow[field] = row[field];
+      trackOrderEchoes.delete(Number(row.id));
+    }
+    return accepted;
+  }
+  window.deliveryTrackReorder = {acceptRealtime:acceptTrackOrderRealtime};
 
   (function installTrackReorderInteractions() {
     if (window._trackReorderInteractionsInstalled) return;
@@ -9775,29 +9861,47 @@
       if (!handle || !card || handle.disabled || !handle.draggable) { if (handle) event.preventDefault(); return; }
       const initiativeId = Number(card.dataset.trackOrderInitiativeId), trackId = Number(card.dataset.trackOrderId);
       const project = projects.find(item => Number(item.id) === initiativeId);
-      const reason = trackReorderBlockReason(project);
+      const reason = trackOrderBlockReason(project);
       if (reason) { event.preventDefault(); showToast(reason, 'info'); return; }
-      window._draggingTrack = { initiativeId, trackId };
+      event.stopPropagation();
+      finishTrackOrderPreview();
+      const list = trackOrderList(initiativeId), gap = document.createElement('div');
+      gap.className = 'track-order-gap'; gap.dataset.trackDropGap = 'true'; gap.setAttribute('aria-hidden','true');
+      gap.style.height = `${Math.min(card.getBoundingClientRect().height,180)}px`;
+      trackOrderPreview = {list,card,gap,initiativeId,targetId:null,after:false,saving:false};
+      list.classList.add('track-order-preview');
+      window._draggingTrack = { initiativeId, trackId, origin:handle };
       event.dataTransfer?.setData('text/plain', `${initiativeId}:${trackId}`);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
       card.classList.add('track-order-dragging');
     }, true);
     document.addEventListener('dragover', event => {
-      const target = event.target.closest?.('[data-track-order-id]'), dragging = window._draggingTrack;
-      if (!target || !dragging || Number(target.dataset.trackOrderInitiativeId) !== dragging.initiativeId) return;
-      event.preventDefault();
-      document.querySelectorAll('.track-order-drop-before,.track-order-drop-after').forEach(card => card.classList.remove('track-order-drop-before','track-order-drop-after'));
-      const after = event.clientY > target.getBoundingClientRect().top + target.getBoundingClientRect().height / 2;
-      target.classList.add(after ? 'track-order-drop-after' : 'track-order-drop-before');
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+      const target = event.target.closest?.('[data-track-order-id],[data-track-drop-gap]'), dragging = window._draggingTrack;
+      if (!dragging) return;
+      event.preventDefault(); event.stopPropagation();
+      const sameInitiative = target === trackOrderPreview?.gap || Boolean(target) && Number(target.dataset.trackOrderInitiativeId) === dragging.initiativeId;
+      pendingTrackOrderPreview = {target,clientY:event.clientY};
+      if (!trackOrderPreviewFrame) trackOrderPreviewFrame = requestAnimationFrame(() => {
+        const next = pendingTrackOrderPreview;
+        updateTrackOrderPreview();
+        if (next?.target && window._draggingTrack && (next.target === trackOrderPreview?.gap || Number(next.target.dataset.trackOrderInitiativeId) === dragging.initiativeId)) autoScrollMilestoneDropContainer({clientY:next.clientY},next.target);
+      });
+      if (event.dataTransfer) event.dataTransfer.dropEffect = sameInitiative ? 'move' : 'none';
     }, true);
     document.addEventListener('drop', event => {
-      const target = event.target.closest?.('[data-track-order-id]'), dragging = window._draggingTrack;
-      if (!target || !dragging || Number(target.dataset.trackOrderInitiativeId) !== dragging.initiativeId) return;
-      event.preventDefault();
-      const after = target.classList.contains('track-order-drop-after');
-      queueTrackSequenceMove(dragging.initiativeId, dragging.trackId, Number(target.dataset.trackOrderId), after);
-      clearTrackDragState();
+      const target = event.target.closest?.('[data-track-order-id],[data-track-drop-gap]'), dragging = window._draggingTrack;
+      if (!dragging) return;
+      event.preventDefault(); event.stopPropagation();
+      if (trackOrderPreviewFrame) cancelAnimationFrame(trackOrderPreviewFrame);
+      pendingTrackOrderPreview = {target,clientY:event.clientY}; updateTrackOrderPreview();
+      if (!target || target !== trackOrderPreview?.gap && Number(target.dataset.trackOrderInitiativeId) !== dragging.initiativeId) { clearTrackDragState(); showToast('Tracks can only be reordered within the same Initiative.','info'); return; }
+      if (!trackOrderPreview?.targetId) { clearTrackDragState(); return; }
+      const targetId = trackOrderPreview.targetId, after = trackOrderPreview.after;
+      trackOrderPreview.saving = true; trackOrderPreview.gap.dataset.saving = 'true';
+      window._draggingTrack = null;
+      queueTrackSequenceMove(dragging.initiativeId, dragging.trackId, targetId, after, dragging.origin).finally(() => {
+        if (trackOrderPreview?.initiativeId === dragging.initiativeId) { trackOrderPreview.saving = false; finishTrackOrderPreview(); }
+      });
     }, true);
     document.addEventListener('dragend', clearTrackDragState, true);
     const previousRender = renderProjects;
@@ -17196,7 +17300,7 @@
   let deliveryRealtimeChannel=null,deliveryRealtimeRefreshTimer=null,deliveryRealtimeRefreshInProgress=false,deliveryRealtimeRefreshPending=false;
   function renderActiveDeliveryWorkspace(){updateDailyTrackerBadge();if(currentWorkspaceView==='daily')renderDailyTrackerPage();else if(currentWorkspaceView==='overview')renderProjects();else renderFlatWorkspacePage();}
   async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._draggingInitiative||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size||window._programSequenceSaveLocks?.size||window.deliveryPlannerFetch?.busy||window.deliveryMilestoneDependency?.busy){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
-  function queueDeliveryRealtimeRefresh(payload){if(window.deliveryInitiativeReorder?.acceptRealtime(payload)||window.deliveryMilestoneDependency?.acceptRealtime(payload))return;clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
+  function queueDeliveryRealtimeRefresh(payload){if(window.deliveryTrackReorder?.acceptRealtime(payload)||window.deliveryInitiativeReorder?.acceptRealtime(payload)||window.deliveryMilestoneDependency?.acceptRealtime(payload))return;clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
   function initializeDeliveryRealtime(){if(deliveryRealtimeChannel||!currentUser||!supabaseClient?.channel)return;deliveryRealtimeChannel=supabaseClient.channel('delivery-hub-live').on('postgres_changes',{event:'*',schema:'public',table:'programs'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'initiatives'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestone_tracks'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestones'},queueDeliveryRealtimeRefresh).subscribe(status=>{if(status==='CHANNEL_ERROR')console.error('Delivery Hub realtime channel failed.');});}
   const existingLoadInitiativesFromSupabase=loadInitiativesFromSupabase;
   loadInitiativesFromSupabase=async function(...args){const loaded=await existingLoadInitiativesFromSupabase.apply(this,args);if(loaded&&currentUser)initializeDeliveryRealtime();return loaded;};
@@ -22418,7 +22522,7 @@
     function allControlHosts(bar){const controls=[...bar.querySelectorAll('input,select')].filter(el=>!el.closest('.unified-filter-primary'));return [...new Set(controls.map(el=>directHost(el,bar)))];}
     function setAccessible(node,enabled){node.toggleAttribute('inert',!enabled);node.setAttribute('aria-hidden',String(!enabled));node.querySelectorAll('input,select,button,a,[tabindex]').forEach(el=>{if(!enabled){if(!el.hasAttribute('data-unified-tabindex'))el.setAttribute('data-unified-tabindex',el.getAttribute('tabindex')??'');el.setAttribute('tabindex','-1');}else if(el.hasAttribute('data-unified-tabindex')){const old=el.getAttribute('data-unified-tabindex');old===''?el.removeAttribute('tabindex'):el.setAttribute('tabindex',old);el.removeAttribute('data-unified-tabindex');}});}
     function activeCount(key){return Object.entries(defaults[key]||{}).reduce((n,[id,def])=>{const el=document.getElementById(id);if(!el)return n;const value=String(el.value??'');if(/search/i.test(id))return n;return n+(value!==String(def)?1:0);},0);}
-    function update(bar,key){if(key==='overview'&&bar.dataset.deliveryOverviewFilterStructure==='v1')return;const expanded=Boolean(state[key]);bar.classList.toggle('is-collapsed',!expanded);bar.classList.toggle('is-expanded',expanded);const secondary=bar.querySelector('.unified-filter-secondary');if(secondary)setAccessible(secondary,expanded);const toggle=bar.querySelector('.unified-filter-toggle');if(toggle){toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',expanded?'Collapse filter bar':'Expand filter bar');toggle.title=expanded?'Hide additional filters':'Show all filters';toggle.innerHTML='<i data-lucide="chevron-'+(expanded?'up':'down')+'" class="w-4 h-4" aria-hidden="true"></i>';}const count=activeCount(key),indicator=bar.querySelector('.unified-filter-count');if(indicator){indicator.textContent=count+(count===1?' filter active':' filters active');indicator.classList.toggle('is-active',!expanded&&count>0);indicator.tabIndex=!expanded&&count>0?0:-1;}if(window.lucide)lucide.createIcons();}
+    function update(bar,key){if(key==='overview'&&bar.dataset.deliveryOverviewFilterStructure==='v1'||key==='daily'&&bar.dataset.dailySharedFilter==='true')return;const expanded=Boolean(state[key]);bar.classList.toggle('is-collapsed',!expanded);bar.classList.toggle('is-expanded',expanded);const secondary=bar.querySelector('.unified-filter-secondary');if(secondary)setAccessible(secondary,expanded);const toggle=bar.querySelector('.unified-filter-toggle');if(toggle){toggle.setAttribute('aria-expanded',String(expanded));toggle.setAttribute('aria-label',expanded?'Collapse filter bar':'Expand filter bar');toggle.title=expanded?'Hide additional filters':'Show all filters';toggle.innerHTML='<i data-lucide="chevron-'+(expanded?'up':'down')+'" class="w-4 h-4" aria-hidden="true"></i>';}const count=activeCount(key),indicator=bar.querySelector('.unified-filter-count');if(indicator){indicator.textContent=count+(count===1?' filter active':' filters active');indicator.classList.toggle('is-active',!expanded&&count>0);indicator.tabIndex=!expanded&&count>0?0:-1;}if(window.lucide)lucide.createIcons();}
     function resetPage(key){state[key]=false;sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));if(key==='overview'){Object.entries(defaults.overview).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v;});activeKpiFilter=null;deliveryCurrentPage=1;renderProjects();}else if(key==='flat'){Object.entries(defaults.flat).forEach(([id,v])=>{const el=document.getElementById(id);if(el)el.value=v;});flatListCurrentPage=1;activeFlatKpiFilter=null;renderFlatWorkspacePage();}else if(key==='daily'){if(typeof resetProjectTrackerFilters==='function')resetProjectTrackerFilters();else renderDailyTrackerPage();}else if(key==='analytics'){if(typeof resetAnalyticsFilters==='function')resetAnalyticsFilters();}else if(key==='todo'){const el=document.getElementById('todo-search');if(el)el.value='';renderTodoListPage();}requestAnimationFrame(enhanceCurrent);}
     function choosePrimary(key,controls){const search=controls.find(el=>/search/i.test(el.id||''));const preferred={overview:['filter-status','filter-record-status'],flat:['flat-status-filter','flat-record-status'],daily:['daily-status-filter','daily-owner-filter'],analytics:['analytics-status','analytics-record-status'],todo:[]}[key]||[];const important=preferred.map(id=>document.getElementById(id)).find(Boolean);return{search,important};}
     function enhanceBar(bar,key){if(!bar)return;bar.dataset.deliveryFilterPage=key;bar.classList.add('unified-filter-container');bar.classList.remove('delivery-filter-bar','uniformStandardFilterPositioning','strict-one-row','compact-collapsed-width','filter-collapse-ready');bar.style.removeProperty('display');bar.style.removeProperty('height');bar.style.removeProperty('max-height');bar.querySelectorAll('.delivery-filter-actions,.analytics-parameter-header').forEach(node=>node.remove());let primary=bar.querySelector(':scope > .unified-filter-primary'),secondary=bar.querySelector(':scope > .unified-filter-secondary');if(!primary){primary=document.createElement('div');primary.className='unified-filter-primary';secondary=document.createElement('div');secondary.className='unified-filter-secondary';const controls=[...bar.querySelectorAll('input,select')].filter(el=>!el.closest('.unified-filter-primary,.unified-filter-secondary'));const hosts=[...new Set(controls.map(el=>directHost(el,bar)))];const selected=choosePrimary(key,controls);const searchHost=selected.search?directHost(selected.search,bar):null;const importantHost=selected.important?directHost(selected.important,bar):null;if(searchHost){searchHost.classList.add('unified-search-host');primary.appendChild(searchHost);}if(importantHost&&importantHost!==searchHost){importantHost.classList.add('unified-primary-filter-host');primary.appendChild(importantHost);}const spacer=document.createElement('span');spacer.className='unified-filter-spacer';primary.appendChild(spacer);const indicator=document.createElement('button');indicator.type='button';indicator.className='unified-filter-count';indicator.onclick=()=>{state[key]=true;sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));update(bar,key);};indicator.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();indicator.click();}};primary.appendChild(indicator);let reset=[...bar.querySelectorAll('button')].find(button=>/reset filters/i.test(button.textContent||'')||button.classList.contains('delivery-filter-reset')||button.classList.contains('analytics-parameter-reset'));if(!reset){reset=document.createElement('button');reset.type='button';reset.innerHTML='<i data-lucide="rotate-ccw" class="w-4 h-4"></i><span>Reset Filters</span>';}reset.className='unified-filter-reset';reset.onclick=()=>resetPage(key);primary.appendChild(reset);let toggle=[...bar.querySelectorAll('button')].find(button=>button.classList.contains('delivery-filter-toggle')||button.classList.contains('analytics-parameter-toggle'));if(!toggle){toggle=document.createElement('button');toggle.type='button';}toggle.className='unified-filter-toggle';toggle.onclick=()=>{state[key]=!Boolean(state[key]);sessionStorage.setItem(STORAGE_KEY,JSON.stringify(state));update(bar,key);};primary.appendChild(toggle);hosts.forEach(host=>{if(host!==searchHost&&host!==importantHost&&!host.contains(reset)&&!host.contains(toggle))secondary.appendChild(host);});bar.replaceChildren(primary,secondary);initialized.add(bar);}else{allControlHosts(bar).forEach(host=>{if(!host.closest('.unified-filter-primary,.unified-filter-secondary'))secondary.appendChild(host);});}update(bar,key);}
@@ -22773,8 +22877,8 @@
             fetch.addEventListener('click',()=>window.deliveryPlannerFetch?.open(projectId,milestoneId,fetch));
             acts.push(fetch);
             if(milestone&&!['deleted','archived'].includes(String(milestone.recordStatus||'').trim().toLowerCase())){
-              const hasDependency=Boolean(milestone.dependencyType),dependency=document.createElement('button');dependency.type='button';dependency.title=hasDependency?'View Dependency':'Set Dependency';
-              dependency.innerHTML=`<i data-lucide="${hasDependency?'eye':'link-2'}" class="h-4 w-4" aria-hidden="true"></i><span>${dependency.title}</span>`;
+              const hasDependency=Boolean(milestone.dependencyType),dependency=document.createElement('button');dependency.type='button';dependency.title=hasDependency?'Edit Dependency':'Set Dependency';
+              dependency.innerHTML=`<i data-lucide="${hasDependency?'pencil':'link-2'}" class="h-4 w-4" aria-hidden="true"></i><span>${dependency.title}</span>`;
               dependency.addEventListener('click',()=>window.deliveryMilestoneDependency?.open(projectId,milestoneId,dependency));
               acts.push(dependency);
             }
@@ -25795,6 +25899,9 @@
   .track-reorder-handle:not(:disabled) { cursor: grab; }
   .track-reorder-handle:active { cursor: grabbing; }
   .track-order-dragging { opacity: .45; }
+  .track-order-preview { overflow-anchor:none; }
+  .track-order-gap { box-sizing:border-box;border:2px dashed #0284c7;border-radius:8px;background:rgba(14,165,233,.08);pointer-events:auto;flex-shrink:0; }
+  .track-order-gap[data-saving] { border-style:solid;background:rgba(14,165,233,.12); }
   .track-order-drop-before { box-shadow: inset 0 3px 0 #0284c7; }
   .track-order-drop-after { box-shadow: inset 0 -3px 0 #0284c7; }
   </style>
@@ -29223,7 +29330,7 @@
       setStyle(primary?.querySelector('.unified-filter-spacer'),'display','none');
       [['display','flex'],['flex','0 0 auto'],['width','auto'],['min-width','0'],['max-width','none'],['gap','8px'],['order',String(controls.length+1)]].forEach(([k,v])=>setStyle(actions,k,v));
       [['display',expanded?'grid':'none'],['grid-column','1 / -1'],['grid-template-columns',`repeat(${columns},minmax(0,1fr))`],['align-items','start'],['gap','8px'],['width','100%'],['min-width','0']].forEach(([k,v])=>setStyle(secondary,k,v));
-      if(secondary)secondary.hidden=!expanded;
+      if(secondary){secondary.hidden=!expanded;secondary.toggleAttribute('inert',!expanded);secondary.setAttribute('aria-hidden',String(!expanded));}
       const ordered=[...(secondary?.querySelectorAll('select,.delivery-date-range-control,[data-overview-filter-group]')||[])].sort((a,b)=>Number(a.dataset.overviewGridOrder||0)-Number(b.dataset.overviewGridOrder||0));
       ordered.forEach((item,index)=>{setStyle(item,'order',String(index));if(!item.classList.contains('overview-filter-group-heading'))[['width','100%'],['min-width','0'],['max-width','none']].forEach(([k,v])=>setStyle(item,k,v));});
       [reset,toggle].forEach(button=>[['display','inline-flex'],['flex','0 0 38px'],['width','38px'],['min-width','38px'],['max-width','38px'],['height','38px'],['padding','0'],['font-size','0'],['justify-content','center']].forEach(([k,v])=>setStyle(button,k,v)));
