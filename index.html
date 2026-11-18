@@ -8701,16 +8701,15 @@
           },
           initiative: {
             done: ['bg-emerald-50 rounded-2xl border-2 border-emerald-300 shadow-sm overflow-hidden','bg-gradient-to-r from-emerald-500 to-green-600 text-white'],
-            'light-red': ['bg-orange-50 rounded-2xl border-2 border-orange-300 shadow-sm overflow-hidden','bg-gradient-to-r from-orange-500 to-red-500 text-white'],
+            'light-red': ['bg-red-50 rounded-2xl border-2 border-red-300 shadow-sm overflow-hidden','bg-gradient-to-r from-red-500 to-red-600 text-white'],
             'due-today': ['bg-orange-50 rounded-2xl border-2 border-orange-400 shadow-sm overflow-hidden','bg-gradient-to-r from-orange-500 to-red-600 text-white'],
             pending: ['bg-red-50 rounded-2xl border-2 border-red-300 shadow-sm overflow-hidden','bg-gradient-to-r from-red-500 to-rose-600 text-white'],
             wip: ['bg-amber-50 rounded-2xl border-2 border-amber-300 shadow-sm overflow-hidden','bg-gradient-to-r from-yellow-500 to-amber-500 text-white']
           },
           track: {
             done: ['border-emerald-300 border-l-green-600 bg-emerald-50','bg-gradient-to-r from-green-100 to-emerald-200 border-emerald-300'],
-            'light-red': ['border-orange-300 border-l-orange-600 bg-orange-50','bg-gradient-to-r from-orange-100 to-red-200 border-orange-300'],
             'on-hold': ['border-zinc-300 border-l-zinc-600 bg-zinc-50','bg-gradient-to-r from-zinc-100 to-slate-200 border-zinc-300'],
-            pending: ['border-pink-300 border-l-rose-600 bg-pink-50','bg-gradient-to-r from-pink-100 to-rose-200 border-pink-300'],
+            pending: ['border-pink-300 border-l-rose-600 bg-pink-50','bg-gradient-to-r from-pink-100 to-rose-200 border-pink-300 text-slate-800'],
             deviated: ['border-red-400 border-l-red-700 bg-red-50','bg-gradient-to-r from-red-100 to-orange-200 border-red-300'],
             critical: ['border-red-700 border-l-red-950 bg-red-100','bg-gradient-to-r from-red-700 to-red-900 border-red-800 text-white'],
             wip: ['border-amber-300 border-l-orange-600 bg-amber-50','bg-gradient-to-r from-amber-100 to-orange-200 border-amber-300'],
@@ -8719,9 +8718,8 @@
           },
           milestone: {
             done: ['bg-gradient-to-r from-emerald-50 to-green-100','',''],
-            'light-red': ['bg-gradient-to-r from-orange-50 to-red-100','',''],
             'on-hold': ['bg-gradient-to-r from-slate-50 to-gray-100','',''],
-            pending: ['bg-gradient-to-r from-red-50 to-rose-100','',''],
+            pending: ['bg-gradient-to-r from-pink-100 to-rose-200 text-slate-800','',''],
             deviated: ['bg-gradient-to-r from-rose-100 to-red-100','',''],
             critical: ['bg-gradient-to-r from-red-200 to-rose-300','',''],
             wip: ['bg-gradient-to-r from-amber-50 to-orange-100','',''],
@@ -8742,7 +8740,8 @@
         if(scheduleRisk!==undefined&&level!=='program'){
           themes.initiative['in-queue']=themes.program['in-queue'];
           themes.initiative['on-hold']=themes.program['on-hold'];
-          themeState=scheduleRisk==='red'?(overdueWorkdays<=2?'light-red':'pending'):scheduleRisk==='yellow'?'wip':state==='done'?'done':state==='on-hold'?'on-hold':'in-queue';
+          const showWarning=scheduleRisk==='yellow'&&(level!=='milestone'||['wip','in-progress'].includes(state));
+          themeState=scheduleRisk==='red'?(level==='initiative'&&overdueWorkdays<=2?'light-red':'pending'):showWarning?'wip':state==='done'?'done':state==='on-hold'?'on-hold':'in-queue';
           if(level==='initiative'&&scheduleRisk!=='red'){
             if(dueTodayCount>0)themeState='due-today';
             else if(scheduleRisk==='normal'&&['wip','in-progress'].includes(state))themeState='wip';
