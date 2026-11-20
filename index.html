@@ -446,6 +446,7 @@
         <div>
           <span class="sidebar-heading px-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-2">Workspace</span>
           <div class="space-y-1">
+            <button id="workspace-nav-home" type="button" onclick="showWorkspaceView('home')" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="house" class="w-5 h-5"></i><span class="sidebar-text">Home</span></button>
             <button type="button" onclick="toggleSidebarGroup('workspace-pages','workspace-pages-chevron')" class="sidebar-link w-full flex items-center justify-between px-3 py-2 rounded-lg bg-indigo-600 text-white font-semibold"><div class="flex items-center gap-3"><i data-lucide="layout-dashboard" class="w-5 h-5"></i><span class="sidebar-text">Project & Task Tracker</span></div><i id="workspace-pages-chevron" data-lucide="chevron-down" class="sidebar-text w-4 h-4"></i></button><div id="workspace-pages" class="mt-1 ml-4 pl-3 border-l border-slate-700 space-y-1"><button id="workspace-nav-overview" onclick="showWorkspaceView('overview')" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-800 text-indigo-300"><i data-lucide="network" class="w-4 h-4"></i><span class="sidebar-text">Delivery Overview</span></button><button id="workspace-nav-programs" onclick="showWorkspaceView('programs')" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="boxes" class="w-4 h-4"></i><span class="sidebar-text">Programs</span></button><button id="workspace-nav-initiatives" onclick="showWorkspaceView('initiatives')" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="folders" class="w-4 h-4"></i><span class="sidebar-text">Initiatives</span></button><button id="workspace-nav-tracks" onclick="showWorkspaceView('tracks')" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="git-branch" class="w-4 h-4"></i><span class="sidebar-text">Tracks</span></button><button id="workspace-nav-milestones" onclick="showWorkspaceView('milestones')" class="workspace-page-link sidebar-link w-full flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"><i data-lucide="list-checks" class="w-4 h-4"></i><span class="sidebar-text">Milestones</span></button></div>
           </div>
         </div>
@@ -862,6 +863,7 @@
   <!-- Empty State -->
 
         <!-- Empty State -->
+        <section id="delivery-home" class="hidden" aria-label="Start My Day"></section>
         <section id="workspace-flat-page" class="hidden space-y-4"></section>
   <section id="analytics-page" class="hidden space-y-5 px-4 sm:px-6 lg:px-8">
     <div class="analytics-dashboard-banner bg-gradient-to-r from-indigo-700 via-violet-700 to-fuchsia-700 p-6 text-white shadow-lg">
@@ -1451,6 +1453,7 @@
 
     <select
       id="p-program-id"
+      onchange="applyProgramInitiativeDefaults()"
       class="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
     >
       <option value="">-- Unmapped Initiative --</option>
@@ -2070,7 +2073,7 @@
       'use strict';
       const stores=['reads','entities','outbox','imports','checkpoints','datasets','meta','drafts'];
       const nativeFetch=window.fetch.bind(window),pending=new Map(),refreshes=new Map(),snapshotReads=new Map();
-      const readRpcs=new Set(['support_ticket_page','support_ticket_options','user_master_email_exists','delivery_import_match_ids']);
+      const readRpcs=new Set(['support_ticket_page','support_ticket_options','user_master_email_exists','delivery_import_match_ids','delivery_home_summary']);
       const credentialField=/password|access_token|refresh_token|secret|authorization|api_key/i;
       const editableTables=new Set(['programs','initiatives','milestones','milestone_tracks','support_tickets','todo_items','master_values','project_planners','project_planner_milestones','planner_type_groups','planner_type_values']);
       let database,scope='',sessionScope=null,reachable=navigator.onLine,busy=false,lastSynced=0,retryTimer=0,failures=0,activeImport=null,storageError='',blockedReason='',statusTimer=0,statusAt=0;
@@ -8993,7 +8996,7 @@
   let deliveryCurrentPage = 1;
 
   let deliveryFilteredTopLevelItems = [];
-  let currentWorkspaceView='overview';
+  let currentWorkspaceView='home';
   let flatListCurrentPage=1;
   const FLAT_LIST_PAGE_SIZE=25;
   let currentImportView='overview';
@@ -10259,7 +10262,7 @@
       if (restrictToTrack && !isSameTrack(milestone.trackId, trackId)) continue;
       if (['deleted', 'archived'].includes(String(milestone.recordStatus || '').trim().toLowerCase())) continue;
       if (isMilestoneScheduleImpactProtected(milestone)) {
-        referenceDate = getReferenceDate(milestone) || referenceDate;
+        if (!options.impactBelow) referenceDate = getReferenceDate(milestone) || referenceDate;
         continue;
       }
       if (options.preserveMilestoneIds?.has(Number(milestone.id))) {
@@ -11857,6 +11860,26 @@
     openImportModal();
   }
 
+  function getWorkspaceExportSelection() {
+    const entities = ['programs', 'initiatives', 'tracks', 'milestones'];
+    if (!['overview', 'daily', ...entities].includes(currentWorkspaceView)) return null;
+    if (currentWorkspaceView === 'overview' && !overviewMultiSelectEnabled ||
+        currentWorkspaceView === 'daily' && !dailyMultiSelectEnabled) return null;
+    const source = currentWorkspaceView === 'daily'
+      ? window.dailyHierarchySelection
+      : bulkWorkspaceSelectionPages.get(currentWorkspaceView);
+    const selection = Object.fromEntries(entities.map(entity => [entity, new Set([...(source?.[entity] || [])].map(String))]));
+    const hasSelection = entities.some(entity => selection[entity].size > 0);
+    const enabled = currentWorkspaceView === 'overview' ? overviewMultiSelectEnabled
+      : currentWorkspaceView === 'daily' ? dailyMultiSelectEnabled : hasSelection;
+    if (!enabled) return null;
+    if (!hasSelection) {
+      showToast('Select at least one record to export.', 'error');
+      return false;
+    }
+    return selection;
+  }
+
   function exportCurrentWorkspacePage() {
     if (currentWorkspaceView === 'overview' || currentWorkspaceView === 'milestones') return exportToWorkbook();
     return exportEntityWorkbook(currentWorkspaceView);
@@ -12795,6 +12818,27 @@
     lucide.createIcons({root:masterContainer});
   }
 
+  function applyProgramInitiativeDefaults() {
+    if (document.getElementById('project-id').value) return;
+    const program = programs.find(item => String(item.id) === document.getElementById('p-program-id').value);
+    if (!program) return;
+    const unavailable = [];
+    for (const [id, field, label] of [
+      ['p-business-owner', 'owner', 'Business Owner'],
+      ['p-assigned-to', 'assignedTo', 'Assigned To'],
+      ['p-functional_engineer_id', 'functional_engineer_id', 'Functional User'],
+      ['p-technical_engineer_id', 'technical_engineer_id', 'Technical User']
+    ]) {
+      const control = document.getElementById(id);
+      const value = String(program[field] ?? '');
+      const option = [...control.options].find(item => item.value === value && !item.disabled);
+      control.value = option ? value : '';
+      if (value && !option) unavailable.push(label);
+      if (control.closest('.engineer-picker')) engineerAssignments.sync(control);
+    }
+    if (unavailable.length) showToast(`Some Program assignments are unavailable. Select active users for: ${unavailable.join(', ')}.`, 'error');
+  }
+
   function openProjectModal(
     editId = null,
     preselectedProgramId = null
@@ -13010,6 +13054,7 @@
   }
 
     engineerAssignments.mount('project-form', 'p', projects.find(item => String(item.id) === String(editId)));
+    if (!editId) applyProgramInitiativeDefaults();
     const impactRecord = projects.find(item => String(item.id) === String(editId));
     impactSelections.restore('p-impact-category', impactRecord?.impactCategory || '');
     impactSelections.restore('p-measurable-impact', impactRecord?.measurableImpact || '');
@@ -14950,34 +14995,40 @@
       return;
     }
 
+    const selection = getWorkspaceExportSelection();
+    if (selection === false) return;
     const headers = deliveryWorkbookHeaders();
     Object.keys(headers).forEach(entity=>{headers[entity]=['Unique ID',...headers[entity]];});
     const workbook = XLSX.utils.book_new();
     const value = item => item ?? '';
 
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
-      programs.map(program => [value(program.id),value(program.name), value(program.purpose), value(program.owner), value(program.assignedTo), value(program.vertical), value(program.startDate), value(program.targetEndDate), value(program.revisedEndDate), value(program.revisedStartDate), value(program.actualEndDate), value(program.impactCategory), value(program.measurableImpact), value(program.businessBenefit),value(program.functional_engineer_id),value(program.technical_engineer_id)]),
+      programs.filter(program => !selection || selection.programs.has(String(program.id))).map(program => [value(program.id),value(program.name), value(program.purpose), value(program.owner), value(program.assignedTo), value(program.vertical), value(program.startDate), value(program.targetEndDate), value(program.revisedEndDate), value(program.revisedStartDate), value(program.actualEndDate), value(program.impactCategory), value(program.measurableImpact), value(program.businessBenefit),value(program.functional_engineer_id),value(program.technical_engineer_id)]),
       headers.programs
     ), 'Programs');
 
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
-      projects.map(initiative => [value(initiative.id),value(programs.find(program => Number(program.id) === Number(initiative.programId))?.name), value(initiative.name), value(initiative.description), value(initiative.type), value(initiative.crNo), value(initiative.vertical), value(initiative.deliveryMethod), value(initiative.businessOwner), value(initiative.assignedTo), value(initiative.startDate), value(initiative.targetEndDate), value(initiative.revisedEndDate), value(initiative.revisedStartDate), value(initiative.actualEndDate), value(initiative.impactCategory), value(initiative.measurableImpact), value(initiative.businessBenefit),value(initiative.functional_engineer_id),value(initiative.technical_engineer_id)]),
+      projects.filter(initiative => !selection || selection.initiatives.has(String(initiative.id))).map(initiative => [value(initiative.id),value(programs.find(program => Number(program.id) === Number(initiative.programId))?.name), value(initiative.name), value(initiative.description), value(initiative.type), value(initiative.crNo), value(initiative.vertical), value(initiative.deliveryMethod), value(initiative.businessOwner), value(initiative.assignedTo), value(initiative.startDate), value(initiative.targetEndDate), value(initiative.revisedEndDate), value(initiative.revisedStartDate), value(initiative.actualEndDate), value(initiative.impactCategory), value(initiative.measurableImpact), value(initiative.businessBenefit),value(initiative.functional_engineer_id),value(initiative.technical_engineer_id)]),
       headers.initiatives
     ), 'Initiatives');
 
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
-      projects.flatMap(initiative => (initiative.tracks || []).map(track => [value(track.id),initiative.name, track.name, track.displayOrder])),
+      projects.flatMap(initiative => (initiative.tracks || []).filter(track => !selection || selection.tracks.has(String(track.id))).map(track => [value(track.id),initiative.name, track.name, track.displayOrder])),
       headers.tracks
     ), 'Tracks');
 
     XLSX.utils.book_append_sheet(workbook, deliverySheet(
-      projects.flatMap(initiative => (initiative.milestones || []).map(milestone => {
+      projects.flatMap(initiative => (initiative.milestones || []).filter(milestone => !selection || selection.milestones.has(String(milestone.id))).map(milestone => {
         const track = (initiative.tracks || []).find(item => Number(item.id) === Number(milestone.trackId));
         return [value(milestone.id),initiative.name, value(track?.name), value(milestone.title), value(milestone.actions), value(milestone.owner), value(milestone.dependency), value(milestone.days), value(milestone.startDate), value(milestone.completionDate),value(programs.find(program=>String(program.id)===String(initiative.programId))?.name),value(milestone.plannerTypeId),value(milestone.milestoneRemarks),value(milestone.remarks),value(milestone.id),value(milestone.scheduleMode||'sequential'),value(milestone.referenceMilestoneId),value(milestone.referenceDateType||'start_date'),value(Number(milestone.referenceOffsetDays)||0)];
       })),
       headers.milestones
     ), 'Milestones');
 
+    if (selection && workbook.SheetNames.every(name => XLSX.utils.decode_range(workbook.Sheets[name]['!ref']).e.r === 0)) {
+      showToast('Selected records are not available for export. Refresh and select them again.', 'error');
+      return;
+    }
     XLSX.writeFile(workbook, `Delivery_Hub_${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
@@ -16791,27 +16842,7 @@
             : 'none';
       }
 
-      const mastersLoaded =
-    await loadMasterValues();
-
-  if (!mastersLoaded) {
-    return;
-  } 
-
-      const projectsLoaded =
-        await loadInitiativesFromSupabase();
-
-      if (!projectsLoaded) {
-        return;
-      }
-
-      renderUserMasterList();
-
-      renderUserRoleManagement();
-
-      populateUserDropdowns();
-
-      lucide.createIcons();
+      await window.deliveryHome.open();
 
     }
     finally {
@@ -16983,19 +17014,45 @@
   return true;
   }
 
-  async function logoutUser() {
-
-    const confirmed = confirm(
-      'Are you sure you want to logout?'
-    );
-
-    if (!confirmed) {
-      return;
+  function confirmLogout() {
+    let dialog=document.getElementById('logout-confirm-dialog');
+    if(!dialog){
+      dialog=document.createElement('dialog');dialog.id='logout-confirm-dialog';
+      dialog.className='rounded-xl border border-slate-200 bg-white p-5 shadow-xl w-full';
+      dialog.style.maxWidth='min(24rem, calc(100vw - 2rem))';
+      dialog.setAttribute('aria-labelledby','logout-confirm-title');
+      dialog.innerHTML='<form method="dialog"><h2 id="logout-confirm-title" class="text-lg font-bold text-slate-800">Logout</h2><p class="mt-2 text-sm text-slate-600">Are you sure you want to logout?</p><div class="mt-5 flex justify-end gap-3"><button type="submit" value="cancel" autofocus class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button><button type="submit" value="logout" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white">Logout</button></div></form>';
+      document.body.append(dialog);
     }
+    if(dialog.open)return Promise.resolve(false);
+    return new Promise(resolve=>{
+      dialog.returnValue='';
+      dialog.addEventListener('close',()=>resolve(dialog.returnValue==='logout'),{once:true});
+      dialog.showModal();
+    });
+  }
+
+  function showLoginScreen() {
+    currentUser=null;
+    window.deliveryHome?.reset();
+    closeMobileSidebar();
+    document.body.classList.remove('delivery-home-active','analytics-view-active','daily-tracker-view-active');
+    document.getElementById('main-content').style.display='none';
+    document.getElementById('sidebar').style.display='none';
+    document.getElementById('login-screen').style.display='flex';
+    document.getElementById('current-user-display')?.replaceChildren();
+    document.getElementById('auth-password').value='';
+    document.getElementById('auth-email').focus();
+  }
+
+  async function logoutUser() {
 
     try {
 
-      await supabaseClient.auth.signOut();
+      if(!await confirmLogout())return;
+
+      const {error}=await supabaseClient.auth.signOut();
+      if(error)throw error;
 
       currentUser = null;
 
@@ -17003,7 +17060,7 @@
     'loggedInEmail'
   );
 
-      location.reload();
+      showLoginScreen();
 
     } catch (error) {
 
@@ -17012,8 +17069,9 @@
         error
       );
 
-      alert(
-        'Unable to logout.'
+      showToast(
+        'Unable to logout. '+(error.message||'Please try again.'),
+        'error'
       );
 
     }
@@ -17026,35 +17084,12 @@
       initSidebar();
       updateKpiSlicerUI();
 
-      const usersLoaded =
-    await loadUsersFromSupabase();
-
-  if (!usersLoaded) {
-    return;
-  }
-
-
-
   const sessionRestored =
     await restoreSession();
 
   if (sessionRestored) {
 
-    const mastersLoaded =
-      await loadMasterValues();
-
-    if (!mastersLoaded) {
-      return;
-    }
-
-    const projectsLoaded =
-      await loadInitiativesFromSupabase();
-
-    if (!projectsLoaded) {
-      return;
-    }
-
-    lucide.createIcons();
+    await window.deliveryHome.open();
 
     return;
   }
@@ -17064,17 +17099,7 @@
   User must login first.
   */
 
-  document
-    .getElementById('main-content')
-    .style.display = 'none';
-
-  document
-    .getElementById('sidebar')
-    .style.display = 'none';
-
-  document
-    .getElementById('login-screen')
-    .style.display = 'flex';
+  showLoginScreen();
 
       const userDisplay =
     document.getElementById(
@@ -17454,8 +17479,8 @@
   <script>
   // REALTIME PORTAL SYNCHRONIZATION
   let deliveryRealtimeChannel=null,deliveryRealtimeRefreshTimer=null,deliveryRealtimeRefreshInProgress=false,deliveryRealtimeRefreshPending=false;
-  function renderActiveDeliveryWorkspace(){updateDailyTrackerBadge();if(currentWorkspaceView==='daily')renderDailyTrackerPage();else if(currentWorkspaceView==='overview')renderProjects();else renderFlatWorkspacePage();}
-  async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._draggingInitiative||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size||window._programSequenceSaveLocks?.size||window.deliveryPlannerFetch?.busy||window.deliveryMilestoneDependency?.busy){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
+  function renderActiveDeliveryWorkspace(){if(currentWorkspaceView==='home')return;updateDailyTrackerBadge();if(currentWorkspaceView==='daily')renderDailyTrackerPage();else if(currentWorkspaceView==='overview')renderProjects();else renderFlatWorkspacePage();}
+  async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(currentWorkspaceView==='home'){window.deliveryHome.invalidate();return;}if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._draggingInitiative||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size||  window._programSequenceSaveLocks?.size||window.deliveryPlannerFetch?.busy||window.deliveryMilestoneDependency?.busy){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
   function queueDeliveryRealtimeRefresh(payload){if(window.deliveryTrackReorder?.acceptRealtime(payload)||window.deliveryInitiativeReorder?.acceptRealtime(payload)||window.deliveryMilestoneDependency?.acceptRealtime(payload))return;clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
   function initializeDeliveryRealtime(){if(deliveryRealtimeChannel||!currentUser||!supabaseClient?.channel)return;deliveryRealtimeChannel=supabaseClient.channel('delivery-hub-live').on('postgres_changes',{event:'*',schema:'public',table:'programs'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'initiatives'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestone_tracks'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestones'},queueDeliveryRealtimeRefresh).subscribe(status=>{if(status==='CHANNEL_ERROR')console.error('Delivery Hub realtime channel failed.');});}
   const existingLoadInitiativesFromSupabase=loadInitiativesFromSupabase;
@@ -19466,7 +19491,7 @@
   }
   async function loadTodoBadgeCountFromSupabase(){
     if(todoBadgeCountPromise)return todoBadgeCountPromise;
-    const request=(async()=>{const user=await getTodoAuthUser();if(!user){todoPendingCount=0;updateTodoBadge();return false;}const {count,error}=await supabaseClient.from('todo_items').select('id',{count:'exact'}).eq('user_id',user.id).eq('is_completed',false).limit(1);if(error)return false;todoPendingCount=count||0;updateTodoBadge();return true;})();
+    const request=(async()=>{const user=await getTodoAuthUser();if(!user){todoPendingCount=0;updateTodoBadge();return false;}const {count,error}=await supabaseClient.from('todo_items').select('id',{count:'exact',head:true}).eq('user_id',user.id).eq('is_completed',false);if(error)return false;todoPendingCount=count||0;updateTodoBadge();return true;})();
     todoBadgeCountPromise=request;
     try{return await request;}finally{if(todoBadgeCountPromise===request)todoBadgeCountPromise=null;}
   }
@@ -19489,9 +19514,9 @@
   toggleTodoDone=async function(id){const item=todoItemsCache.find(row=>row.id===String(id));if(!item)return;const user=await getTodoAuthUser();if(!user)return;const done=!item.done,{error}=await supabaseClient.from('todo_items').update({is_completed:done,completed_at:done?new Date().toISOString():null,updated_at:new Date().toISOString()}).eq('id',id).eq('user_id',user.id);if(error)return showToast('Unable to update To Do item: '+error.message,'error');await loadTodoItemsFromSupabase(false);renderTodoListPage();};
   deleteTodoItem=async function(id){if(!confirm('Delete this To Do item?'))return;const user=await getTodoAuthUser();if(!user)return;const {error}=await supabaseClient.from('todo_items').delete().eq('id',id).eq('user_id',user.id);if(error)return showToast('Unable to delete To Do item: '+error.message,'error');if(todoEditingId===id)todoEditingId=null;await loadTodoItemsFromSupabase(false);renderTodoListPage();showToast('To Do item deleted.','success');};
   const restoreSessionBeforeTodoSync=restoreSession;
-  restoreSession=async function(){const restored=await restoreSessionBeforeTodoSync();if(restored)await loadTodoBadgeCountFromSupabase();return restored;};
+  restoreSession=async function(){const restored=await restoreSessionBeforeTodoSync();if(restored&&currentWorkspaceView!=='home')await loadTodoBadgeCountFromSupabase();return restored;};
   const loginUserBeforeTodoSync=loginUser;
-  loginUser=async function(){const result=await loginUserBeforeTodoSync();if(currentUser)await loadTodoBadgeCountFromSupabase();return result;};
+  loginUser=async function(){const result=await loginUserBeforeTodoSync();if(currentUser&&currentWorkspaceView!=='home')await loadTodoBadgeCountFromSupabase();return result;};
   window.addEventListener('beforeunload',()=>{if(todoRealtimeChannel)supabaseClient.removeChannel(todoRealtimeChannel);});
   </script>
 
@@ -24157,6 +24182,7 @@
   window.exportCurrentWorkspacePage=function(){
     const p=page();if(p==='overview')return original.exportPage();if(p==='analytics')return menu();
     const c=cfg[p];if(!c)return showToast?.('Export is not available for this page.','error');if(busy)return;
+    const selection=['programs','initiatives','tracks','milestones','daily'].includes(p)?getWorkspaceExportSelection():null;if(selection===false)return;
     busy=true;
     try{
       let exportHeaders=['Unique ID',...c.headers],rows;
@@ -24175,10 +24201,11 @@
           included.forEach(header=>{const cell=cells[header.index];row[header.label]=cell?cell.innerText.replace(/\s+/g,' ').trim():'';});return row;
         });
         if(!rows.length)throw new Error('No Daily Tracker rows are visible for the current filters.');
-      }else rows=c.rows().map(record=>{
+      }else rows=c.rows().filter(record=>!selection||selection[p]?.has(String(record.id))).map(record=>{
         const row={'Unique ID':normalizeImportId(record.id)};
         c.headers.forEach(heading=>{if(Object.hasOwn(record,heading)){row[heading]=record[heading]??'';return;}const field=c.map[heading];row[heading]=field?record[field]??record[toCamel(field)]??record[importDatabaseField(p,field)]??'':'';});return row;
       });
+      if(selection&&!rows.length)throw new Error('Selected records are not available for export. Refresh and select them again.');
       const ws=XLSX.utils.json_to_sheet(rows,{header:exportHeaders}),wb=XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb,ws,c.sheet);XLSX.writeFile(wb,`${c.label.replace(/ /g,'_')}_${stamp()}.xlsx`);
       showToast?.(`${c.label} export created.`,'success');
@@ -24721,7 +24748,9 @@
       if(typeof XLSX==='undefined')return showToast?.('Excel library is not available.','error');
       if(typeof getDailyTrackerTaskRows!=='function'||typeof DAILY_TASK_BUCKETS==='undefined')return showToast?.('Daily Tracker data is not available.','error');
       try{
-        const allRows=getDailyTrackerTaskRows();
+        const selection=getWorkspaceExportSelection();if(selection===false)return;
+        const allRows=getDailyTrackerTaskRows().filter(row=>!selection||selection.milestones.has(String(row.m.id)));
+        if(selection&&!allRows.length)throw new Error('Selected records are not available for export. Refresh and select them again.');
         const headers=['Unique ID','Bucket','Program','Initiative','Track','Milestone ID','Milestone','Milestone Owner','Dependency','Status','Start Date','Due Date','Overdue Days','Actual End Date','Critical','Review State','Record Status'];
         const workbook=XLSX.utils.book_new();
         appendDailySheet(workbook,'All Items',allRows,headers);
@@ -32561,6 +32590,476 @@ COMMIT;
     window.deliveryRbac={state,refresh,can,canCreate,canTicket,enabled,system,admin,share,manage,inherited,setup,decorate,
       canImport(page){const kind=types[page]||({tracks:'track',support:'support',overview:'initiative'})[page];return ['user_master','user_roles'].includes(page)?system():Boolean(kind&&action(kind,'write')&&enabled(kind));}
     };
+  })();
+  </script>
+  <script id="delivery-home-sql" type="text/plain">
+BEGIN;
+-- Read-only equivalents of addWorkingDays and the existing milestone schedule/status helpers.
+CREATE OR REPLACE FUNCTION public.delivery_home_workday_end(p_start date,p_days text)
+RETURNS date LANGUAGE plpgsql IMMUTABLE SET search_path='' AS $fn$
+DECLARE remaining integer; base date:=p_start; weekday integer;
+BEGIN
+  IF p_start IS NULL OR btrim(coalesce(p_days,'')) !~ '^\d+(\.\d+)?$' OR p_days::numeric<1 THEN RETURN NULL; END IF;
+  remaining:=floor(p_days::numeric)::integer-1;
+  IF remaining=0 THEN RETURN base; END IF;
+  weekday:=extract(isodow FROM base)::integer;
+  IF weekday>5 THEN base:=base+(8-weekday);remaining:=remaining-1; END IF;
+  RETURN base+remaining+2*((extract(isodow FROM base)::integer-1+remaining)/5);
+END;
+$fn$;
+CREATE OR REPLACE FUNCTION public.delivery_home_milestone(p_row jsonb,p_today date)
+RETURNS TABLE(status text,due_date date,eligible boolean)
+LANGUAGE plpgsql IMMUTABLE SET search_path='' AS $fn$
+DECLARE
+  stored text:=lower(regexp_replace(btrim(coalesce(p_row->>'status','')),'[\s_-]+','','g'));
+  days text:=btrim(coalesce(p_row->>'days','')); start_day date:=(p_row->>'start_date')::date;
+  end_day date:=(p_row->>'end_date')::date; history jsonb; original jsonb; revision jsonb;
+  first_revision jsonb; old_start date; new_start date; old_end date; old_days integer; new_days integer;
+  offset_start integer:=0; offset_days integer:=0; valid_revisions integer:=0;
+BEGIN
+  IF p_row->>'days' IS NULL AND start_day IS NOT NULL AND end_day>=start_day THEN
+    SELECT coalesce(nullif(count(*),0)::text,'') INTO days FROM generate_series(start_day::timestamp,end_day::timestamp,interval '1 day') d WHERE extract(isodow FROM d)<6;
+  END IF;
+  IF left(ltrim(coalesce(p_row->>'remarks','')),1)='{' THEN
+    BEGIN history:=nullif(p_row->>'remarks','')::jsonb;
+    EXCEPTION WHEN invalid_text_representation THEN history:=NULL; END;
+  END IF;
+  IF history->'__deliveryRevisionHistory'='true'::jsonb AND jsonb_typeof(history->'revisions')='array'
+    AND (jsonb_array_length(history->'revisions')>0 OR history ? 'originalSchedule' OR NOT history ? 'legacyRemark') THEN
+    first_revision:=history->'revisions'->0;
+    original:=history->'originalSchedule';
+    IF original IS NULL THEN
+      old_start:=coalesce(first_revision->>'oldStart',first_revision->>'oldStartDate',p_row->>'start_date')::date;
+      old_end:=coalesce(first_revision->>'oldEnd',first_revision->>'oldEndDate',p_row->>'end_date')::date;
+      IF nullif(first_revision->>'oldDays','') IS NULL AND coalesce(first_revision->>'oldStart',first_revision->>'oldStartDate') IS NOT NULL
+        AND coalesce(first_revision->>'oldEnd',first_revision->>'oldEndDate') IS NOT NULL AND old_end>=old_start THEN
+        SELECT count(*)::integer INTO old_days FROM generate_series(old_start::timestamp,old_end::timestamp,interval '1 day') d WHERE extract(isodow FROM d)<6;
+      END IF;
+      original:=jsonb_build_object('start',old_start,'days',coalesce(nullif(first_revision->>'oldDays',''),nullif(old_days,0)::text,days));
+    END IF;
+    FOR revision IN SELECT value FROM jsonb_array_elements(history->'revisions') LOOP
+      IF revision IS NULL OR revision='null'::jsonb OR revision->'deleted'='true'::jsonb OR revision->'isDeleted'='true'::jsonb
+        OR revision->'is_active'='false'::jsonb OR revision->'isActive'='false'::jsonb
+        OR revision->>'recordStatus'='deleted' OR revision->>'record_status'='deleted' THEN CONTINUE; END IF;
+      BEGIN
+        old_start:=coalesce(revision->>'oldStart',revision->>'oldStartDate')::date;
+        new_start:=coalesce(revision->>'newStart',revision->>'newStartDate')::date;
+        old_end:=coalesce(revision->>'oldEnd',revision->>'oldEndDate')::date;
+      EXCEPTION WHEN invalid_datetime_format OR datetime_field_overflow THEN CONTINUE; END;
+      IF old_start IS NULL OR new_start IS NULL OR coalesce(revision->>'newDays','') !~ '^[0-9]+$' THEN CONTINUE; END IF;
+      old_days:=NULL;
+      IF coalesce(revision->>'oldDays','') ~ '^[0-9]+$' THEN old_days:=(revision->>'oldDays')::integer;
+      ELSIF old_end>=old_start THEN
+        SELECT count(*)::integer INTO old_days FROM generate_series(old_start::timestamp,old_end::timestamp,interval '1 day') d WHERE extract(isodow FROM d)<6;
+      END IF;
+      new_days:=(revision->>'newDays')::integer;
+      IF old_days IS NULL OR old_days<1 OR new_days<1 THEN CONTINUE; END IF;
+      offset_start:=offset_start+(new_start-old_start);offset_days:=offset_days+new_days-old_days;valid_revisions:=valid_revisions+1;
+    END LOOP;
+    start_day:=(original->>'start')::date+offset_start;
+    days:=CASE WHEN valid_revisions>0 THEN ((original->>'days')::integer+offset_days)::text ELSE original->>'days' END;
+    end_day:=public.delivery_home_workday_end(start_day,days);
+    due_date:=coalesce((p_row->>'revised_end_date')::date,greatest(start_day,end_day));
+  ELSE
+    due_date:=coalesce((p_row->>'revised_end_date')::date,(p_row->>'deadline')::date,end_day,public.delivery_home_workday_end(start_day,days));
+  END IF;
+  status:=CASE
+    WHEN nullif(btrim(coalesce(p_row->>'completion_date','')),'') IS NOT NULL AND p_row->>'completion_date'<>'-' THEN 'Done'
+    WHEN stored='onhold' THEN 'On-Hold'
+    WHEN stored='critical' THEN 'Critical'
+    WHEN stored IN ('deviation','deviated') OR (history->'__deliveryRevisionHistory'='true'::jsonb AND jsonb_typeof(history->'revisions')='array' AND jsonb_array_length(history->'revisions')>0) THEN 'Deviated'
+    WHEN days='TBD' THEN 'TBD' WHEN days='-' THEN 'On-Hold'
+    WHEN due_date IS NULL THEN '' WHEN due_date<p_today THEN 'Pending'
+    WHEN start_day IS NOT NULL AND p_today BETWEEN start_day AND due_date THEN 'WIP' ELSE 'In-Queue' END;
+  eligible:=status NOT IN ('Done','On-Hold') AND stored NOT IN ('done','complete','completed','closed','onhold')
+    AND lower(btrim(coalesce(p_row->>'record_status','active'))) NOT IN ('deleted','archived');
+  RETURN NEXT;
+END;
+$fn$;
+DROP FUNCTION IF EXISTS public.delivery_home_summary(text,integer,integer);
+CREATE OR REPLACE FUNCTION public.delivery_home_summary(p_metric text DEFAULT NULL,p_offset integer DEFAULT 0,p_limit integer DEFAULT 50,p_include_support boolean DEFAULT false)
+RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $fn$
+DECLARE
+  today date:=(current_timestamp AT TIME ZONE 'Asia/Kolkata')::date;
+  actor jsonb:=public.delivery_rbac_profile(); context jsonb:=public.delivery_rbac_context();
+  keys text[]; is_admin boolean; upcoming_end date; result jsonb;
+BEGIN
+  IF auth.uid() IS NULL OR actor IS NULL THEN RAISE EXCEPTION 'Authentication required' USING ERRCODE='42501'; END IF;
+  IF p_include_support IS NULL OR p_offset IS NULL OR p_limit IS NULL OR p_offset<0 OR p_limit NOT BETWEEN 1 AND 100
+    OR (p_metric IS NOT NULL AND p_metric NOT IN ('action','close_today','follow_up','attention','overdue','due_today','upcoming','pending')) THEN
+    RAISE EXCEPTION 'Invalid Home request' USING ERRCODE='22023';
+  END IF;
+  keys:=public.delivery_rbac_actor_keys(actor);is_admin:=actor->>'role'='Admin';
+  upcoming_end:=public.delivery_home_workday_end(today,'8');
+  IF extract(isodow FROM upcoming_end)=5 THEN upcoming_end:=upcoming_end+2; END IF;
+  WITH milestone_scope AS MATERIALIZED (SELECT resource_id FROM public.delivery_rbac_scope('milestone',false)),
+  ticket_scope AS MATERIALIZED (SELECT resource_id FROM public.delivery_rbac_scope('support',false)),
+  milestone_rows AS (
+    SELECT m.id::text id,'milestone'::text kind,s.status,s.due_date,
+      s.status IN ('Critical','Deviated') attention,s.status='Critical' high,
+      is_admin OR public.delivery_rbac_assignment_key(m.owner)=ANY(keys) assigned,
+      CASE WHEN is_admin THEN nullif(btrim(m.dependency),'') IS NOT NULL ELSE public.delivery_rbac_assignment_key(m.dependency)=ANY(keys) END follow_up,
+      s.status='Pending' pending
+    FROM public.milestones m JOIN milestone_scope scope ON scope.resource_id=m.id::text
+    CROSS JOIN LATERAL public.delivery_home_milestone(jsonb_build_object('status',m.status,'days',m.days,'start_date',m.start_date,
+      'end_date',m.end_date,'revised_end_date',m.revised_end_date,'deadline',m.deadline,'completion_date',m.completion_date,
+      'remarks',m.remarks,'record_status',m.record_status),today) s
+    JOIN public.initiatives i ON i.id=m.initiative_id
+    LEFT JOIN public.programs p ON p.id=i.program_id
+    LEFT JOIN public.milestone_tracks t ON t.id=m.track_id AND t.initiative_id=i.id
+    WHERE s.eligible AND lower(btrim(coalesce(i.record_status,'active'))) NOT IN ('deleted','archived')
+      AND coalesce(p.is_active,true) AND lower(btrim(coalesce(t.record_status,'active'))) NOT IN ('deleted','archived')
+  ), ticket_rows AS (
+    SELECT t.request_id id,'support'::text kind,coalesce(nullif(t.fields->>'Status',''),t.fields->>'Request Status','Open') status,
+      (public.support_ticket_safe_date(t.fields->>'Due By Time',t.source_cells,'Due By Time') AT TIME ZONE
+        CASE WHEN coalesce(t.fields->>'Due By Time','') ~* '(Z|[+-][0-9]{2}:?[0-9]{2})$' THEN 'Asia/Kolkata' ELSE 'UTC' END)::date due_date,
+      coalesce(t.fields->>'Priority','') ~* 'critical|urgent|high' attention,
+      coalesce(t.fields->>'Priority','') ~* 'critical|urgent|high' high,
+      is_admin OR public.delivery_rbac_assignment_key(t.fields->>'Technician')=ANY(keys) assigned,
+      CASE WHEN is_admin THEN nullif(btrim(t.fields->>'Requester'),'') IS NOT NULL
+        AND lower(btrim(t.fields->>'Requester')) IS DISTINCT FROM lower(btrim(t.fields->>'Technician'))
+        ELSE (public.delivery_rbac_assignment_key(t.fields->>'Requester')=ANY(keys) OR public.delivery_rbac_assignment_key(t.fields->>'Requester Email')=ANY(keys))
+          AND NOT coalesce(public.delivery_rbac_assignment_key(t.fields->>'Technician')=ANY(keys),false) END follow_up,
+      lower(btrim(coalesce(t.fields->>'Request Status','')))='pending' OR lower(btrim(coalesce(t.fields->>'Status','')))='pending' pending
+    FROM public.support_tickets t JOIN ticket_scope scope ON scope.resource_id=t.request_id
+    WHERE p_include_support AND lower(regexp_replace(btrim(coalesce(t.fields->>'Request Status','')),'[-_]+',' ','g')) NOT IN ('on hold','closed','resolved')
+  ), todo_rows AS (
+    SELECT t.id::text id,'todo'::text kind,'Pending'::text status,t.due_date,
+      coalesce(t.priority,'') ~* 'critical|urgent|high' attention,coalesce(t.priority,'') ~* 'critical|urgent|high' high,
+      true assigned,false follow_up,true pending
+    FROM public.todo_items t WHERE t.user_id=auth.uid() AND NOT t.is_completed
+  ), eligible AS (
+    SELECT * FROM milestone_rows UNION ALL SELECT * FROM ticket_rows UNION ALL SELECT * FROM todo_rows
+  ), classified AS MATERIALIZED (
+    SELECT eligible.*,array_remove(ARRAY[
+      CASE WHEN assigned AND (due_date<=today OR high) THEN 'action' END,
+      CASE WHEN assigned AND due_date=today THEN 'close_today' END,
+      CASE WHEN follow_up THEN 'follow_up' END,
+      CASE WHEN attention OR due_date<today THEN 'attention' END,
+      CASE WHEN due_date<today THEN 'overdue' END,
+      CASE WHEN due_date=today THEN 'due_today' END,
+      CASE WHEN due_date>today AND due_date<=upcoming_end THEN 'upcoming' END,
+      CASE WHEN pending THEN 'pending' END],NULL) metrics
+    FROM eligible
+  ), counts AS (
+    SELECT jsonb_object_agg(metric,total) value FROM (
+      SELECT metric,count(*) total FROM classified CROSS JOIN LATERAL unnest(metrics) metric GROUP BY metric
+    ) totals
+  ), matching AS MATERIALIZED (SELECT * FROM classified WHERE p_metric=ANY(metrics)),
+  page_rows AS (SELECT * FROM matching ORDER BY high DESC,due_date NULLS LAST,kind,id LIMIT p_limit OFFSET p_offset),
+  details AS (
+    SELECT r.high,r.due_date,r.kind,r.id,jsonb_build_object('id',r.id,'type',r.kind,'status',r.status,'due_date',r.due_date,
+      'priority',CASE r.kind WHEN 'milestone' THEN CASE WHEN r.high THEN 'Critical' ELSE '' END WHEN 'support' THEN st.fields->>'Priority' ELSE td.priority END,
+      'name',CASE r.kind WHEN 'milestone' THEN coalesce(nullif(m.actions,''),nullif(m.milestone_title,''),'Milestone') WHEN 'support' THEN coalesce(st.fields->>'Subject',st.request_id) ELSE td.title END,
+      'initiative_id',m.initiative_id,'track_id',m.track_id,'program',p.program_name,'initiative',i.title,'track',t.track_name,
+      'context',CASE r.kind WHEN 'support' THEN st.fields->>'Department' WHEN 'todo' THEN 'To Do List' ELSE NULL END) record
+    FROM page_rows r
+    LEFT JOIN public.milestones m ON r.kind='milestone' AND m.id::text=r.id
+    LEFT JOIN public.initiatives i ON i.id=m.initiative_id
+    LEFT JOIN public.programs p ON p.id=i.program_id
+    LEFT JOIN public.milestone_tracks t ON t.id=m.track_id AND t.initiative_id=i.id
+    LEFT JOIN public.support_tickets st ON r.kind='support' AND st.request_id=r.id
+    LEFT JOIN public.todo_items td ON r.kind='todo' AND td.id::text=r.id AND td.user_id=auth.uid()
+  )
+  SELECT jsonb_build_object('as_of',today,'updated_at',current_timestamp,'include_support',p_include_support,'todo_pending',(SELECT count(*) FROM todo_rows),
+    'available',jsonb_build_object('milestone',is_admin OR (context->'access_levels') ?| ARRAY['program','initiative','track','milestone'] OR EXISTS(SELECT 1 FROM milestone_scope),
+      'support',(actor->>'role'='Admin' AND actor->>'admin_scope'='system') OR (context->'access_levels') ? 'support' OR EXISTS(SELECT 1 FROM ticket_scope),'todo',true))
+    ||CASE WHEN p_metric IS NULL THEN jsonb_build_object('counts',coalesce((SELECT value FROM counts),'{}'::jsonb))
+      ELSE jsonb_build_object('metric',p_metric,'total',(SELECT count(*) FROM matching),'records',coalesce((SELECT jsonb_agg(record ORDER BY high DESC,due_date NULLS LAST,kind,id) FROM details),'[]'::jsonb)) END
+    INTO result;
+  RETURN result;
+END;
+$fn$;
+REVOKE ALL ON FUNCTION public.delivery_home_workday_end(date,text),public.delivery_home_milestone(jsonb,date),public.delivery_home_summary(text,integer,integer,boolean) FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION public.delivery_home_summary(text,integer,integer,boolean) TO authenticated;
+NOTIFY pgrst,'reload schema';
+COMMIT;
+  </script>
+  <style id="delivery-workspace-background">
+    #main-content{background:#d5f0f5 url("delivery-workspace-background-gradient.jpg") center/cover no-repeat}
+    html[data-theme="dark"] #main-content{background:linear-gradient(rgba(19,23,29,.88),rgba(19,23,29,.88)),#13171d url("delivery-workspace-background-gradient.jpg") center/cover no-repeat!important}
+    @media print{#main-content,html[data-theme="dark"] #main-content{background-image:none!important}}
+  </style>
+  <style id="delivery-home-style">
+    body.delivery-home-active [data-home-hidden],body.delivery-home-active [data-home-filter-host],body.delivery-home-active #btn-new-program,body.delivery-home-active #btn-new-project,body.delivery-home-active #btn-page-import,body.delivery-home-active #btn-page-export{display:none!important}
+    #delivery-home{max-width:1280px;margin:0 auto;width:100%;color:#334155}
+    #delivery-home [hidden]{display:none!important}
+    .home-heading{display:flex;align-items:start;justify-content:space-between;gap:16px;margin:12px 0 28px}
+    .home-heading h1{font-size:clamp(24px,3vw,34px);font-weight:700;letter-spacing:-.035em;color:#0f172a;margin-bottom:6px}
+    .home-heading p,.home-updated{font-size:12px;color:#64748b}
+    .home-refresh,.home-close,.home-pager button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:8px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:10px;font-size:12px;font-weight:600}
+    .home-heading-actions{text-align:right;flex-shrink:0}.home-updated{margin-top:6px;font-size:10px}
+    .home-support-toggle{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:44px;font-size:12px;color:#475569;cursor:pointer}
+    .home-support-toggle input{width:16px;height:16px;accent-color:#4f46e5;flex-shrink:0}
+    .home-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
+    .home-card{position:relative;min-width:0;height:244px;box-sizing:border-box;display:flex;flex-direction:column;align-items:start;text-align:left;background:#fff;border:1px solid #e2e8f0;border-top:3px solid transparent;border-radius:18px;padding:22px;box-shadow:0 3px 12px #0f172a05;transition:transform .28s,box-shadow .28s,border-color .28s}
+    .home-card:hover{transform:translateY(-3px);box-shadow:0 8px 18px #0f172a0c}
+    .home-card:active{transform:translateY(0)}.home-card:focus-visible,.home-refresh:focus-visible,.home-close:focus-visible,.home-open:focus-visible{outline:2px solid #6366f1;outline-offset:3px}
+    .home-card[aria-pressed="true"]{border-color:#6366f1;box-shadow:0 0 0 2px #6366f126}.home-card[aria-pressed="true"]:after{content:"";position:absolute;right:18px;top:22px;width:8px;height:8px;border-radius:50%;background:#6366f1}
+    .home-icon{display:flex;align-items:center;justify-content:center;width:38px;height:38px;border-radius:12px;background:#eef2ff;color:#4f46e5;margin-bottom:16px}
+    .home-icon svg{width:19px;height:19px}.home-card-warning .home-icon{background:#fff1f2;color:#e11d48}
+    .home-card-warning{border-top:3px solid #fda4af}.home-card-warning .home-number{color:#be123c}
+    .home-number{font-size:36px;line-height:1.2;font-weight:700;font-variant-numeric:tabular-nums;color:#0f172a;letter-spacing:-.04em;margin-bottom:8px}
+    .home-card strong{font-size:14px;line-height:1.5;min-height:42px;color:#334155}.home-card small{font-size:12px;color:#64748b;margin-top:5px;line-height:1.5}
+    .home-skeleton{display:block;width:66px;height:38px;background:#f1f5f9;border-radius:8px;margin-bottom:10px}
+    .home-enter{animation:home-enter .4s both;animation-delay:var(--home-delay,0ms)}
+    @keyframes home-enter{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+    .home-name{display:inline-block;animation:home-name 1.8s cubic-bezier(.2,.7,.2,1) both}
+    .home-subtitle{--home-delay:1500ms;animation-duration:.6s}
+    .home-card.home-enter{animation-name:home-card-pop;animation-duration:.8s;animation-timing-function:cubic-bezier(.16,1,.3,1);animation-fill-mode:backwards}
+    @keyframes home-name{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+    @keyframes home-card-pop{from{visibility:hidden;opacity:0;transform:translateY(14px) scale(.975)}to{visibility:visible;opacity:1;transform:translateY(0) scale(1)}}
+    .home-details{margin-top:28px;background:#fff;border:1px solid #e2e8f0;border-radius:18px;overflow:hidden;scroll-margin-top:90px}
+    .home-details header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px 20px;border-bottom:1px solid #f1f5f9}.home-details h2{font-size:15px;font-weight:700;color:#0f172a}
+    .home-details table{width:100%;border-collapse:collapse;text-align:left;font-size:12px;table-layout:fixed}
+    .home-details th{padding:12px 16px;background:#f8fafc;font-size:10px;text-transform:uppercase;color:#64748b}
+    .home-details td{padding:16px;border-top:1px solid #f1f5f9;overflow-wrap:anywhere;vertical-align:top}
+    .home-details th:nth-child(1){width:30%}.home-details th:nth-child(2){width:25%}.home-details th:nth-child(3){width:15%}.home-details th:nth-child(4){width:18%}.home-details th:nth-child(5){width:12%}
+    .home-meta{display:block;color:#64748b;font-size:10px;margin-top:4px}.home-priority{display:inline-block;font-size:10px;color:#be123c;background:#fff1f2;border-radius:6px;padding:3px 6px;margin-top:6px}
+    .home-open{display:inline-flex;align-items:center;gap:4px;justify-content:center;min-height:44px;font-size:12px;font-weight:600;color:#4f46e5}
+    .home-message{padding:28px 20px;color:#64748b;font-size:12px}.home-error{border:1px solid #fecdd3;background:#fff1f2;color:#9f1239;border-radius:12px;padding:16px;margin-bottom:18px;font-size:12px;white-space:pre-wrap}
+    .home-pager{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 20px;border-top:1px solid #e2e8f0;font-size:11px}.home-pager button:disabled{opacity:.45}
+    @media(max-width:1024px){.home-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media(max-width:640px){.home-heading{flex-wrap:wrap;margin-bottom:20px}.home-heading-actions{text-align:left;display:flex;align-items:center;gap:12px}.home-grid{gap:10px}.home-card{padding:16px;border-radius:14px}.home-number{font-size:30px}.home-details table,.home-details tbody,.home-details tr,.home-details td{display:block;width:100%}.home-details thead{display:none}.home-details tr{padding:14px 16px;border-top:1px solid #e2e8f0}.home-details td{padding:3px 0;border:0}.home-details td[data-label]:before{content:attr(data-label) ": ";font-size:10px;font-weight:600;color:#64748b}.home-details td:first-child{font-weight:600}.home-details td:last-child{text-align:right}.home-details header{padding:14px 16px}}
+    @media(max-width:640px){.home-heading-actions{flex-wrap:wrap;max-width:100%}}
+    @media(max-width:340px){.home-grid{grid-template-columns:minmax(0,1fr)}}
+    @media(prefers-reduced-motion:reduce){#delivery-home *,#delivery-home *:before,#delivery-home *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+  </style>
+  <script id="delivery-home-runtime">
+  (function installDeliveryHome(){
+    const metrics=[
+      {id:'action',title:'Action Required',icon:'zap',text:'Assigned work needing action',warning:true},
+      {id:'close_today',title:'Target to Close Today',icon:'target',text:'Assigned work due today'},
+      {id:'follow_up',title:'Follow-up Required',icon:'corner-up-right',text:'Dependency and requester follow-ups'},
+      {id:'attention',title:'Need Attention',icon:'triangle-alert',text:'Overdue, critical or deviated',warning:true},
+      {id:'overdue',title:'Overdue',icon:'alarm-clock',text:'Past the effective due date',warning:true},
+      {id:'due_today',title:'Due Today',icon:'calendar-check',text:'Due today in your access scope'},
+      {id:'upcoming',title:'Upcoming',icon:'calendar-days',text:'Next seven working days'},
+      {id:'pending',title:'Pending',icon:'hourglass',text:'Existing module Pending rules'}
+    ];
+    const state={key:'',summary:null,details:new Map(),active:null,page:0,request:0,controller:null,summaryController:null,summaryRequest:0,summaryPending:null,directory:null,hierarchy:null,loadedUser:'',navigation:0,dirty:false,entranceStart:0,includeSupport:false};
+    const home=()=>document.getElementById('delivery-home');
+    const reduced=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    function today(){return new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Kolkata',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date()).filter(p=>['year','month','day'].includes(p.type)).reduce((parts,p)=>(parts[p.type]=p.value,parts),{});}
+    function dayKey(){const d=today();return `${d.year}-${d.month}-${d.day}`;}
+    function accessKey(){return JSON.stringify([currentUser?.id,currentUser?.email,dayKey(),window.deliveryRbac.state.context,state.includeSupport]);}
+    function stopDetails(){state.request++;state.controller?.abort();state.controller=null;}
+    function leave(){home().classList.add('hidden');document.querySelectorAll('[data-home-filter-host]').forEach(host=>host.replaceWith(...host.childNodes));document.body.classList.remove('delivery-home-active');stopDetails();}
+    function invalidate(){state.dirty=true;state.details.clear();stopDetails();}
+    function reset(){stopDetails();state.summaryController?.abort();state.summaryRequest++;state.summaryPending=null;state.key='';state.summary=null;state.details.clear();state.active=null;state.directory=null;state.hierarchy=null;state.loadedUser='';state.navigation++;state.dirty=false;state.includeSupport=false;home()?.replaceChildren();}
+    function shell(){
+      state.entranceStart=performance.now();
+      home().innerHTML=`<header class="home-heading"><div><h1>Welcome, <span class="home-name">${escape(String(currentUser?.name||'').trim().split(/\s+/)[0]||'there')}</span></h1><p class="home-subtitle home-enter">Find your action summary below</p></div><div class="home-heading-actions"><button type="button" class="home-refresh" data-home-refresh><i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>Refresh</button><label class="home-support-toggle" hidden><input type="checkbox" data-home-support ${state.includeSupport?'checked':''}>Include support tickets</label><div class="home-updated" aria-live="polite">Last updated: &mdash;</div></div></header><div class="home-error" role="alert" hidden></div><div class="home-grid home-primary"></div><div class="home-grid home-secondary"></div><section class="home-details" aria-labelledby="home-detail-title" hidden></section>`;
+      cards(null);
+      home().querySelector('[data-home-refresh]').onclick=()=>refresh(true);
+      home().querySelector('[data-home-support]').onchange=event=>{
+        state.includeSupport=event.target.checked;invalidate();state.active=null;
+        home().querySelector('.home-details').hidden=true;cards(null);return refresh(true);
+      };
+    }
+    function visible(metric,summary){return !summary||metric.id!=='follow_up'||summary.available.milestone||(state.includeSupport&&summary.available.support);}
+    function cards(summary){
+      const now=performance.now();let cardIndex=0;
+      for(const [selector,list] of [['.home-primary',metrics.slice(0,4)],['.home-secondary',metrics.slice(4)]]){
+        home().querySelector(selector).innerHTML=list.filter(m=>visible(m,summary)).map(m=>{
+          const count=summary?.counts[m.id]??0;
+          const delay=state.entranceStart+2150+cardIndex++*320-now;
+          return `<button type="button" class="home-card home-enter ${m.warning?'home-card-warning':''}" style="--home-delay:${delay}ms" data-home-metric="${m.id}" aria-controls="home-detail-title" aria-pressed="${state.active===m.id}" ${!summary?'disabled':''}><span class="home-icon"><i data-lucide="${m.icon}"></i></span>${summary?`<span class="home-number" aria-label="${count}">${count}</span>`:'<span class="home-skeleton" aria-label="Loading count"></span>'}<strong>${m.title}</strong><small>${summary&&count===0?"You're all caught up":m.text}</small></button>`;
+        }).join('');
+      }
+      home().querySelectorAll('[data-home-metric]').forEach(button=>button.onclick=()=>select(button.dataset.homeMetric));
+      lucide.createIcons({root:home()});
+      if(summary&&!reduced()){
+        const nodes=[...home().querySelectorAll('.home-number')].map((node,index)=>({node,count:Number(node.getAttribute('aria-label')),start:state.entranceStart+2150+index*320}));
+        const frame=now=>{if(currentWorkspaceView!=='home'||state.summary!==summary||!nodes[0]?.node.isConnected)return;let pending=false;nodes.forEach(({node,count,start})=>{const t=Math.max(0,Math.min(1,(now-start)/700)),value=String(Math.round(count*(1-(1-t)**3)));if(node.textContent!==value)node.textContent=value;if(t<1)pending=true;});if(pending)requestAnimationFrame(frame);};
+        frame(performance.now());
+      }
+    }
+    function showError(error){
+      console.error('Home summary failed:',error);
+      const node=home().querySelector('.home-error');node.hidden=false;node.textContent=`Unable to load your action summary. ${error.message}`;
+      if(['PGRST202','42883'].includes(error.code)){
+        node.append(document.createElement('br'));
+        const button=document.createElement('button');button.type='button';button.className='home-refresh';button.textContent='Copy read-only Home setup SQL';
+        button.onclick=async()=>{try{await navigator.clipboard.writeText(document.getElementById('delivery-home-sql').textContent.trim());showToast('Home SQL copied. Review and apply it in the existing Supabase project, then Refresh.','info');}catch(copyError){showToast(copyError.message,'error');}};
+        node.append(button);
+      }
+    }
+    async function query(args,signal){
+      const parameters={...args,p_include_support:state.includeSupport};
+      let request=supabaseClient.rpc('delivery_home_summary',parameters);
+      if(request.abortSignal)request=request.abortSignal(signal);
+      const {data,error}=await request;if(error)throw Object.assign(new Error(error.message),{code:error.code});
+      if(!data||data.include_support!==parameters.p_include_support||!/^\d{4}-\d{2}-\d{2}$/.test(data.as_of)||!data.available||!data.updated_at||!Number.isInteger(data.todo_pending)||data.todo_pending<0)throw new Error('Invalid Home response.');
+      if(args.p_metric){
+        if(data.metric!==args.p_metric||!Number.isInteger(data.total)||data.total<0||!Array.isArray(data.records))throw new Error('Invalid Home detail response.');
+      }else if(!data.counts||'records' in data||Object.values(data.counts).some(n=>!Number.isInteger(n)||n<0))throw new Error('Invalid Home count response.');
+      return data;
+    }
+    async function refresh(force=false){
+      if(!currentUser)return;
+      if(state.summaryPending&&!force)return state.summaryPending;
+      state.summaryController?.abort();const controller=new AbortController();state.summaryController=controller;
+      const request=++state.summaryRequest,user=String(currentUser.id);
+      const run=(async()=>{
+        home().querySelector('.home-error').hidden=true;
+        home().querySelector('[data-home-refresh]').disabled=true;
+        try{
+          await window.deliveryRbac.refresh();
+          if(request!==state.summaryRequest||String(currentUser?.id)!==user)return;
+          const key=accessKey();
+          if(key!==state.key||force||state.dirty){state.key=key;state.summary=null;state.details.clear();state.active=null;state.page=0;stopDetails();home().querySelector('.home-details').hidden=true;cards(null);}
+          if(!state.summary){
+            const summary=await query({},controller.signal);
+            if(request!==state.summaryRequest||String(currentUser?.id)!==user||key!==accessKey())return;
+            if(summary.as_of!==dayKey())throw new Error('The date changed while loading. Please Refresh.');
+            state.summary=summary;state.dirty=false;
+          }
+          if(currentWorkspaceView!=='home')return;
+          cards(state.summary);
+          home().querySelector('.home-support-toggle').hidden=!state.summary.available.support;
+          todoPendingCount=state.summary.todo_pending;updateTodoBadge();
+          home().querySelector('.home-updated').textContent=`Last updated: ${new Intl.DateTimeFormat('en-IN',{timeZone:'Asia/Kolkata',hour:'2-digit',minute:'2-digit'}).format(new Date(state.summary.updated_at))} IST`;
+        }catch(error){if(!controller.signal.aborted&&request===state.summaryRequest&&currentWorkspaceView==='home')showError(error);}
+        finally{if(request===state.summaryRequest){state.summaryPending=null;home().querySelector('[data-home-refresh]').disabled=false;}}
+      })();
+      state.summaryPending=run;return run;
+    }
+    async function open(){
+      if(!currentUser)return;
+      state.navigation++;stopDetails();state.active=null;
+      currentWorkspaceView='home';deliveryViewNavigationVersion++;deliveryTargetNavigationActive=false;
+      document.body.classList.remove('analytics-view-active');document.body.classList.add('delivery-home-active');
+      getWorkspaceOverviewElements().forEach(node=>{node.classList.add('hidden');node.dataset.homeHidden='true';});
+      document.getElementById('overview-filter-row')?.setAttribute('data-home-hidden','true');
+      const filter=document.getElementById('overview-filter-row');
+      if(filter&&!filter.parentElement.hasAttribute('data-home-filter-host')){
+        const host=document.createElement('div');host.setAttribute('data-home-filter-host','');filter.before(host);host.append(filter);
+      }
+      ['workspace-flat-page','analytics-page','overview-control-bar'].forEach(id=>document.getElementById(id)?.classList.add('hidden'));
+      document.getElementById('overview-selection-actions')?.remove();
+      ['btn-page-import','btn-page-export','btn-new-program','btn-new-project'].forEach(id=>{const node=document.getElementById(id);if(node)node.style.display='none';});
+      document.getElementById('workspace-page-title').textContent='Home';
+      document.querySelectorAll('.workspace-page-link').forEach(button=>{const active=button.id==='workspace-nav-home';button.classList.toggle('bg-slate-800',active);button.classList.toggle('text-indigo-300',active);button.classList.toggle('text-slate-400',!active);});
+      home().classList.remove('hidden');shell();return refresh();
+    }
+    async function select(metric,pageNumber=0){
+      if(!metrics.some(m=>m.id===metric)||!state.summary)return;
+      if(state.dirty||state.key!==accessKey()){await refresh(true);return;}
+      stopDetails();state.active=metric;state.page=pageNumber;
+      const request=state.request,key=state.key,controller=new AbortController();state.controller=controller;
+      const title=metrics.find(m=>m.id===metric).title,panel=home().querySelector('.home-details');
+      home().querySelectorAll('[data-home-metric]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.homeMetric===metric)));
+      panel.hidden=false;panel.classList.remove('home-enter');void panel.offsetWidth;panel.classList.add('home-enter');
+      panel.innerHTML=`<header><h2 id="home-detail-title" tabindex="-1">${title}</h2><button type="button" class="home-close" aria-label="Close Details"><i data-lucide="x" class="w-4 h-4"></i>Close Details</button></header><div class="home-detail-body"><p class="home-message" role="status">Loading ${title.toLowerCase()}...</p></div>`;
+      panel.querySelector('.home-close').onclick=closeDetails;
+      lucide.createIcons({root:panel});panel.scrollIntoView({behavior:reduced()?'auto':'smooth',block:'nearest'});panel.querySelector('h2').focus({preventScroll:true});
+      try{
+        const cacheKey=`${metric}:${pageNumber}`;
+        let data=state.details.get(cacheKey);
+        if(!data){data=await query({p_metric:metric,p_offset:pageNumber*50,p_limit:50},controller.signal);}
+        if(request!==state.request||key!==state.key||key!==accessKey()||state.active!==metric||currentWorkspaceView!=='home')return;
+        if(data.as_of!==state.summary.as_of)throw new Error('The date changed. Please Refresh your summary.');
+        state.details.set(cacheKey,data);renderDetails(data);
+      }catch(error){
+        if(!controller.signal.aborted&&request===state.request){console.error('Home details failed:',error);panel.querySelector('.home-detail-body').innerHTML=`<p class="home-message" role="alert">Unable to load details. ${escape(error.message)} Use Refresh to try again.</p>`;}
+      }
+    }
+    function closeDetails(){
+      const metric=state.active;stopDetails();state.active=null;home().querySelector('.home-details').hidden=true;
+      home().querySelectorAll('[data-home-metric]').forEach(button=>button.setAttribute('aria-pressed','false'));
+      home().querySelector(`[data-home-metric="${metric}"]`)?.focus({preventScroll:true});
+    }
+    function renderDetails(data){
+      const body=home().querySelector('.home-detail-body'),names={milestone:'Milestone',support:'Support Ticket',todo:'To Do'};
+      body.innerHTML=data.records.length?`<table><thead><tr><th scope="col">Item</th><th scope="col">Context</th><th scope="col">Status</th><th scope="col">Due</th><th scope="col">Action</th></tr></thead><tbody>${data.records.map((row,index)=>{
+        const countdown=row.due_date?calculateWorkdayCountdown(row.due_date,'',data.as_of):null;
+        return `<tr><td><strong>${escape(row.name)}</strong><span class="home-meta">${names[row.type]||escape(row.type)}</span>${row.priority?`<span class="home-priority">${escape(row.priority)}</span>`:''}</td><td data-label="Context">${escape([row.program,row.initiative,row.track].filter(Boolean).join(' / ')||row.context||'Unmapped')}</td><td data-label="Status">${escape(row.status||'Not specified')}</td><td data-label="Due">${row.due_date?escape(formatDate(row.due_date)):'Not set'}${countdown?`<span class="home-meta">${escape(countdown.label)}</span>`:''}</td><td><button type="button" class="home-open" data-home-open="${index}" aria-label="Open ${escape(row.name)}">Open<i data-lucide="arrow-up-right" class="w-3.5 h-3.5"></i></button></td></tr>`;
+      }).join('')}</tbody></table>`:'<p class="home-message">You\'re all caught up. No matching items.</p>';
+      body.insertAdjacentHTML('beforeend',`<footer class="home-pager"><span>${data.total} item${data.total===1?'':'s'}${data.total>50?` &middot; Page ${state.page+1}`:''}</span><div><button type="button" data-home-prev ${state.page===0?'disabled':''}>Previous</button> <button type="button" data-home-next ${(state.page+1)*50>=data.total?'disabled':''}>Next</button></div></footer>`);
+      body.querySelectorAll('[data-home-open]').forEach(button=>button.onclick=()=>openRecord(data.records[Number(button.dataset.homeOpen)],button));
+      body.querySelector('[data-home-prev]').onclick=()=>select(state.active,state.page-1);
+      body.querySelector('[data-home-next]').onclick=()=>select(state.active,state.page+1);
+      lucide.createIcons({root:body});
+    }
+    async function directory(){
+      const user=String(currentUser?.id);
+      if(state.loadedUser===user)return true;
+      if(!state.directory){
+        const pending=Promise.all([loadUsersFromSupabase(),loadMasterValues()]).then(results=>{
+          if(results.some(loaded=>!loaded))return false;
+          if(String(currentUser?.id)!==user)return false;
+          state.loadedUser=user;populateUserDropdowns();return true;
+        }).finally(()=>{if(state.directory===pending)state.directory=null;});
+        state.directory=pending;
+      }
+      return state.directory;
+    }
+    async function hierarchy(){
+      if(window.deliveryRbac.state.snapshot)return true;
+      if(!state.hierarchy){
+        const pending=(async()=>{if(!await directory())return false;return loadInitiativesFromSupabase({render:false});})().finally(()=>{if(state.hierarchy===pending)state.hierarchy=null;});
+        state.hierarchy=pending;
+      }
+      return state.hierarchy;
+    }
+    async function openRecord(row,button){
+      button.disabled=true;const navigation=++state.navigation;
+      try{
+        if(row.type==='milestone'){
+          if(!await hierarchy())throw new Error('Unable to load the authorized hierarchy.');
+          if(navigation!==state.navigation)return;
+          if(!window.deliveryRbac.can('milestone',row.id,'read'))throw new Error('Access to this milestone has changed. Refresh Home.');
+          window.navigateToOverviewMilestone(row.initiative_id,Number(row.id),row.track_id);
+        }else if(row.type==='todo'){
+          todoActiveFilter='all';document.getElementById('todo-search')?.remove();
+          await window.showTodoListView();if(navigation!==state.navigation)return;
+          const target=[...document.querySelectorAll('#workspace-flat-page article')].find(node=>[...node.querySelectorAll('button')].some(b=>(b.getAttribute('onclick')||'').includes(`('${row.id}')`)));
+          if(!target)throw new Error('This To Do item is no longer available.');
+          target.scrollIntoView({behavior:reduced()?'auto':'smooth',block:'center'});target.classList.add('ring-2','ring-indigo-400');
+        }else if(row.type==='support'){
+          const module=window.supportTickets;
+          const user=String(currentUser?.email||currentUser?.id||'');
+          if(module.state.user!==user){await module.load();if(navigation!==state.navigation)return;}
+          module.state.query='';module.state.filters={RequestID:row.id};module.state.page=1;module.state.view='grid';
+          await module.load(true);if(navigation!==state.navigation)return;
+          if(module.state.error)throw new Error(module.state.error);
+          const index=module.state.records.findIndex(record=>record.request_id===row.id);
+          if(index<0||!window.deliveryRbac.canTicket(module.state.records[index],'read'))throw new Error('This ticket is no longer available in your access scope.');
+          await window.showWorkspaceView('support');
+          const target=document.querySelector(`[data-support-action="view"][data-index="${index}"]`)?.closest('tr,article');
+          if(target)target.classList.add('ring-2','ring-indigo-400');
+          module.openTicket(index,'view');
+        }else throw new Error('Unsupported Home item type.');
+      }catch(error){console.error('Home navigation failed:',error);showToast(error.message,'error');}
+      finally{button.disabled=false;}
+    }
+    const previousShow=window.showWorkspaceView;
+    window.showWorkspaceView=function(view){
+      if(view==='home')return open();
+      const navigation=++state.navigation;
+      if(['overview','programs','initiatives','tracks','milestones','daily','report_builder','custom_reports','system_reports'].includes(view)&&!window.deliveryRbac.state.snapshot){
+        return hierarchy().then(loaded=>{if(loaded&&navigation===state.navigation){leave();return previousShow.apply(this,[view]);}});
+      }
+      leave();if(view==='support')invalidate();return previousShow.apply(this,arguments);
+    };
+    for(const name of ['showTodoListView','showAnalyticsView']){
+      const previous=window[name];
+      window[name]=async function(){
+        leave();if(name==='showTodoListView')invalidate();
+        if(name==='showAnalyticsView'&&!await hierarchy())return;
+        return previous.apply(this,arguments);
+      };
+    }
+    for(const name of ['openUserModal','openAdminModal','openMasterModal','openProjectPlannerModal']){
+      const previous=window[name];if(typeof previous!=='function')continue;
+      window[name]=async function(){if(!currentUser)return;if(!await directory())return;return previous.apply(this,arguments);};
+    }
+    const previousLoad=window.loadInitiativesFromSupabase;
+    window.loadInitiativesFromSupabase=async function(){const loaded=await previousLoad.apply(this,arguments);if(loaded)invalidate();return loaded;};
+    supabaseClient.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT')showLoginScreen();});
+    window.deliveryHome={open,refresh,select,closeDetails,invalidate,reset};
   })();
   </script>
   </body>
