@@ -6,6 +6,100 @@
     <title>Project Milestone Delivery Hub</title>
     <script>
       try { if (localStorage.getItem('deliveryHubTheme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (error) {}
+      (function () {
+        const root = document.documentElement;
+        const W = window.DELIVERY_WALLPAPERS = [
+          { id: 'default', name: 'Delivery Sky', tone: 'light', accent: '#4f46e5', css: 'url("delivery-workspace-background-gradient.jpg")' },
+          { id: 'graphite', name: 'Graphite', tone: 'dark', accent: '#0ea5e9', css: 'radial-gradient(at 12% 8%,#475569 0,transparent 50%),radial-gradient(at 88% 92%,#1e3a5f 0,transparent 55%),linear-gradient(135deg,#1e293b 0%,#334155 55%,#0f172a 100%)' },
+          { id: 'aurora', name: 'Aurora', tone: 'light', accent: '#6366f1', css: 'radial-gradient(at 20% 15%,#c7d2fe 0,transparent 55%),radial-gradient(at 85% 10%,#a5f3fc 0,transparent 50%),radial-gradient(at 70% 90%,#fbcfe8 0,transparent 55%),linear-gradient(135deg,#eef2ff,#ecfeff)' },
+          { id: 'peach', name: 'Peach Glow', tone: 'light', accent: '#ea580c', css: 'linear-gradient(135deg,#ffecd2 0%,#fcb69f 100%)' },
+          { id: 'mint', name: 'Fresh Mint', tone: 'light', accent: '#059669', css: 'linear-gradient(120deg,#d4fc79 0%,#96e6a1 100%)' },
+          { id: 'lavender', name: 'Lavender Mist', tone: 'light', accent: '#7c3aed', css: 'linear-gradient(135deg,#e0c3fc 0%,#8ec5fc 100%)' },
+          { id: 'ocean', name: 'Deep Ocean', tone: 'dark', accent: '#6366f1', css: 'linear-gradient(135deg,#667eea 0%,#764ba2 100%)' },
+          { id: 'plain', name: 'Plain', tone: 'light', accent: '#4f46e5', css: 'linear-gradient(#eef2f6,#eef2f6)' }
+        ];
+        const hex = value => [1, 3, 5].map(i => parseInt(value.slice(i, i + 2), 16));
+        const lighten = (rgb, amount) => rgb.map(c => Math.round(c + (255 - c) * amount));
+        function palette(p) {
+          const rgb = hex(p.accent), light = lighten(rgb, .45);
+          root.style.setProperty('--wp-accent', p.accent);
+          root.style.setProperty('--wp-accent-rgb', rgb.join(','));
+          root.style.setProperty('--wp-accent-light', `rgb(${light.join(',')})`);
+          root.style.setProperty('--wp-accent-light-rgb', light.join(','));
+          root.dataset.wpTone = p.tone === 'dark' ? 'dark' : 'light';
+        }
+        // Custom images live in IndexedDB as Blobs and are referenced via a short blob: URL,
+        // keeping large base64 strings out of localStorage and CSS for performance.
+        function openDb() {
+          return new Promise((resolve, reject) => {
+            const request = indexedDB.open('deliveryHubWallpaper', 1);
+            request.onupgradeneeded = () => request.result.createObjectStore('images');
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+        }
+        async function withStore(mode, action) {
+          const db = await openDb();
+          try {
+            return await new Promise((resolve, reject) => {
+              const tx = db.transaction('images', mode), request = action(tx.objectStore('images'));
+              tx.oncomplete = () => resolve(request && request.result);
+              tx.onerror = tx.onabort = () => reject(tx.error);
+            });
+          } finally { db.close(); }
+        }
+        // Wallpaper choices are stored per user (keys suffixed with the user id); signed-out state always uses Delivery Sky.
+        let user = '';
+        try {
+          ['deliveryHubWallpaper', 'deliveryHubWallpaperPalette', 'deliveryHubWallpaperCustom'].forEach(key => localStorage.removeItem(key));
+          user = localStorage.getItem('deliveryHubWallpaperLastUser') || '';
+        } catch (error) {}
+        withStore('readwrite', s => s.delete('custom')).catch(() => {});
+        const key = name => `${name}:${user}`;
+        const read = name => { try { return user ? localStorage.getItem(key(name)) : null; } catch (error) { return null; } };
+        window.deliveryWallpaperPrefs = {
+          get user() { return user; },
+          get: read,
+          set(name, value) { if (!user) return false; try { localStorage.setItem(key(name), value); return true; } catch (error) { return false; } }
+        };
+        window.deliveryWallpaperStore = {
+          get: () => user ? withStore('readonly', s => s.get(key('custom'))) : Promise.resolve(null),
+          put: blob => user ? withStore('readwrite', s => s.put(blob, key('custom'))) : Promise.reject(new Error('Sign in to save a custom background.'))
+        };
+        window.setDeliveryWallpaperUser = function (id) {
+          user = id == null ? '' : String(id);
+          try { if (user) localStorage.setItem('deliveryHubWallpaperLastUser', user); else localStorage.removeItem('deliveryHubWallpaperLastUser'); } catch (error) {}
+          document.getElementById('delivery-wallpaper-picker')?.remove();
+          window.applyDeliveryWallpaper();
+        };
+        let objectUrl = '', token = 0;
+        const setImage = css => root.style.setProperty('--delivery-wallpaper', css);
+        window.applyDeliveryWallpaper = function () {
+          const current = ++token, owner = user;
+          const id = read('deliveryHubWallpaper') || 'default';
+          if (id === 'custom') {
+            let p = null;
+            try { p = JSON.parse(read('deliveryHubWallpaperPalette') || 'null'); } catch (error) {}
+            palette(p && /^#[0-9a-f]{6}$/i.test(p.accent) ? p : { tone: 'light', accent: '#4f46e5' });
+            root.dataset.wallpaper = 'custom';
+            setImage('none');
+            window.deliveryWallpaperStore.get().then(blob => {
+              if (current !== token || owner !== user) return;
+              if (!(blob instanceof Blob)) {
+                window.deliveryWallpaperPrefs.set('deliveryHubWallpaper', 'default');
+                window.applyDeliveryWallpaper(); return;
+              }
+              const previous = objectUrl;
+              objectUrl = URL.createObjectURL(blob); setImage(`url("${objectUrl}")`);
+              if (previous) setTimeout(() => URL.revokeObjectURL(previous), 1000);
+            }).catch(() => { if (current === token) { palette(W[0]); setImage(W[0].css); } });
+            return;
+          }
+          const p = W.find(w => w.id === id) || W[0];
+          palette(p); setImage(p.css); root.dataset.wallpaper = p.id;
+        };
+        window.applyDeliveryWallpaper();
+      })();
     </script>
     <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -313,7 +407,7 @@
   </style>
 
   <style id="user-onboarding-security-styles">
-  .user-onboarding-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.65rem;align-items:start}
+  .user-onboarding-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:.65rem;align-items:start}
   .user-onboarding-field{min-width:0}.user-onboarding-field label{display:block;margin:0 0 .3rem;font-weight:600;color:#334155;line-height:1.15}
   .user-onboarding-control{width:100%;height:2.25rem;min-width:0;padding:0 .7rem;background:#fff;border:1px solid #cbd5e1;border-radius:.5rem;font-size:.75rem;color:#0f172a;outline:none;transition:border-color .15s,box-shadow .15s,background .15s}
   .user-onboarding-control:focus{border-color:#6366f1;box-shadow:0 0 0 2px rgba(99,102,241,.22)}
@@ -675,6 +769,7 @@
         <!-- Right Buttons Start -->
   <div class="flex items-center gap-2 sm:gap-3">
 
+            <button id="delivery-wallpaper-toggle" type="button" class="delivery-theme-toggle delivery-wallpaper-toggle" aria-label="Choose background wallpaper" title="Choose background wallpaper" aria-haspopup="dialog" onclick="openDeliveryWallpaperPicker()"><i data-lucide="image" class="w-4 h-4" aria-hidden="true"></i></button>
             <button id="delivery-theme-toggle" type="button" class="delivery-theme-toggle" aria-label="Switch to dark mode" title="Switch to dark mode" aria-pressed="false" onclick="toggleDeliveryTheme()"><i data-lucide="moon" class="w-4 h-4" aria-hidden="true"></i></button>
 
   <!-- Admin User Management -->
@@ -1836,7 +1931,7 @@
           </h2>
 
           <p class="text-xs text-slate-500 mt-0.5">
-            Manage team members, corporate emails, departments, and default roles
+            Create basic user details, then assign access through User Role
           </p>
         </div>
 
@@ -1916,24 +2011,6 @@
             <label for="new-user-dept">Department *</label>
             <select id="new-user-dept" required class="user-onboarding-control">
               <option value="">-- Select Department --</option>
-            </select>
-          </div>
-          <div class="user-onboarding-field">
-            <label for="new-user-role">Role Tier</label>
-            <select id="new-user-role" class="user-onboarding-control">
-              <option value="Level 1">Level 1 (Full CRUD)</option>
-              <option value="Level 2">Level 2 (Vertical Scoped)</option>
-              <option value="Admin">Admin</option>
-              <option value="Read-Only">Read-Only</option>
-            </select>
-          </div>
-          <div class="user-onboarding-field">
-            <label for="new-user-vertical">Assigned Vertical</label>
-            <select id="new-user-vertical" class="user-onboarding-control">
-              <option value="All">All Verticals</option>
-              <option value="Retail commercial">Retail commercial</option>
-              <option value="Finance">Finance</option>
-              <option value="Merchandising">Merchandising</option>
             </select>
           </div>
           <div class="user-onboarding-field">
@@ -5089,7 +5166,7 @@
 
   async function addUser(e) {
     e.preventDefault();
-    if (!currentUser || currentUser.role !== 'Admin') {
+    if (!currentUser || !window.deliveryRbac.system()) {
       showToast('You are not authorized to onboard users.', 'error');
       return;
     }
@@ -5115,8 +5192,8 @@
       email: normalizeUserMasterEmail(document.getElementById('new-user-email').value),
       password,
       department: document.getElementById('new-user-dept').value.trim(),
-      role: document.getElementById('new-user-role').value,
-      assigned_vertical: document.getElementById('new-user-vertical').value
+      role: 'Read-Only',
+      assigned_vertical: 'All'
     };
 
     submitButton.disabled = true;
@@ -5156,6 +5233,10 @@
       renderUserRoleManagement();
       renderProjects();
       showToast('User onboarded successfully.', 'success');
+      const created=userMaster.find(user=>user.authUserId===data.auth_user_id);
+      const roleLink=created&&document.querySelector(`[data-user-master-id="${created.id}"] [data-user-role-link]`);
+      roleLink?.scrollIntoView({block:'nearest'});
+      roleLink?.focus({preventScroll:true});
     } catch (error) {
       clearNewUserPasswordState();
       const message = userMasterEmailErrorMessage(error);
@@ -5766,16 +5847,10 @@
         `edit-user-department-${userId}`
       );
 
-    const verticalInput =
-      document.getElementById(
-        `edit-user-vertical-${userId}`
-      );
-
     if (
       !nameInput ||
       !emailInput ||
-      !departmentInput ||
-      !verticalInput
+      !departmentInput
     ) {
       showToast(
         'The inline edit fields were not found.',
@@ -5794,9 +5869,6 @@
 
     const department =
       departmentInput.value.trim();
-
-    const assignedVertical =
-      verticalInput.value;
 
     if (!fullName) {
       showToast(
@@ -5837,33 +5909,10 @@
       return;
     }
 
-    if (!assignedVertical) {
-      showToast(
-        'Assigned Vertical is required.',
-        'error'
-      );
-      verticalInput.focus();
-      return;
-    }
-
-    if (
-      user.role === 'Level 2' &&
-      assignedVertical === 'All'
-    ) {
-      showToast(
-        'Level 2 users must have a specific Assigned Vertical.',
-        'error'
-      );
-      verticalInput.focus();
-      return;
-    }
-
     const payload = {
       full_name: fullName,
       email: email,
-      department: department,
-      assigned_vertical:
-        assignedVertical
+      department: department
     };
 
     try {
@@ -5905,9 +5954,6 @@
 
         currentUser.department =
           department;
-
-        currentUser.assignedVertical =
-          assignedVertical;
 
         const leftBadge =
           document.getElementById(
@@ -5954,41 +6000,42 @@
       async function removeUser(index) {
         if (
     !currentUser ||
-    currentUser.role !== 'Admin'
+    !window.deliveryRbac.system()
   ) {
-    alert(
-      'Only Admin can remove users.'
+    showToast(
+      'Only System Admin can mark users inactive.','error'
     );
     return;
   }
+    if(editingUserMasterId!==null){showToast('Save or cancel the basic details before managing this user.','error');return;}
     const user = userMaster[index];
 
     if (!user) return;
 
-    const confirmed = confirm(
-      `Deactivate ${user.name} (${user.email})?`
-    );
+    const confirmed = await confirmUserDeactivation(user);
 
     if (!confirmed) return;
 
-    const { error } = await supabaseClient
+    const { data, error } = await supabaseClient
       .from('user_master')
       .update({
         is_active: false
       })
-      .eq('id', Number(user.id));
+      .eq('id', Number(user.id)).select('id,is_active').single();
 
     if (error) {
       console.error('User deactivation failed:', error);
-      alert(`Unable to deactivate user: ${error.message}`);
+      showToast(`Unable to deactivate user: ${error.message}`,'error');
       return;
     }
+    if(!data||Number(data.id)!==Number(user.id)||data.is_active!==false){showToast('User deactivation was not confirmed. Refresh and retry.','error');return;}
 
-    await loadUsersFromSupabase();
+    if(await loadUsersFromSupabase()===false){showToast('User was marked inactive, but User Master could not be refreshed. Refresh and retry.','error');return;}
 
     renderUserMasterList();
     renderUserRoleManagement();
     renderProjects();
+    showToast('User marked inactive.','success');
   }
 
       function openUserModal() {
@@ -10488,6 +10535,92 @@
     }
   }
 
+  const inlineMilestoneInsertions=new Map();
+  const inlineInsertionAuditFields=new Set(['updated_at','modified_at','modified_time','modified_by','modified_by_name','updated_by','updated_by_name']);
+  function acceptInlineMilestoneInsertionRealtime(payload){
+    if(!payload?.new)return false;
+    const row=payload.new;
+    for(const [id,operation] of inlineMilestoneInsertions){
+      if(!operation.busy&&operation.until<Date.now()){inlineMilestoneInsertions.delete(id);continue;}
+      const milestoneEvent=payload.table==='milestones'&&Number(row.initiative_id)===id&&Number(row.track_id||0)===Number(operation.trackId||0);
+      const initiativeEvent=payload.table==='initiatives'&&Number(row.id)===id;
+      const programEvent=payload.table==='programs'&&Number(row.id)===Number(operation.project.programId);
+      if(!milestoneEvent&&!initiativeEvent&&!programEvent)continue;
+      if(!['INSERT','UPDATE'].includes(payload.eventType))return false;
+      if(operation.busy){operation.events.push(payload);return true;}
+      const equal=(field,left,right)=>field==='days'&&left!=null&&right!=null?String(left)===String(right):JSON.stringify(left)===JSON.stringify(right);
+      const matches=(baseline,ignoreSequence=false)=>baseline&&Object.keys(row).every(field=>inlineInsertionAuditFields.has(field)||ignoreSequence&&field==='sequence_no'||equal(field,row[field],baseline[field]));
+      if(milestoneEvent){
+        const current=kpiMilestoneRows.find(item=>Number(item.id)===Number(row.id));
+        if(matches(current)||matches(operation.created))return true;
+        const before=operation.before.get(Number(row.id)),position=operation.temporary.get(Number(row.id));
+        if(payload.eventType==='UPDATE'&&Number(row.sequence_no)===position&&matches(before,true))return true;
+      }else{
+        const baseline=initiativeEvent?operation.initiative:operation.program;
+        const current=initiativeEvent?operation.project:programs.find(item=>Number(item.id)===Number(row.id));
+        if(baseline&&current&&matches({...baseline,revised_end_date:current.revisedEndDate||null,actual_end_date:current.actualEndDate||null}))return true;
+      }
+    }
+    return false;
+  }
+
+  async function insertInlineMilestoneAtPosition(project,milestone,record){
+    const ordered=project.milestones.filter(item=>Number(item.trackId||0)===Number(milestone.trackId||0));
+    const position=ordered.indexOf(milestone)+1;
+    if(position<1||ordered.some(item=>item!==milestone&&Number(item.id)<=0))throw new Error('The insertion position is unavailable. Save or cancel other draft Milestones first.');
+    const before=new Map(kpiMilestoneRows.filter(row=>Number(row.initiative_id)===Number(project.id)&&Number(row.track_id||0)===Number(milestone.trackId||0)).map(row=>[Number(row.id),{...row}]));
+    const storedSequence=item=>before.has(Number(item.id))?before.get(Number(item.id)).sequence_no:Number(item.persistedSequenceNo)>0?Number(item.persistedSequenceNo):null;
+    const expected=ordered.filter(item=>item!==milestone).map(item=>({id:Number(item.id),sequence_no:storedSequence(item)}));
+    const changes=ordered.flatMap((item,index)=>item!==milestone&&Number(storedSequence(item)||0)!==index+1?[{id:Number(item.id),sequence_no:index+1}]:[]);
+    await milestoneTypeIntegrity.validate([{initiative_id:Number(project.id),track_id:milestone.trackId||null,...record}],kpiMilestoneRows);
+    const highWater=Math.max(0,...[...before.values()].map(row=>Number(row.sequence_no)||0));
+    const temporary=new Map(changes.slice().sort((a,b)=>a.id-b.id).map((row,index)=>[row.id,highWater+changes.length+index+2]));
+    const operation={project,trackId:milestone.trackId,before,temporary,events:[],busy:true,until:Date.now()+15000};
+    inlineMilestoneInsertions.set(Number(project.id),operation);
+    const {data,error}=await supabaseClient.rpc('delivery_insert_milestone_at_position',{
+      p_initiative_id:Number(project.id),p_track_id:milestone.trackId||null,p_position:position,p_expected:expected,p_changes:changes,p_record:record
+    });
+    if(error)throw new Error(['PGRST202','42883'].includes(error.code)?'Run supabase-migration-milestone-insertion.sql in Supabase to save the inserted position.':error.code==='23505'&&/planner_type/i.test(error.message||error.details||'')?milestoneTypeIntegrity.duplicateMessage:error.message);
+    const rows=new Map((Array.isArray(data?.changed)?data.changed:[]).map(row=>[Number(row.id),row]));
+    if(!data?.created||!Array.isArray(data.changed)||!(Number(data.created.id)>0)||Number(data.created.sequence_no)!==position||Number(data.created.initiative_id)!==Number(project.id)||Number(data.created.track_id||0)!==Number(milestone.trackId||0)||rows.size!==changes.length||data.changed.length!==changes.length||changes.some(change=>{
+      const row=rows.get(change.id);
+      return !row||Number(row.sequence_no)!==change.sequence_no||Number(row.initiative_id)!==Number(project.id)||Number(row.track_id||0)!==Number(milestone.trackId||0);
+    }))throw new Error('Supabase did not confirm the complete insertion and Track order. Refresh before retrying.');
+    operation.created=data.created;operation.initiative=data.initiative;operation.program=data.program;
+    const byId=new Map(ordered.map(item=>[Number(item.id),item]));
+    for(const row of rows.values()){
+      const item=byId.get(Number(row.id));
+      item.sequenceNo=Number(row.sequence_no);item.persistedSequenceNo=Number(row.sequence_no);
+    }
+    kpiMilestoneRows=kpiMilestoneRows.map(row=>rows.has(Number(row.id))?{...row,...rows.get(Number(row.id))}:row);
+    project._lastOrderMode='manual';
+    return {data:data.created,error:null};
+  }
+
+  function finishInlineMilestoneInsertion(projectId){
+    const operation=inlineMilestoneInsertions.get(Number(projectId));
+    if(!operation)return;
+    operation.busy=false;operation.until=Date.now()+15000;
+    const events=operation.events.splice(0);
+    if(!operation.created)inlineMilestoneInsertions.delete(Number(projectId));
+    events.forEach(payload=>{if(!acceptInlineMilestoneInsertionRealtime(payload))queueDeliveryRealtimeRefresh(payload);});
+  }
+
+  function refreshInsertedMilestoneTrack(project,milestone,previousMilestoneId){
+    renderKPIs();
+    const row=document.querySelector(`tr[data-inline-milestone-project-id="${Number(project.id)}"][data-inline-milestone-id="${Number(previousMilestoneId)}"]`);
+    const card=row?.closest('[data-track-completed]');
+    const track=project.tracks?.find(item=>Number(item.id)===Number(milestone.trackId));
+    if(!card||!track)return refreshMilestoneRowInPlace(project,milestone.id,previousMilestoneId);
+    const displayed=new Set([...card.querySelectorAll('tr[data-inline-milestone-id]')].map(item=>Number(item.dataset.inlineMilestoneId)));
+    displayed.delete(Number(previousMilestoneId));displayed.add(Number(milestone.id));
+    const holder=document.createElement('div');
+    holder.innerHTML=renderAgileTrackCards(project,project.milestones.filter(item=>displayed.has(Number(item.id))),canEditInitiative(project),[track]);
+    card.replaceWith(holder.firstElementChild);
+    decorateTrackReorderControls();
+    return true;
+  }
+
   async function saveInlineMilestone(projectId, milestoneId, options = {}) {
     const addNextRow = Boolean(options.addNextRow);
     const saveKey = `${Number(projectId)}:${Number(milestoneId)}`;
@@ -10537,15 +10670,15 @@
     const isDraft=Number(milestoneId)<0;
     if(isDraft&&window._initiativeSequenceSaveLocks?.has(Number(projectId))){showToast('Saving milestone order — please wait','info');return false;}
     let sequenceNo=milestone.sequenceNo||null;
-    if(isDraft){try{sequenceNo=await getNextMilestoneSequence(projectId,milestone.trackId||null);}catch(error){console.error('Inline Milestone sequence generation failed:',error);showToast('Unable to generate the next Milestone number.','error');return false;}}
     const viewState=captureDeliveryViewState();
     viewState.milestoneId=milestoneId;
     const scrollX=viewState.scrollX,scrollY=viewState.scrollY;
     window.inlineMilestoneSaveLocks.add(saveKey);
+    if(isDraft){window._initiativeSequenceSaveLocks ||= new Set();window._initiativeSequenceSaveLocks.add(Number(projectId));}
     document.querySelectorAll(`[id$="-${milestoneId}"]`).forEach(c=>{if('disabled' in c)c.disabled=true;});
     try{
       const result=isDraft
-        ? await supabaseClient.from('milestones').insert({initiative_id:Number(projectId),initiative_name:project.name,track_id:milestone.trackId||null,milestone_title:milestone.title||'Milestone',sequence_no:sequenceNo,...milestoneRecord}).select('*').single()
+        ? await insertInlineMilestoneAtPosition(project,milestone,{milestone_title:milestone.title||'Milestone',...milestoneRecord})
         : await supabaseClient.from('milestones').update(milestoneRecord).eq('id',Number(milestoneId)).select('*').single();
       const {data,error}=result;
       if(error){showToast(`Unable to save Milestone: ${error.message}`,'error');return false;}
@@ -10557,22 +10690,14 @@
       if(schedule.hasHistory)Object.assign(milestone,{startDate:data?.start_date??schedule.startDate,days:data?.days??schedule.days,deviationDays:data?.deviation_days??schedule.deviationDays});
       if(isDraft)kpiMilestoneRows.push({...data});else{const ri=kpiMilestoneRows.findIndex(r=>Number(r.id)===Number(milestone.id));if(ri>=0)kpiMilestoneRows[ri]={...kpiMilestoneRows[ri],...data};}
       inlineMilestoneEditId=null;
-      if(isDraft){
-        applyDerivedMilestoneSequence(project,{mode:'manual'});
-        if(!await persistInitiativeSequenceChanges(project.id)){
-          await loadInitiativesFromSupabase();
-          showToast('Milestone was created, but its position could not be saved. Review the refreshed order before retrying the move.','error');
-          return false;
-        }
-      }
       if(impactBelow && !await cascadeTrackMilestoneSchedule(project,milestone.id,{impactBelow:true}))return false;
       if(!await cascadeReferencedMilestoneSchedule(project,milestone.id))return false;
       await synchronizeInitiativeRevisedEndDates([project]);
       if(addNextRow){const savedId=milestone.id,savedTrackId=milestone.trackId||null;addMilestoneInline(projectId,savedTrackId,null,savedId);requestAnimationFrame(()=>{window.scrollTo(scrollX,scrollY);requestAnimationFrame(()=>{const input=document.getElementById(`inline-actions-${inlineMilestoneEditId}`);input?.focus({preventScroll:true});input?.scrollIntoView({block:'nearest',inline:'nearest'});});});}
-      else{viewState.milestoneId=milestone.id;refreshMilestoneRowInPlace(project,milestone.id,milestoneId);restoreDeliveryViewState(viewState);}
+      else{viewState.milestoneId=milestone.id;if(isDraft){refreshInsertedMilestoneTrack(project,milestone,milestoneId);viewState.anchor=null;viewState.neighbors=[];}else refreshMilestoneRowInPlace(project,milestone.id,milestoneId);restoreDeliveryViewState(viewState);}
       showToast('Milestone saved successfully.','success');return true;
     }catch(error){console.error('Unable to save Milestone:',error);showToast(`Unable to save Milestone: ${error?.message||error}`,'error');return false;}
-    finally{window.inlineMilestoneSaveLocks.delete(saveKey);document.querySelectorAll(`[id$="-${milestoneId}"]`).forEach(c=>{if('disabled' in c)c.disabled=false;});}
+    finally{window.inlineMilestoneSaveLocks.delete(saveKey);if(isDraft){window._initiativeSequenceSaveLocks.delete(Number(projectId));finishInlineMilestoneInsertion(projectId);}document.querySelectorAll(`[id$="-${milestoneId}"]`).forEach(c=>{if('disabled' in c)c.disabled=false;});}
   }
 
   function addMilestoneInline(projectId, trackId = null, legacyTrackId = null, insertAfterId = null) {
@@ -16727,6 +16852,7 @@
           userRecord.assigned_vertical
 
       };
+      window.setDeliveryWallpaperUser?.(currentUser.id);
 
       showToast(
         'Welcome ' + currentUser.name,
@@ -16896,6 +17022,7 @@
         userRecord.assigned_vertical
 
     };
+    window.setDeliveryWallpaperUser?.(currentUser.id);
 
     document
       .getElementById('login-screen')
@@ -17034,6 +17161,7 @@
 
   function showLoginScreen() {
     currentUser=null;
+    window.setDeliveryWallpaperUser?.(null);
     window.deliveryHome?.reset();
     closeMobileSidebar();
     document.body.classList.remove('delivery-home-active','analytics-view-active','daily-tracker-view-active');
@@ -17481,7 +17609,7 @@
   let deliveryRealtimeChannel=null,deliveryRealtimeRefreshTimer=null,deliveryRealtimeRefreshInProgress=false,deliveryRealtimeRefreshPending=false;
   function renderActiveDeliveryWorkspace(){if(currentWorkspaceView==='home')return;updateDailyTrackerBadge();if(currentWorkspaceView==='daily')renderDailyTrackerPage();else if(currentWorkspaceView==='overview')renderProjects();else renderFlatWorkspacePage();}
   async function refreshDeliveryPortalFromRealtime(){if(!currentUser)return;if(currentWorkspaceView==='home'){window.deliveryHome.invalidate();return;}if(deliveryRealtimeRefreshInProgress){deliveryRealtimeRefreshPending=true;return;}if(window._draggingMilestone||window._draggingTrack||window._draggingInitiative||window._initiativeSequenceSaveLocks?.size||window._trackSequenceSaveLocks?.size||  window._programSequenceSaveLocks?.size||window.deliveryPlannerFetch?.busy||window.deliveryMilestoneDependency?.busy){queueDeliveryRealtimeRefresh();return;}deliveryRealtimeRefreshInProgress=true;deliveryRealtimeRefreshPending=false;try{const loaded=await loadInitiativesFromSupabase({render:false});if(loaded){const state=captureDeliveryViewState();renderActiveDeliveryWorkspace();restoreDeliveryViewState(state);}}finally{deliveryRealtimeRefreshInProgress=false;if(deliveryRealtimeRefreshPending)queueDeliveryRealtimeRefresh();}}
-  function queueDeliveryRealtimeRefresh(payload){if(window.deliveryTrackReorder?.acceptRealtime(payload)||window.deliveryInitiativeReorder?.acceptRealtime(payload)||window.deliveryMilestoneDependency?.acceptRealtime(payload))return;clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
+  function queueDeliveryRealtimeRefresh(payload){if(acceptInlineMilestoneInsertionRealtime(payload)||window.deliveryTrackReorder?.acceptRealtime(payload)||window.deliveryInitiativeReorder?.acceptRealtime(payload)||window.deliveryMilestoneDependency?.acceptRealtime(payload))return;clearTimeout(deliveryRealtimeRefreshTimer);deliveryRealtimeRefreshTimer=setTimeout(refreshDeliveryPortalFromRealtime,200);}
   function initializeDeliveryRealtime(){if(deliveryRealtimeChannel||!currentUser||!supabaseClient?.channel)return;deliveryRealtimeChannel=supabaseClient.channel('delivery-hub-live').on('postgres_changes',{event:'*',schema:'public',table:'programs'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'initiatives'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestone_tracks'},queueDeliveryRealtimeRefresh).on('postgres_changes',{event:'*',schema:'public',table:'milestones'},queueDeliveryRealtimeRefresh).subscribe(status=>{if(status==='CHANNEL_ERROR')console.error('Delivery Hub realtime channel failed.');});}
   const existingLoadInitiativesFromSupabase=loadInitiativesFromSupabase;
   loadInitiativesFromSupabase=async function(...args){const loaded=await existingLoadInitiativesFromSupabase.apply(this,args);if(loaded&&currentUser)initializeDeliveryRealtime();return loaded;};
@@ -21381,7 +21509,7 @@
     const priorOpen=openMilestoneModal;openMilestoneModal=function(pid,mid,tid){const r=priorOpen.apply(this,arguments);addCriticalControl();const c=document.getElementById('m-critical');if(c)c.checked=mid?isCritical(mid):false;return r;};
     const priorSave=saveMilestone;saveMilestone=async function(e){const critical=document.getElementById('m-critical')?.checked,pid=Number(document.getElementById('m-project-id')?.value),mid=Number(document.getElementById('m-id')?.value||0),actions=document.getElementById('m-actions')?.value.trim();await priorSave.apply(this,arguments);const p=projects.find(x=>Number(x.id)===pid),m=mid?p?.milestones?.find(x=>Number(x.id)===mid):[...(p?.milestones||[])].reverse().find(x=>(x.actions||x.title)===actions);if(m){const set=loadSet(criticalKey());critical&&isOpenMilestone(m)?set.add(Number(m.id)):set.delete(Number(m.id));saveSet(criticalKey(),set);renderProjects();}};
     const priorInline=renderInlineMilestoneRow;renderInlineMilestoneRow=function(project,m,canEdit){const html=priorInline.apply(this,arguments);criticalDrafts.set(Number(m.id),isCritical(m.id));return html.replace('id="inline-actions-',`data-critical-row="${m.id}" id="inline-actions-`).replace('</textarea></td>',`</textarea><div class="mt-1 flex flex-wrap items-center gap-3 text-[10px] font-semibold"><label class="flex items-center gap-1 text-red-700"><input type="checkbox" id="inline-critical-${m.id}" ${criticalDrafts.get(Number(m.id))?'checked':''}> Critical</label><label class="flex items-center gap-1 text-emerald-700"><input type="checkbox" id="inline-done-${m.id}" ${hasMilestoneCompletion(m)?'checked':''} onchange="toggleInlineMilestoneDone(${m.id})"> Done</label></div></td>`);};
-    const priorInlineSave=saveInlineMilestone;saveInlineMilestone=async function(pid,mid){const viewState=captureDeliveryViewState();viewState.milestoneId=mid;const checked=document.getElementById(`inline-critical-${mid}`)?.checked,actions=document.getElementById(`inline-actions-${mid}`)?.value.trim();const result=await priorInlineSave.apply(this,arguments);if(result===false)return result;const p=projects.find(x=>Number(x.id)===Number(pid)),m=Number(mid)>0?p?.milestones?.find(x=>Number(x.id)===Number(mid)):[...(p?.milestones||[])].reverse().find(x=>(x.actions||x.title)===actions);if(m){const set=loadSet(criticalKey());checked&&isOpenMilestone(m)?set.add(Number(m.id)):set.delete(Number(m.id));saveSet(criticalKey(),set);renderProjects();if(!arguments[2]?.addNextRow){viewState.milestoneId=m.id;restoreDeliveryViewState(viewState);}}return result;};
+    const priorInlineSave=saveInlineMilestone;saveInlineMilestone=async function(pid,mid){const viewState=Number(mid)>0?captureDeliveryViewState():null;if(viewState)viewState.milestoneId=mid;const checked=document.getElementById(`inline-critical-${mid}`)?.checked,actions=document.getElementById(`inline-actions-${mid}`)?.value.trim();const result=await priorInlineSave.apply(this,arguments);if(result===false)return result;const p=projects.find(x=>Number(x.id)===Number(pid)),m=Number(mid)>0?p?.milestones?.find(x=>Number(x.id)===Number(mid)):[...(p?.milestones||[])].reverse().find(x=>(x.actions||x.title)===actions);if(m){const set=loadSet(criticalKey());checked&&isOpenMilestone(m)?set.add(Number(m.id)):set.delete(Number(m.id));saveSet(criticalKey(),set);if(viewState){renderProjects();if(!arguments[2]?.addNextRow){viewState.milestoneId=m.id;restoreDeliveryViewState(viewState);}}else decorate();}return result;};
     document.addEventListener('DOMContentLoaded',()=>requestAnimationFrame(decorate));
   })();
   </script>
@@ -24592,8 +24720,6 @@
       });
       const department=document.getElementById('new-user-dept');
       if(department)department.innerHTML=masterOptions('DEPARTMENT','-- Select Department --',department.value,false);
-      const vertical=document.getElementById('new-user-vertical');
-      if(vertical)vertical.innerHTML=masterOptions('DEPARTMENT','-- Select Assigned Vertical --',vertical.value,true);
     }
 
     const originalPopulateMasterLOVs=window.populateMasterLOVs;
@@ -24640,30 +24766,34 @@
       if(count)count.textContent=userMaster.length;
       const departments=typeof getMasterValues==='function'?getMasterValues('DEPARTMENT'):[];
       const departmentOptions=(value)=>masterOptions('DEPARTMENT','-- Select Department --',value,false);
-      const verticalOptions=(value)=>masterOptions('DEPARTMENT','-- Select Assigned Vertical --',value,true);
+      const roleLink=user=>{
+        const role=user.role||user.roleTier||'-';
+        const label=role==='Admin'&&user.adminScope==='vertical'?'Vertical Admin':({'Read-Only':'Read Only','Level 1':'Read and write'})[role]||role;
+        return `<a href="#user-roles" data-user-role-link onclick="event.preventDefault();openUserRoleForUser(${user.id})" class="font-semibold text-indigo-600 underline">${escapeHtml(label)}</a>`;
+      };
       const rows=userMaster.map((user,index)=>{
         const editing=Number(editingUserMasterId)===Number(user.id);
-        if(editing)return `<tr class="bg-indigo-50">
+        if(editing)return `<tr class="bg-indigo-50" data-user-master-id="${user.id}">
           <td><input id="edit-user-name-${user.id}" value="${escapeHtml(user.name||'')}"></td>
           <td><input id="edit-user-email-${user.id}" type="email" value="${escapeHtml(user.email||'')}"></td>
           <td><select id="edit-user-department-${user.id}">${departmentOptions(user.department)}</select></td>
-          <td>${escapeHtml(user.role||user.roleTier||'-')}</td>
-          <td><select id="edit-user-vertical-${user.id}">${verticalOptions(user.assignedVertical)}</select></td>
+          <td>${roleLink(user)}</td>
+          <td>${escapeHtml((user.assignedVerticals||[user.assignedVertical]).join(', ')||'-')}</td>
           <td>${user.isActive===false?'Inactive':'Active'}</td>
           <td><div class="user-master-actions"><button class="user-master-action" onclick="saveUserMasterRow(${user.id})" title="Save"><i data-lucide="check" class="w-4 h-4"></i></button><button class="user-master-action" onclick="cancelUserMasterEdit()" title="Cancel"><i data-lucide="x" class="w-4 h-4"></i></button></div></td>
         </tr>`;
-        return `<tr>
+        return `<tr data-user-master-id="${user.id}">
           <td class="font-semibold text-slate-800">${escapeHtml(user.name||'-')}</td>
           <td>${escapeHtml(user.email||'-')}</td>
           <td>${escapeHtml(user.department||'-')}</td>
-          <td>${escapeHtml(user.role||user.roleTier||'-')}</td>
-          <td>${escapeHtml(user.assignedVertical||'-')}</td>
+          <td>${roleLink(user)}</td>
+          <td>${escapeHtml((user.assignedVerticals||[user.assignedVertical]).join(', ')||'-')}</td>
           <td><span class="inline-flex rounded-full px-2 py-1 text-[10px] font-semibold ${user.isActive===false?'bg-slate-100 text-slate-600':'bg-emerald-100 text-emerald-700'}">${user.isActive===false?'Inactive':'Active'}</span></td>
-          <td><div class="user-master-actions"><button class="user-master-action" onclick="editUserMasterRow(${user.id})" title="Edit"><i data-lucide="pencil" class="w-4 h-4"></i></button><button class="user-master-action user-master-action-danger" onclick="removeUser(${index})" title="Archive"><i data-lucide="trash-2" class="w-4 h-4"></i></button></div></td>
+          <td><div class="user-master-actions"><button class="user-master-action" onclick="editUserMasterRow(${user.id})" title="Edit" aria-label="Edit user"><i data-lucide="pencil" class="w-4 h-4"></i></button><button class="user-master-action" onclick="openUserPasswordReset(${user.id})" title="Reset password" aria-label="Reset password"><i data-lucide="key-round" class="w-4 h-4"></i></button><button class="user-master-action user-master-action-danger" onclick="removeUser(${index})" title="Mark inactive" aria-label="Mark user inactive"><i data-lucide="user-x" class="w-4 h-4"></i></button></div></td>
         </tr>`;
       }).join('');
       container.className='max-h-80 overflow-auto custom-scrollbar';
-      container.innerHTML=`<div class="user-master-grid-wrap"><table class="user-master-grid"><thead><tr><th>Full Name</th><th>Email</th><th>Department</th><th>Role Tier</th><th>Assigned Vertical</th><th>Status</th><th class="text-right">Actions</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="text-center text-slate-400">No active users found.</td></tr>'}</tbody></table></div>`;
+      container.innerHTML=`<div class="user-master-grid-wrap"><table class="user-master-grid"><thead><tr><th>Full Name</th><th>Email</th><th>Department</th><th>User Role</th><th>Assigned Vertical</th><th>Status</th><th class="text-right">Actions</th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="text-center text-slate-400">No active users found.</td></tr>'}</tbody></table></div>`;
       installUserExportButton();
       if(window.lucide?.createIcons)window.lucide.createIcons();
     };
@@ -29010,6 +29140,7 @@
   #overview-filter-row>.unified-filter-primary>.unified-filter-reset{order:7!important;flex:0 0 auto!important;width:auto!important;min-width:100px!important;height:34px!important;min-height:34px!important;padding:0 10px!important;font-size:11px!important}
   #overview-filter-row>.unified-filter-primary>.unified-filter-toggle{order:8!important;flex:0 0 30px!important;width:30px!important;min-width:30px!important;max-width:30px!important;height:30px!important;min-height:30px!important;padding:0!important;border-radius:6px!important}
   .delivery-page-selection-row{display:flex!important;align-items:center;justify-content:space-between;gap:10px!important;flex-wrap:wrap;min-width:0;max-width:100%;width:100%;box-sizing:border-box;overflow-wrap:anywhere}
+  .delivery-page-selection-row.hidden,body.delivery-home-active #overview-control-bar{display:none!important}
   .delivery-page-selection-row>*,.delivery-page-selection-row button{min-width:0;max-width:100%;white-space:normal}
   .delivery-page-selection-row .shared-multiselect-left,.delivery-page-selection-row .shared-multiselect-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;max-width:100%}
   #overview-control-bar>div{min-width:0;max-width:100%;flex-wrap:wrap}
@@ -32231,7 +32362,7 @@ COMMIT;
   <script id="delivery-rbac-runtime">
   (function installDeliveryRbac(){
     const hierarchy=['program','initiative','track','milestone'],types={programs:'program',initiatives:'initiative',milestone_tracks:'track',milestones:'milestone'};
-    const state={context:null,user:'',snapshot:null,records:new Map(),departments:[],loading:null,request:0};
+    const state={context:null,user:'',snapshot:null,records:new Map(),departments:[],loading:null,departmentLoading:null,request:0};
     const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const system=()=>state.context?.role==='Admin'&&state.context.admin_scope==='system';
     const admin=()=>state.context?.role==='Admin';
@@ -32288,7 +32419,7 @@ COMMIT;
       dialog.querySelector('.rbac-status').textContent=error.message;if(!dialog.open)dialog.showModal();
     }
     function reset(){
-      state.request++;state.context=null;state.snapshot=null;state.user='';state.loading=null;state.records.clear();state.departments=[];
+      state.request++;state.context=null;state.snapshot=null;state.user='';state.loading=null;state.departmentLoading=null;state.records.clear();state.departments=[];
       document.querySelectorAll('.rbac-dialog').forEach(dialog=>dialog.close());
     }
     async function refresh(){
@@ -32333,7 +32464,8 @@ COMMIT;
     fetchAllSupabaseRows=async function(table,order='id',active=false,options={}){
       if(!types[table])return previousFetch.apply(this,arguments);
       if(!state.context||!state.snapshot)return {data:null,error:{message:'Access scope is not loaded. Reconnect and refresh.'}};
-      const rows=state.snapshot[table].filter(row=>(!active||row.record_status==='active')&&Object.entries(options.equals||{}).every(([key,value])=>row[key]===value)).map(row=>({...row}));
+      const membershipFilters=Object.entries(options.in||{}).map(([key,values])=>[key,new Set(values.filter(value=>value!=null).map(String))]);
+      const rows=state.snapshot[table].filter(row=>(!active||row.record_status==='active')&&Object.entries(options.equals||{}).every(([key,value])=>row[key]===value)&&membershipFilters.every(([key,values])=>row[key]!=null&&values.has(String(row[key])))).map(row=>({...row}));
       if(window.deliveryOffline)await window.deliveryOffline.localRows(table,rows,operation=>can(types[table],operation.identity,operation.method==='DELETE'?'archive':'write'));
       const columns=[order,...options.thenOrder||[],'id'];
       rows.sort((a,b)=>{for(const key of columns){const left=a[key],right=b[key];const value=typeof left==='number'&&typeof right==='number'?left-right:String(left??'').localeCompare(String(right??''),undefined,{numeric:true});if(value)return value;}return 0;});
@@ -32422,10 +32554,22 @@ COMMIT;
       });
       card.querySelector('[data-rbac-departments]').hidden=!selected.has('support');
     }
+    async function loadRoleDepartments(){
+      if(state.departments.length)return state.departments;
+      if(state.departmentLoading)return state.departmentLoading;
+      const request=state.request;
+      const pending=(async()=>{
+        const departments=await rpc('delivery_rbac_departments');
+        if(request!==state.request)throw new Error('Account changed while loading ticket departments.');
+        state.departments=departments;return departments;
+      })();
+      state.departmentLoading=pending;
+      try{return await pending;}finally{if(state.departmentLoading===pending)state.departmentLoading=null;}
+    }
     renderUserRoleManagement=function(){
       const container=document.getElementById('user-role-table');if(!container)return;
       if(!state.context){container.textContent='Access rights are not loaded. Reconnect and refresh.';return;}
-      const visible=userMaster.filter(user=>system()||admin()&&sameVerticals(user)||String(user.id)===String(currentUser?.id));
+      const visible=userMaster.filter(user=>(system()||admin()&&sameVerticals(user)||String(user.id)===String(currentUser?.id))&&(!container.dataset.userMasterRoleTarget||String(user.id)===container.dataset.userMasterRoleTarget));
       const verticals=[...new Set(['All',...userMaster.flatMap(userVerticals),...masterValues.filter(value=>value.master_type==='VERTICAL').map(value=>value.value_name),...programs.map(program=>program.vertical),...projects.map(project=>project.vertical)].filter(Boolean))];
       const roles=[['system','Admin'],['vertical','Vertical Admin'],['Read-Only','Read Only'],['Level 1','Read and write']];
       const directoryUser=String(currentUser?.id??''),sameUser=container.dataset.rbacDirectoryUser===directoryUser;
@@ -32536,13 +32680,16 @@ COMMIT;
             const selectedVerticals=role.value==='system'?['All']:draft.assignedVerticals;
             if(!selectedVerticals.length)throw new Error('Select at least one Vertical.');
             await rpc('delivery_rbac_save_user_access',{p_user:user.id,p_role:['system','vertical'].includes(role.value)?'Admin':role.value,p_admin_scope:role.value==='vertical'?'vertical':'system',p_verticals:selectedVerticals,p_levels:draft.accessLevels,p_departments:[...card.querySelectorAll('[data-rbac-department]:checked')].map(box=>box.value)});
-            await loadUsersFromSupabase();await window.loadInitiativesFromSupabase();renderUserRoleManagement();showToast('User access updated.','success');
+            if(await loadUsersFromSupabase()===false)throw new Error('Access was saved, but User Master could not be refreshed. Refresh and retry.');
+            if(await window.loadInitiativesFromSupabase()===false)throw new Error('Access was saved, but the hierarchy could not be refreshed. Refresh and retry.');
+            renderUserRoleManagement();showToast('User access updated.','success');
+            window.dispatchEvent(new CustomEvent('delivery-user-access-saved',{detail:{userId:user.id}}));
           }catch(error){status.textContent=error.message;}finally{saving=false;updateEditing();}
         };
       });
       applyDirectoryFilters();
       if(admin()&&!state.departments.length&&!container.dataset.rbacDepartmentsLoading){
-        container.dataset.rbacDepartmentsLoading='true';rpc('delivery_rbac_departments').then(departments=>{state.departments=departments;delete container.dataset.rbacDepartmentsLoading;if(departments.length)renderUserRoleManagement();}).catch(error=>{delete container.dataset.rbacDepartmentsLoading;showToast(error.message,'error');});
+        container.dataset.rbacDepartmentsLoading='true';loadRoleDepartments().then(departments=>{delete container.dataset.rbacDepartmentsLoading;if(departments.length)renderUserRoleManagement();}).catch(error=>{delete container.dataset.rbacDepartmentsLoading;showToast(error.message,'error');});
       }
     };
     function decorate(){
@@ -32587,7 +32734,7 @@ COMMIT;
     let frame=0;const schedule=()=>{if(!frame)frame=requestAnimationFrame(()=>{frame=0;decorate();});};
     new MutationObserver(records=>{if(records.some(record=>[...record.addedNodes].some(node=>node.nodeType===1&&!node.matches?.('.rbac-share-button'))))schedule();}).observe(document.body,{childList:true,subtree:true});
     supabaseClient.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT')reset();});
-    window.deliveryRbac={state,refresh,can,canCreate,canTicket,enabled,system,admin,share,manage,inherited,setup,decorate,
+    window.deliveryRbac={state,refresh,can,canCreate,canTicket,enabled,system,admin,share,manage,inherited,setup,decorate,loadRoleDepartments,
       canImport(page){const kind=types[page]||({tracks:'track',support:'support',overview:'initiative'})[page];return ['user_master','user_roles'].includes(page)?system():Boolean(kind&&action(kind,'write')&&enabled(kind));}
     };
   })();
@@ -32776,13 +32923,201 @@ NOTIFY pgrst,'reload schema';
 COMMIT;
   </script>
   <style id="delivery-workspace-background">
-    #main-content{background:#d5f0f5 url("delivery-workspace-background-gradient.jpg") center/cover no-repeat}
-    html[data-theme="dark"] #main-content{background:linear-gradient(rgba(19,23,29,.88),rgba(19,23,29,.88)),#13171d url("delivery-workspace-background-gradient.jpg") center/cover no-repeat!important}
-    @media print{#main-content,html[data-theme="dark"] #main-content{background-image:none!important}}
+    body #main-content,html[data-theme="dark"] body #main-content{background:transparent!important}
+    #main-content::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;background-color:#dbe7f0;background-image:var(--delivery-wallpaper,url("delivery-workspace-background-gradient.jpg"));background-position:center;background-size:cover;background-repeat:no-repeat;transform:translateZ(0)}
+    html[data-theme="dark"] #main-content::before{background-color:#1b222c;background-image:linear-gradient(rgba(16,21,29,.52),rgba(16,21,29,.52)),var(--delivery-wallpaper,url("delivery-workspace-background-gradient.jpg"))}
+    @media print{#main-content::before{display:none}}
+    #main-content > header{background:rgba(255,255,255,.96)!important;border-bottom:1px solid rgba(var(--wp-accent-rgb,79,70,229),.14)!important;box-shadow:0 1px 3px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.08)!important}
+    #main-content > header::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;background:linear-gradient(90deg,var(--wp-accent,#4f46e5),rgba(var(--wp-accent-rgb,79,70,229),.12));pointer-events:none}
+    #main-content > header #workspace-page-title{color:#0f172a!important}
+    #main-content > header svg.text-indigo-600{color:var(--wp-accent,#4f46e5)!important}
+    html[data-theme="dark"] #main-content > header{background:rgba(24,30,39,.96)!important;border-bottom-color:rgba(var(--wp-accent-light-rgb,165,180,252),.16)!important;box-shadow:0 1px 3px rgba(0,0,0,.3),0 10px 28px rgba(0,0,0,.35)!important}
+    html[data-theme="dark"] #main-content > header::after{background:linear-gradient(90deg,var(--wp-accent-light,#a5b4fc),rgba(var(--wp-accent-light-rgb,165,180,252),.1))}
+    html[data-theme="dark"] #main-content > header #workspace-page-title{color:#f1f5f9!important}
+    html[data-theme="dark"] #main-content > header svg.text-indigo-600{color:var(--wp-accent-light,#a5b4fc)!important}
+    #main-content main :is(.bg-white,.bg-white\/90,.bg-white\/95):is(.rounded-lg,.rounded-xl,.rounded-2xl,.rounded-3xl):is(.border,.shadow,.shadow-sm,.shadow-md,.shadow-lg){box-shadow:0 1px 2px rgba(15,23,42,.05),0 8px 22px rgba(15,23,42,.08)!important}
+    html[data-theme="dark"] #main-content main :is(.bg-white,.bg-white\/90,.bg-white\/95):is(.rounded-lg,.rounded-xl,.rounded-2xl,.rounded-3xl):is(.border,.shadow,.shadow-sm,.shadow-md,.shadow-lg){box-shadow:0 1px 2px rgba(0,0,0,.3),0 10px 26px rgba(0,0,0,.3)!important}
+    .delivery-wallpaper-toggle{display:none}body.delivery-home-active .delivery-wallpaper-toggle{display:inline-flex}
+    .delivery-wallpaper-toggle{color:var(--wp-accent,#4f46e5)}html[data-theme="dark"] .delivery-wallpaper-toggle{color:var(--wp-accent-light,#c7d2fe)}
+    .wallpaper-overlay{position:fixed;inset:0;z-index:90;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(15,23,42,.5);animation:wallpaper-fade .2s ease both}
+    .wallpaper-dialog{width:min(640px,100%);max-height:calc(100vh - 32px);overflow:auto;background:#fff;color:#0f172a;border:1px solid #e2e8f0;border-radius:20px;box-shadow:0 24px 60px rgba(15,23,42,.25);padding:22px;animation:wallpaper-pop .25s cubic-bezier(.16,1,.3,1) both}
+    .wallpaper-dialog header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+    .wallpaper-dialog h2{font-size:17px;font-weight:700}.wallpaper-dialog p{font-size:12px;color:#64748b;margin-bottom:16px}
+    .wallpaper-close{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:10px;border:1px solid #e2e8f0;background:#fff;color:#475569}
+    .wallpaper-close:hover{background:#f1f5f9}
+    .wallpaper-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:12px}
+    .wallpaper-option{position:relative;display:flex;flex-direction:column;gap:6px;padding:6px;border:2px solid transparent;border-radius:14px;background:#f8fafc;text-align:left;font-size:12px;font-weight:600;color:#334155;transition:border-color .2s,transform .2s}
+    .wallpaper-option:hover{transform:translateY(-2px);border-color:#c7d2fe}
+    .wallpaper-option:focus-visible,.wallpaper-close:focus-visible{outline:2px solid #6366f1;outline-offset:2px}
+    .wallpaper-option[aria-checked="true"]{border-color:#6366f1}
+    .wallpaper-option[aria-busy="true"]{opacity:.6;pointer-events:none}
+    .wallpaper-swatch{display:flex;align-items:center;justify-content:center;height:78px;border-radius:10px;background-position:center;background-size:cover;border:1px solid rgba(15,23,42,.08);color:#64748b;box-shadow:0 2px 6px rgba(15,23,42,.08)}
+    .wallpaper-check{position:absolute;top:12px;right:12px;display:none;width:22px;height:22px;border-radius:50%;background:#6366f1;color:#fff;align-items:center;justify-content:center}
+    .wallpaper-option[aria-checked="true"] .wallpaper-check{display:flex}
+    .wallpaper-upload .wallpaper-swatch{border:1.5px dashed #94a3b8;background:#fff;box-shadow:none}
+    .wallpaper-hint{margin-top:12px;font-size:11px;color:#94a3b8}
+    @keyframes wallpaper-fade{from{opacity:0}to{opacity:1}}
+    @keyframes wallpaper-pop{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
+    html[data-theme="dark"] .wallpaper-overlay{background:rgba(2,6,12,.6)}
+    html[data-theme="dark"] .wallpaper-dialog{background:#1a212b;color:#e7edf3;border-color:rgba(148,163,184,.2);box-shadow:0 24px 60px rgba(0,0,0,.55)}
+    html[data-theme="dark"] .wallpaper-dialog p{color:#94a3b8}
+    html[data-theme="dark"] .wallpaper-close{background:#242d39;border-color:rgba(148,163,184,.25);color:#e2e8f0}
+    html[data-theme="dark"] .wallpaper-close:hover{background:#2e3947}
+    html[data-theme="dark"] .wallpaper-option{background:#232c37;color:#e2e8f0}
+    html[data-theme="dark"] .wallpaper-option:hover{border-color:#4f5bd5}
+    html[data-theme="dark"] .wallpaper-option[aria-checked="true"]{border-color:#818cf8}
+    html[data-theme="dark"] .wallpaper-upload .wallpaper-swatch{background:#1a212b;border-color:#5b6b7a;color:#94a3b8}
+    @media(prefers-reduced-motion:reduce){.wallpaper-overlay,.wallpaper-dialog{animation:none}.wallpaper-option{transition:none}}
   </style>
+  <script id="delivery-wallpaper-runtime">
+  (function installDeliveryWallpaper(){
+    const MAX_FILE_BYTES=25*1024*1024,MAX_EDGE=1920;
+    let lastFocus=null,previewUrl='',busy=false;
+    const current=()=>document.documentElement.dataset.wallpaper||'default';
+    const picker=()=>document.getElementById('delivery-wallpaper-picker');
+    function close(){
+      picker()?.remove();
+      if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl='';}
+      document.removeEventListener('keydown',onKey,true);
+      lastFocus?.focus?.();
+    }
+    function onKey(event){
+      if(event.key==='Escape'){event.preventDefault();close();return;}
+      if(event.key!=='Tab')return;
+      const items=[...picker().querySelectorAll('button:not([disabled])')];if(!items.length)return;
+      const first=items[0],last=items[items.length-1];
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+    }
+    function markSelected(){picker()?.querySelectorAll('[data-wallpaper]').forEach(node=>node.setAttribute('aria-checked',String(node.dataset.wallpaper===current())));}
+    function choose(id){
+      if(!window.deliveryWallpaperPrefs.set('deliveryHubWallpaper',id)){if(typeof showToast==='function')showToast('Sign in to change your background.','error');return;}
+      window.applyDeliveryWallpaper();markSelected();
+    }
+    async function decode(file){
+      if(window.createImageBitmap){try{return await createImageBitmap(file);}catch(error){}}
+      const url=URL.createObjectURL(file);
+      try{return await new Promise((resolve,reject)=>{const image=new Image();image.decoding='async';image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('Unable to read that image.'));image.src=url;});}
+      finally{setTimeout(()=>URL.revokeObjectURL(url),0);}
+    }
+    function toHex(h,s,l){
+      const k=n=>(n+h/30)%12,a=s*Math.min(l,1-l),f=n=>l-a*Math.max(-1,Math.min(k(n)-3,Math.min(9-k(n),1)));
+      return '#'+[f(0),f(8),f(4)].map(v=>Math.round(v*255).toString(16).padStart(2,'0')).join('');
+    }
+    function derivePalette(source){
+      const canvas=document.createElement('canvas');canvas.width=canvas.height=24;
+      const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.drawImage(source,0,0,24,24);
+      const data=ctx.getImageData(0,0,24,24).data;let lum=0,wr=0,wg=0,wb=0,wt=0,count=0;
+      for(let i=0;i<data.length;i+=4){
+        const r=data[i]/255,g=data[i+1]/255,b=data[i+2]/255,max=Math.max(r,g,b),min=Math.min(r,g,b),sat=max===0?0:(max-min)/max;
+        lum+=.2126*r+.7152*g+.0722*b;count++;const w=sat*sat+.001;wr+=r*w;wg+=g*w;wb+=b*w;wt+=w;
+      }
+      const r=wr/wt,g=wg/wt,b=wb/wt,max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min;
+      let h=0;if(d){h=max===r?((g-b)/d)%6:max===g?(b-r)/d+2:(r-g)/d+4;h=(h*60+360)%360;}
+      const sat=max===0?0:d/max;
+      return {tone:lum/count<.5?'dark':'light',accent:sat<.15?'#4f46e5':toHex(h,.68,.44)};
+    }
+    async function processImage(file){
+      if(!file||!/^image\//.test(file.type))throw new Error('Please choose an image file.');
+      if(file.size>MAX_FILE_BYTES)throw new Error('Image is larger than 25 MB. Please choose a smaller image.');
+      const source=await decode(file);
+      try{
+        const width=source.width||source.naturalWidth,height=source.height||source.naturalHeight;
+        const scale=Math.min(1,MAX_EDGE/Math.max(width,height));
+        const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(width*scale));canvas.height=Math.max(1,Math.round(height*scale));
+        const ctx=canvas.getContext('2d');ctx.imageSmoothingQuality='high';ctx.drawImage(source,0,0,canvas.width,canvas.height);
+        const blob=await new Promise((resolve,reject)=>canvas.toBlob(result=>result?resolve(result):reject(new Error('Unable to process that image.')),'image/jpeg',.8));
+        return {blob,palette:derivePalette(canvas)};
+      }finally{source.close?.();}
+    }
+    async function upload(file,tile){
+      if(busy)return;busy=true;tile?.setAttribute('aria-busy','true');
+      const label=tile?.querySelector('[data-upload-label]');if(label)label.textContent='Optimizing...';
+      try{
+        const {blob,palette}=await processImage(file);
+        await window.deliveryWallpaperStore.put(blob);
+        window.deliveryWallpaperPrefs.set('deliveryHubWallpaperPalette',JSON.stringify(palette));
+        choose('custom');
+        if(picker()){const keep=lastFocus;close();lastFocus=keep;await window.openDeliveryWallpaperPicker();lastFocus=keep;}
+      }catch(error){
+        if(typeof showToast==='function')showToast(error.message||'Unable to save that image.','error');else alert(error.message);
+      }finally{
+        busy=false;tile?.removeAttribute('aria-busy');if(label&&label.isConnected)label.textContent='Upload image';
+      }
+    }
+    window.openDeliveryWallpaperPicker=async function(){
+      if(picker())return;
+      lastFocus=document.activeElement;
+      let customBlob=null;try{customBlob=await window.deliveryWallpaperStore.get();}catch(error){}
+      if(picker())return;
+      if(customBlob instanceof Blob)previewUrl=URL.createObjectURL(customBlob);
+      const option=(id,name,css)=>`<button type="button" role="radio" class="wallpaper-option" data-wallpaper="${id}" aria-checked="${current()===id}"><span class="wallpaper-swatch" style='background-image:${css.replace(/'/g,'&#39;')}'></span><span>${name}</span><span class="wallpaper-check"><i data-lucide="check" class="w-3.5 h-3.5"></i></span></button>`;
+      const overlay=document.createElement('div');
+      overlay.id='delivery-wallpaper-picker';overlay.className='wallpaper-overlay';
+      overlay.innerHTML=`<div class="wallpaper-dialog" role="dialog" aria-modal="true" aria-labelledby="wallpaper-title"><header><h2 id="wallpaper-title">Choose a background</h2><button type="button" class="wallpaper-close" aria-label="Close"><i data-lucide="x" class="w-4 h-4"></i></button></header><p>Applied across all pages. Header and card accents adapt to the selected background, and dark mode adds a soft tint.</p><div class="wallpaper-grid" role="radiogroup" aria-label="Wallpapers">${window.DELIVERY_WALLPAPERS.map(w=>option(w.id,w.name,w.css)).join('')}${previewUrl?option('custom','My image',`url("${previewUrl}")`):''}<button type="button" class="wallpaper-option wallpaper-upload" data-wallpaper-upload><span class="wallpaper-swatch"><i data-lucide="image-plus" class="w-6 h-6"></i></span><span data-upload-label>Upload image</span></button></div><div class="wallpaper-hint">Uploads are automatically optimized (max ${MAX_EDGE}px). Only one custom image is kept; a new upload replaces it.</div><input type="file" accept="image/*" hidden data-wallpaper-file></div>`;
+      document.body.append(overlay);
+      overlay.addEventListener('click',event=>{
+        if(event.target===overlay){close();return;}
+        const node=event.target.closest('[data-wallpaper]');if(node)choose(node.dataset.wallpaper);
+      });
+      overlay.querySelector('.wallpaper-close').onclick=close;
+      const input=overlay.querySelector('[data-wallpaper-file]'),tile=overlay.querySelector('[data-wallpaper-upload]');
+      tile.onclick=()=>input.click();
+      input.onchange=()=>{const file=input.files?.[0];input.value='';if(file)upload(file,tile);};
+      document.addEventListener('keydown',onKey,true);
+      if(window.lucide)lucide.createIcons({root:overlay});
+      (overlay.querySelector('[aria-checked="true"]')||overlay.querySelector('.wallpaper-option')).focus();
+    };
+    window.addEventListener('storage',event=>{const user=window.deliveryWallpaperPrefs.user;if(user&&[`deliveryHubWallpaper:${user}`,`deliveryHubWallpaperPalette:${user}`].includes(event.key))window.applyDeliveryWallpaper();});
+  })();
+  </script>
   <style id="delivery-home-style">
     body.delivery-home-active [data-home-hidden],body.delivery-home-active [data-home-filter-host],body.delivery-home-active #btn-new-program,body.delivery-home-active #btn-new-project,body.delivery-home-active #btn-page-import,body.delivery-home-active #btn-page-export{display:none!important}
-    #delivery-home{max-width:1280px;margin:0 auto;width:100%;color:#334155}
+    #delivery-home{max-width:1280px;margin:0 auto;width:100%;box-sizing:border-box;padding:0 24px 24px;color:#334155}
+    @media(max-width:640px){#delivery-home{padding:0 12px 16px}}
+    .home-card,.home-details{background:rgba(255,255,255,.96)!important;border-color:rgba(226,232,240,.9)!important;box-shadow:0 1px 2px rgba(15,23,42,.05),0 10px 26px rgba(15,23,42,.09)!important}
+    .home-card:not(.home-card-warning){border-top-color:rgba(var(--wp-accent-rgb,79,70,229),.55)!important}
+    .home-card:hover{box-shadow:0 2px 4px rgba(15,23,42,.06),0 16px 34px rgba(15,23,42,.14)!important}
+    .home-card[aria-pressed="true"]{border-color:var(--wp-accent,#6366f1)!important;box-shadow:0 0 0 2px rgba(var(--wp-accent-rgb,99,102,241),.22),0 16px 34px rgba(15,23,42,.14)!important}
+    #delivery-home .home-card[aria-pressed="true"]:after{background:var(--wp-accent,#6366f1)}
+    #delivery-home .home-card:not(.home-card-warning) .home-icon{background:rgba(var(--wp-accent-rgb,79,70,229),.1);color:var(--wp-accent,#4f46e5)}
+    #delivery-home .home-open{color:var(--wp-accent,#4f46e5)}
+    .home-refresh,.home-close,.home-pager button{box-shadow:0 1px 2px rgba(15,23,42,.06),0 4px 12px rgba(15,23,42,.08)}
+    .home-refresh:not(:disabled):hover,.home-close:hover{border-color:rgba(var(--wp-accent-rgb,79,70,229),.45);color:var(--wp-accent,#4f46e5)}
+    #delivery-home .home-support-toggle input{accent-color:var(--wp-accent,#4f46e5)}
+    #delivery-home .home-heading h1{color:#0f172a}
+    #delivery-home .home-name{color:var(--wp-accent,#4f46e5)}
+    html[data-wp-tone="dark"] #delivery-home .home-heading h1,html[data-theme="dark"] #delivery-home .home-heading h1{color:#f8fafc;text-shadow:0 2px 14px rgba(0,0,0,.35)}
+    html[data-wp-tone="dark"] #delivery-home .home-name,html[data-theme="dark"] #delivery-home .home-name{color:var(--wp-accent-light,#c7d2fe)}
+    html[data-wp-tone="dark"] #delivery-home :is(.home-heading p,.home-heading-actions .home-updated,.home-heading-actions .home-support-toggle){color:#e2e8f0;text-shadow:0 1px 6px rgba(0,0,0,.35)}
+    html[data-theme="dark"] #delivery-home{color:#cbd5e1}
+    html[data-theme="dark"] :is(.home-heading p,.home-updated,.home-message,.home-meta){color:#aab6c5}
+    html[data-theme="dark"] .home-support-toggle{color:#d5dde7}
+    html[data-theme="dark"] :is(.home-refresh,.home-close,.home-pager button){background:#26303c;border-color:rgba(148,163,184,.26);color:#e2e8f0;box-shadow:0 1px 2px rgba(0,0,0,.3),0 6px 16px rgba(0,0,0,.28)}
+    html[data-theme="dark"] :is(.home-refresh,.home-close,.home-pager button):not(:disabled):hover{background:#303b49;border-color:rgba(var(--wp-accent-light-rgb,165,180,252),.5);color:#fff}
+    html[data-theme="dark"] .home-card{background:linear-gradient(160deg,rgba(38,47,60,.96),rgba(28,35,46,.95))!important;border-color:rgba(148,163,184,.18)!important;box-shadow:0 1px 2px rgba(0,0,0,.3),0 12px 28px rgba(0,0,0,.32)!important}
+    html[data-theme="dark"] .home-card:not(.home-card-warning){border-top-color:rgba(var(--wp-accent-light-rgb,165,180,252),.6)!important}
+    html[data-theme="dark"] .home-card:hover{border-color:rgba(var(--wp-accent-light-rgb,165,180,252),.45)!important;box-shadow:0 2px 4px rgba(0,0,0,.3),0 18px 36px rgba(0,0,0,.42)!important}
+    html[data-theme="dark"] .home-card[aria-pressed="true"]{border-color:var(--wp-accent-light,#a5b4fc)!important;box-shadow:0 0 0 2px rgba(var(--wp-accent-light-rgb,165,180,252),.3),0 18px 36px rgba(0,0,0,.42)!important}
+    html[data-theme="dark"] #delivery-home .home-card[aria-pressed="true"]:after{background:var(--wp-accent-light,#a5b4fc)}
+    html[data-theme="dark"] #delivery-home .home-card:not(.home-card-warning) .home-icon{background:rgba(var(--wp-accent-light-rgb,165,180,252),.16);color:var(--wp-accent-light,#a5b4fc)}
+    html[data-theme="dark"] .home-card-warning{border-top-color:#fb7185!important}
+    html[data-theme="dark"] .home-card-warning .home-icon{background:rgba(244,63,94,.18);color:#fda4af}
+    html[data-theme="dark"] .home-number{color:#f8fafc}html[data-theme="dark"] .home-card-warning .home-number{color:#fda4af}
+    html[data-theme="dark"] .home-card strong{color:#e8edf3}html[data-theme="dark"] .home-card small{color:#a3b0bf}
+    html[data-theme="dark"] .home-skeleton{background:rgba(148,163,184,.18)}
+    html[data-theme="dark"] .home-details{background:rgba(30,37,48,.97)!important;border-color:rgba(148,163,184,.18)!important;box-shadow:0 1px 2px rgba(0,0,0,.3),0 14px 32px rgba(0,0,0,.35)!important}
+    html[data-theme="dark"] .home-details header{border-bottom-color:rgba(148,163,184,.14)}
+    html[data-theme="dark"] .home-details h2,html[data-theme="dark"] .home-details td strong{color:#f1f5f9}
+    html[data-theme="dark"] .home-details th{background:#262f3b;color:#aab6c5}
+    html[data-theme="dark"] .home-details td{border-top-color:rgba(148,163,184,.12);color:#d0d8e2}
+    html[data-theme="dark"] .home-details tr{border-top-color:rgba(148,163,184,.12)}
+    html[data-theme="dark"] .home-priority{background:rgba(244,63,94,.18);color:#fda4af}
+    html[data-theme="dark"] #delivery-home .home-open{color:var(--wp-accent-light,#a5b4fc)}
+    html[data-theme="dark"] .home-error{background:rgba(127,29,29,.45);border-color:rgba(248,113,113,.35);color:#fecaca}
+    html[data-theme="dark"] .home-pager{border-top-color:rgba(148,163,184,.14);color:#d0d8e2}
+    html[data-theme="dark"] #delivery-home .home-support-toggle input{accent-color:var(--wp-accent-light,#a5b4fc)}
+    .home-card-warning{border-top-color:#fda4af!important}
     #delivery-home [hidden]{display:none!important}
     .home-heading{display:flex;align-items:start;justify-content:space-between;gap:16px;margin:12px 0 28px}
     .home-heading h1{font-size:clamp(24px,3vw,34px);font-weight:700;letter-spacing:-.035em;color:#0f172a;margin-bottom:6px}
@@ -32911,10 +33246,17 @@ COMMIT;
           const key=accessKey();
           if(key!==state.key||force||state.dirty){state.key=key;state.summary=null;state.details.clear();state.active=null;state.page=0;stopDetails();home().querySelector('.home-details').hidden=true;cards(null);}
           if(!state.summary){
-            const summary=await query({},controller.signal);
-            if(request!==state.summaryRequest||String(currentUser?.id)!==user||key!==accessKey())return;
-            if(summary.as_of!==dayKey())throw new Error('The date changed while loading. Please Refresh.');
-            state.summary=summary;state.dirty=false;
+            let summary=await query({},controller.signal);
+            // Server date is authoritative; retry briefly to absorb midnight/clock-skew races instead of failing.
+            for(let attempt=1;summary.as_of!==dayKey()&&attempt<=2;attempt++){
+              await new Promise(resolve=>setTimeout(resolve,400*attempt));
+              if(controller.signal.aborted||request!==state.summaryRequest)return;
+              summary=await query({},controller.signal);
+            }
+            if(request!==state.summaryRequest||String(currentUser?.id)!==user)return;
+            if(key!==accessKey()){if(currentWorkspaceView==='home'&&(state.rekeys=(state.rekeys||0)+1)<=3)setTimeout(()=>refresh(true),0);return;}
+            if(summary.as_of!==dayKey())console.warn(`Home summary date ${summary.as_of} differs from browser date ${dayKey()}; using server date.`);
+            state.summary=summary;state.dirty=false;state.rekeys=0;
           }
           if(currentWorkspaceView!=='home')return;
           cards(state.summary);
@@ -32942,7 +33284,7 @@ COMMIT;
       ['btn-page-import','btn-page-export','btn-new-program','btn-new-project'].forEach(id=>{const node=document.getElementById(id);if(node)node.style.display='none';});
       document.getElementById('workspace-page-title').textContent='Home';
       document.querySelectorAll('.workspace-page-link').forEach(button=>{const active=button.id==='workspace-nav-home';button.classList.toggle('bg-slate-800',active);button.classList.toggle('text-indigo-300',active);button.classList.toggle('text-slate-400',!active);});
-      home().classList.remove('hidden');shell();return refresh();
+      home().classList.remove('hidden');shell();return refresh(true);
     }
     async function select(metric,pageNumber=0){
       if(!metrics.some(m=>m.id===metric)||!state.summary)return;
@@ -32960,7 +33302,7 @@ COMMIT;
         let data=state.details.get(cacheKey);
         if(!data){data=await query({p_metric:metric,p_offset:pageNumber*50,p_limit:50},controller.signal);}
         if(request!==state.request||key!==state.key||key!==accessKey()||state.active!==metric||currentWorkspaceView!=='home')return;
-        if(data.as_of!==state.summary.as_of)throw new Error('The date changed. Please Refresh your summary.');
+        if(data.as_of!==state.summary.as_of){await refresh(true);return;}
         state.details.set(cacheKey,data);renderDetails(data);
       }catch(error){
         if(!controller.signal.aborted&&request===state.request){console.error('Home details failed:',error);panel.querySelector('.home-detail-body').innerHTML=`<p class="home-message" role="alert">Unable to load details. ${escape(error.message)} Use Refresh to try again.</p>`;}
@@ -33059,7 +33401,393 @@ COMMIT;
     const previousLoad=window.loadInitiativesFromSupabase;
     window.loadInitiativesFromSupabase=async function(){const loaded=await previousLoad.apply(this,arguments);if(loaded)invalidate();return loaded;};
     supabaseClient.auth.onAuthStateChange(event=>{if(event==='SIGNED_OUT')showLoginScreen();});
+    document.addEventListener('visibilitychange',()=>{
+      if(document.visibilityState==='visible'&&currentUser&&currentWorkspaceView==='home'&&home()&&!home().classList.contains('hidden')&&(state.dirty||state.key!==accessKey()))refresh(true);
+    });
     window.deliveryHome={open,refresh,select,closeDetails,invalidate,reset};
+  })();
+  </script>
+  <script id="delivery-user-master-workflow">
+  (function installUserMasterWorkflow(){
+    let roleContext=null,roleOpening=false;
+    const master=()=>document.getElementById('user-modal');
+    const rolePage=()=>document.getElementById('admin-modal');
+    const roleTable=()=>document.getElementById('user-role-table');
+    const authorized=()=>Boolean(currentUser&&window.deliveryRbac.system());
+    function userFor(id){
+      const user=userMaster.find(user=>String(user.id)===String(id));
+      if(!user)throw new Error('User was not found. Refresh User Master and retry.');
+      return user;
+    }
+    function basicEditPending(){
+      if(editingUserMasterId!==null){showToast('Save or cancel the basic details before managing this user.','error');return true;}
+      return false;
+    }
+    function restoreMaster(){
+      if(!roleContext)return;
+      const {userId,inert,ariaHidden}=roleContext;roleContext=null;
+      master().inert=inert;
+      if(ariaHidden===null)master().removeAttribute('aria-hidden');else master().setAttribute('aria-hidden',ariaHidden);
+      delete roleTable().dataset.userMasterRoleTarget;
+      rolePage().style.zIndex='';
+      renderUserMasterList();
+      master().querySelector(`[data-user-master-id="${userId}"] [data-user-role-link]`)?.focus({preventScroll:true});
+    }
+    const previousClose=window.closeAdminModal;
+    window.closeAdminModal=function(){
+      if(roleContext&&roleTable().querySelector('[data-rbac-saving="true"]')){showToast('Please wait for the user access save to finish.','error');return;}
+      const result=previousClose.apply(this,arguments);restoreMaster();return result;
+    };
+    window.openUserRoleForUser=async function(id){
+      if(roleContext||roleOpening){showToast('Close the current User Role page before selecting another user.','error');return;}
+      roleOpening=true;
+      try{
+        await window.deliveryRbac.refresh();
+        if(!authorized())throw new Error('Only System Admin can assign user roles.');
+        if(basicEditPending())return;
+        const user=userFor(id);
+        await window.deliveryRbac.loadRoleDepartments();
+        roleContext={userId:user.id,inert:master().inert,ariaHidden:master().getAttribute('aria-hidden')};
+        roleTable().dataset.userMasterRoleTarget=String(user.id);
+        master().inert=true;master().setAttribute('aria-hidden','true');rolePage().style.zIndex='60';
+        await window.openAdminModal();
+        const row=roleTable().querySelector(`[data-rbac-user="${user.id}"]`);
+        if(!row)throw new Error('The selected user is unavailable in User Roles.');
+        row.querySelector('[data-rbac-edit]').click();
+      }catch(error){rolePage().classList.add('hidden');restoreMaster();showToast(error.message,'error');}
+      finally{roleOpening=false;}
+    };
+    window.addEventListener('delivery-user-access-saved',event=>{
+      if(roleContext&&String(event.detail.userId)===String(roleContext.userId))window.closeAdminModal();
+    });
+    window.confirmUserDeactivation=function(user){
+      if(!authorized()){showToast('Only System Admin can mark users inactive.','error');return Promise.resolve(false);}
+      let dialog=document.getElementById('user-inactive-dialog');
+      if(!dialog){
+        dialog=document.createElement('dialog');dialog.id='user-inactive-dialog';
+        dialog.className='rounded-xl border border-slate-200 bg-white p-5 shadow-xl';
+        dialog.style.maxWidth='min(28rem, calc(100vw - 2rem))';
+        dialog.setAttribute('aria-labelledby','user-inactive-title');
+        dialog.innerHTML='<form method="dialog"><h2 id="user-inactive-title" class="text-lg font-bold">Mark user inactive</h2><p data-inactive-message class="mt-2 text-sm text-slate-600"></p><div class="mt-5 flex justify-end gap-3"><button value="cancel" autofocus class="rounded-lg border px-4 py-2">Cancel</button><button value="inactive" class="rounded-lg bg-indigo-600 px-4 py-2 text-white">Mark inactive</button></div></form>';
+        document.body.append(dialog);
+      }
+      if(dialog.open)return Promise.resolve(false);
+      dialog.querySelector('[data-inactive-message]').textContent=`Mark ${user.name} (${user.email}) inactive? Their existing assignments will be retained.`;
+      return new Promise(resolve=>{dialog.returnValue='';dialog.addEventListener('close',()=>resolve(dialog.returnValue==='inactive'),{once:true});dialog.showModal();});
+    };
+    window.openUserPasswordReset=async function(id){
+      try{
+        await window.deliveryRbac.refresh();
+        if(!authorized())throw new Error('Only System Admin can reset passwords.');
+        if(basicEditPending())return;
+        const user=userFor(id);
+        if(!user.authUserId)throw new Error('This user is not linked to an Auth account. Reconcile onboarding before resetting the password.');
+        let dialog=document.getElementById('user-password-reset-dialog');
+        if(dialog?.open)throw new Error('Close the current password reset before selecting another user.');
+        if(!dialog){
+          dialog=document.createElement('dialog');dialog.id='user-password-reset-dialog';
+          dialog.className='rounded-xl border border-slate-200 bg-white p-5 shadow-xl';
+          dialog.style.width='min(28rem, calc(100vw - 2rem))';
+          dialog.setAttribute('aria-labelledby','user-password-reset-title');
+          dialog.innerHTML='<form id="auth-user-password-reset-form" class="space-y-4"><h2 id="user-password-reset-title" class="text-lg font-bold">Reset password</h2><p data-reset-user class="text-sm text-slate-600"></p><label class="block text-sm">New password<input name="password" type="password" autocomplete="new-password" required minlength="6" class="user-onboarding-control mt-1"></label><label class="block text-sm">Confirm password<input name="confirmation" type="password" autocomplete="new-password" required class="user-onboarding-control mt-1"></label><p data-reset-error role="alert" class="text-sm text-red-700"></p><div class="flex justify-end gap-3"><button type="button" data-reset-cancel class="rounded-lg border px-4 py-2">Cancel</button><button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-white">Reset password</button></div></form>';
+          document.body.append(dialog);
+          dialog.addEventListener('close',()=>dialog.querySelector('form').reset());
+        }
+        const form=dialog.querySelector('form'),errorNode=dialog.querySelector('[data-reset-error]');
+        form.reset();errorNode.textContent='';dialog.querySelector('[data-reset-user]').textContent=`${user.name} (${user.email})`;
+        dialog.querySelector('[data-reset-cancel]').onclick=()=>{form.reset();dialog.close();};
+        let saving=false;
+        dialog.oncancel=event=>{if(saving)event.preventDefault();else form.reset();};
+        form.onsubmit=async event=>{
+          event.preventDefault();if(saving)return;
+          const password=form.elements.namedItem('password'),confirmation=form.elements.namedItem('confirmation');
+          if(password.value!==confirmation.value){errorNode.textContent='Passwords do not match.';confirmation.focus();return;}
+          if(!form.reportValidity())return;
+          const payload={user_id:user.id,password:password.value};
+          saving=true;errorNode.textContent='';form.setAttribute('aria-busy','true');form.querySelector('[type="submit"]').textContent='Resetting...';form.querySelectorAll('button').forEach(button=>button.disabled=true);
+          try{
+            const {data:{session},error:sessionError}=await supabaseClient.auth.getSession();
+            if(sessionError)throw sessionError;
+            if(!session?.access_token)throw new Error('Your session has expired. Sign in again.');
+            const {data,error}=await supabaseClient.functions.invoke('admin-reset-user-password',{body:payload,headers:{Authorization:`Bearer ${session.access_token}`}});
+            if(error){
+              let detail;
+              if(error.context?.json)detail=await error.context.json();
+              throw new Error(detail?.code==='NOT_FOUND'?'The password reset service is not deployed. Contact your System Admin.':detail?.error||detail?.message||error.message||'The password reset service is unavailable.');
+            }
+            if(data?.status!=='password_reset'||String(data.user_id)!==String(user.id))throw new Error('Password reset was not confirmed. Retry after checking the service.');
+            dialog.close();showToast('Password reset successfully.','success');
+          }catch(error){errorNode.textContent=error.message;}
+          finally{payload.password=undefined;password.value='';confirmation.value='';saving=false;form.removeAttribute('aria-busy');form.querySelector('[type="submit"]').textContent='Reset password';form.querySelectorAll('button').forEach(button=>button.disabled=false);}
+        };
+        dialog.showModal();form.elements.namedItem('password').focus();
+      }catch(error){showToast(error.message,'error');}
+    };
+    supabaseClient.auth.onAuthStateChange(event=>{
+      if(event!=='SIGNED_OUT')return;
+      rolePage().classList.add('hidden');restoreMaster();
+      for(const id of ['user-inactive-dialog','user-password-reset-dialog']){
+        const dialog=document.getElementById(id);dialog?.querySelector('form').reset();dialog?.close();
+      }
+    });
+  })();
+  </script>
+  <script id="delivery-milestone-order-guard">
+  // Keeps each Milestone where the user placed it. Milestones without a stored
+  // position (or sharing one within a Track) used to be re-sorted by Start Date on
+  // reload, which pushed edited rows to the bottom. This keeps the on-screen order
+  // across reloads and stores it, without changing the existing save/drag logic.
+  (()=>{'use strict';
+    const baseLoad=window.loadInitiativesFromSupabase,baseApply=window.applyDerivedMilestoneSequence,basePersist=window.persistInitiativeSequenceChanges;
+    if(typeof baseLoad!=='function'||typeof baseApply!=='function'||typeof basePersist!=='function')return;
+    const allProjects=()=>typeof projects!=='undefined'&&Array.isArray(projects)?projects:[];
+    const findProject=id=>allProjects().find(project=>Number(project.id)===Number(id));
+    const isActive=milestone=>!['deleted','archived'].includes(String(milestone?.recordStatus||'active').trim().toLowerCase());
+    function isUnpinned(project){
+      const seen=new Set();
+      for(const milestone of project?.milestones||[]){
+        if(!(Number(milestone.id)>0)||!isActive(milestone))continue;
+        const stored=Number(milestone.persistedSequenceNo??milestone.sequenceNo);
+        if(!(stored>0))return true;
+        const key=`${Number(milestone.trackId)||0}:${stored}`;
+        if(seen.has(key))return true;
+        seen.add(key);
+      }
+      return false;
+    }
+    function canPin(project){
+      try{return window.deliveryRbac?window.deliveryRbac.can('initiative',project.id,'write'):canEditInitiative(project);}catch(error){return false;}
+    }
+    async function pinIfNeeded(projectId){
+      const project=findProject(projectId);
+      if(!project||project._lastOrderMode!=='manual'||!isUnpinned(project)||!canPin(project))return true;
+      if(window._initiativeSequenceSaveLocks?.has(Number(project.id)))return true;
+      return window.persistInitiativeSequenceChanges(project.id);
+    }
+    function restoreOrder(project,order){
+      const list=project.milestones||[],byId=new Map(list.map(milestone=>[Number(milestone.id),milestone]));
+      const kept=order.filter(id=>byId.has(id)),keptIds=new Set(kept);
+      let index=0;
+      const next=list.map(milestone=>keptIds.has(Number(milestone.id))?byId.get(kept[index++]):milestone);
+      if(next.every((milestone,position)=>milestone===list[position]))return false;
+      project.milestones=next;
+      return true;
+    }
+
+    // Unstored positions are null in Supabase; the batch RPC must expect null, not 0.
+    window.persistInitiativeSequenceChanges=async function(initiativeId){
+      for(const milestone of findProject(initiativeId)?.milestones||[]){
+        if(Number(milestone.id)>0&&milestone.persistedSequenceNo!=null&&!(Number(milestone.persistedSequenceNo)>0))milestone.persistedSequenceNo=null;
+      }
+      return basePersist.apply(this,arguments);
+    };
+
+    let reloadContext=null;
+    window.applyDerivedMilestoneSequence=function(project,options){
+      const freshLoad=Boolean(project&&!project._lastOrderMode&&!(options&&options.mode));
+      const result=baseApply.apply(this,arguments);
+      const order=freshLoad&&reloadContext?.orders.get(Number(project.id));
+      if(order&&isUnpinned(project)&&restoreOrder(project,order)){
+        baseApply.call(this,project,{mode:'manual'});
+        reloadContext.restored.add(Number(project.id));
+      }
+      return result;
+    };
+
+    window.loadInitiativesFromSupabase=async function(){
+      const context={orders:new Map(),restored:new Set()};
+      for(const project of allProjects()){
+        if(project._lastOrderMode==='manual'&&project.milestones?.length)context.orders.set(Number(project.id),project.milestones.map(milestone=>Number(milestone.id)).filter(id=>id>0));
+      }
+      reloadContext=context;
+      let loaded;
+      try{loaded=await baseLoad.apply(this,arguments);}
+      finally{if(reloadContext===context)reloadContext=null;}
+      if(loaded!==false)for(const id of context.restored)await pinIfNeeded(id);
+      return loaded;
+    };
+
+    const baseInlineSave=window.saveInlineMilestone;
+    if(typeof baseInlineSave==='function')window.saveInlineMilestone=async function(projectId,milestoneId){
+      const saved=await baseInlineSave.apply(this,arguments);
+      if(saved&&Number(milestoneId)>=0)await pinIfNeeded(projectId);
+      return saved;
+    };
+
+    const baseModalSave=window.saveMilestone;
+    if(typeof baseModalSave==='function')window.saveMilestone=async function(){
+      const projectId=Number(document.getElementById('m-project-id')?.value||0);
+      const result=await baseModalSave.apply(this,arguments);
+      if(projectId)await pinIfNeeded(projectId);
+      return result;
+    };
+  })();
+  </script>
+  <style id="delivery-milestone-track-move-style">
+    tr[data-milestone-row].milestone-group-dragging{opacity:.45}
+    [data-track-completed].milestone-track-drop-target{outline:2px dashed #0284c7;outline-offset:2px}
+  </style>
+  <script id="delivery-milestone-track-move">
+  // Enable Multiple Select, select Milestones, then drag a selected handle into a Track.
+  // Track headers append; Milestone rows insert before/after. Single same-Track drags are unchanged.
+  // Requires supabase-migration-milestone-track-move.sql for atomic saving.
+  (function(){
+    const baseDragStart=window.onMilestoneDragStart,baseDrop=window.onMilestoneDrop;
+    if(typeof baseDragStart!=='function'||typeof baseDrop!=='function')return;
+    const isActive=m=>!['deleted','archived'].includes(String(m?.recordStatus||'active').trim().toLowerCase());
+    const findProject=id=>(projects||[]).find(p=>Number(p.id)===Number(id));
+    const clearGroupMarks=()=>{document.querySelectorAll('.milestone-group-dragging,.milestone-track-drop-target').forEach(el=>el.classList.remove('milestone-group-dragging','milestone-track-drop-target'));};
+    const selectedMilestoneIds=()=>overviewMultiSelectEnabled?bulkWorkspaceSelection.milestones:null;
+
+    function dragGroup(project,sourceId){
+      const source=(project?.milestones||[]).find(m=>Number(m.id)===Number(sourceId));
+      if(!source)return [];
+      const selected=selectedMilestoneIds();
+      if(!selected||!selected.has(Number(sourceId)))return isActive(source)&&Number(source.id)>0?[source]:[];
+      return project.milestones.filter(m=>selected.has(Number(m.id))&&Number(m.id)>0&&isActive(m));
+    }
+    function canWriteTrack(project,trackId){
+      return window.deliveryRbac?window.deliveryRbac.can('track',trackId,'write'):canEditInitiative(project);
+    }
+    function trackIdOfCard(card){
+      if(!card)return null;
+      if(card.dataset.trackOrderId)return Number(card.dataset.trackOrderId);
+      return typeof trackCardIdentity==='function'?trackCardIdentity(card)?.trackId??null:null;
+    }
+
+    window.onMilestoneDragStart=function(e,projectId,milestoneId){
+      const result=baseDragStart.apply(this,arguments);
+      clearGroupMarks();
+      if(window._draggingMilestone){
+        const group=dragGroup(findProject(projectId),milestoneId);
+        if(group.length>1)group.forEach(m=>document.querySelector(`tr[data-milestone-row="true"][data-inline-milestone-id="${CSS.escape(String(m.id))}"]`)?.classList.add('milestone-group-dragging'));
+      }
+      return result;
+    };
+    document.addEventListener('dragend',clearGroupMarks);
+
+    async function moveMilestonesToTrack(project,group,targetTrackId,anchorId,insertAfter){
+      const projectId=Number(project.id);
+      if(window._initiativeSequenceSaveLocks?.has(projectId)){showToast('Saving milestone order — please wait','info');return;}
+      const track=(project.tracks||[]).find(t=>Number(t.id)===Number(targetTrackId));
+      if(!track||!isActive(track)){showToast('Milestones can only be moved into an active Track.','error');return;}
+      if(!canWriteTrack(project,targetTrackId)||group.some(m=>!canEditMilestone(project,m)||(window.deliveryRbac&&!window.deliveryRbac.can(m.trackId?'track':'initiative',m.trackId||project.id,'write')))){showToast('Moving Milestones requires edit access to the Milestones, their source Tracks and the destination Track.','error');return;}
+      if(group.some(m=>Number(m.id)<=0||!isActive(m))){showToast('Save new Milestones before moving them to a Track.','error');return;}
+      const milestones=project.milestones;
+      const groupIds=new Set(group.map(m=>Number(m.id)));
+      const previousOrder=milestones.slice();
+      const remaining=milestones.filter(m=>!groupIds.has(Number(m.id)));
+      let insertIndex;
+      if(anchorId!=null){
+        const anchorIndex=remaining.findIndex(m=>Number(m.id)===Number(anchorId));
+        if(anchorIndex<0){showToast('The destination Milestone is unavailable. Refresh and retry.','error');return;}
+        insertIndex=anchorIndex+(insertAfter?1:0);
+      }else{
+        let last=-1;remaining.forEach((m,i)=>{if(Number(m.trackId)===Number(targetTrackId))last=i;});
+        insertIndex=last>=0?last+1:remaining.length;
+      }
+      remaining.splice(insertIndex,0,...group);
+      const moving=group.filter(m=>Number(m.trackId||0)!==Number(targetTrackId));
+      const orderChanged=remaining.some((m,i)=>m!==previousOrder[i]);
+      if(!orderChanged&&!moving.length)return;
+      // Archived rows retain their stored positions and still participate in the unique index.
+      const reservedSequences=new Set(milestones.filter(m=>!isActive(m)).map(m=>Number(m.persistedSequenceNo)).filter(n=>n>0));
+      let nextSequence=0;
+      const changes=remaining.flatMap(m=>{
+        if(Number(m.id)<=0||!isActive(m))return [];
+        do{nextSequence++;}while(reservedSequences.has(nextSequence));
+        return groupIds.has(Number(m.id))||Number(m.persistedSequenceNo||0)!==nextSequence?[{id:Number(m.id),sequence_no:nextSequence}]:[];
+      });
+      const beforeById=new Map(milestones.map(m=>[Number(m.id),m]));
+      const expected=changes.map(change=>{
+        const m=beforeById.get(change.id);
+        return {id:change.id,sequence_no:Number(m.persistedSequenceNo)>0?Number(m.persistedSequenceNo):null,track_id:m.trackId?Number(m.trackId):null};
+      });
+      const expectedById=new Map(expected.map(row=>[row.id,row]));
+      const view=captureDeliveryViewState();
+      window._initiativeSequenceSaveLocks ||= new Set();
+      window._initiativeSequenceSaveLocks.add(projectId);
+      let confirmed=false;
+      try{
+        const {data,error}=await supabaseClient.rpc('delivery_move_milestones_to_track',{
+          p_initiative_id:projectId,p_target_track_id:Number(targetTrackId),p_milestone_ids:group.map(m=>Number(m.id)),p_expected:expected,p_changes:changes
+        });
+        if(error)throw error;
+        const rows=new Map((Array.isArray(data)?data:[]).map(row=>[Number(row.id),row]));
+        if(!Array.isArray(data)||data.length!==changes.length||rows.size!==changes.length||changes.some(change=>{
+          const row=rows.get(change.id),before=expectedById.get(change.id);
+          return !row||Number(row.initiative_id)!==projectId||Number(row.sequence_no)!==change.sequence_no||
+            Number(row.track_id||0)!==Number(groupIds.has(change.id)?targetTrackId:before.track_id||0);
+        }))throw new Error('Supabase did not confirm the complete Milestone move. Refresh before retrying.');
+        const current=findProject(projectId);
+        if(!current)throw new Error('The Initiative is no longer available. Refresh to see the saved move.');
+        const currentById=new Map(current.milestones.map(m=>[Number(m.id),m]));
+        current.milestones=remaining.filter(m=>currentById.has(Number(m.id))).map(m=>currentById.get(Number(m.id)))
+          .concat(current.milestones.filter(m=>!beforeById.has(Number(m.id))));
+        current._lastOrderMode='manual';
+        current.milestones.forEach(m=>{
+          const row=rows.get(Number(m.id));
+          if(row){m.sequenceNo=Number(row.sequence_no);m.persistedSequenceNo=Number(row.sequence_no);m.trackId=row.track_id?Number(row.track_id):null;}
+        });
+        kpiMilestoneRows=kpiMilestoneRows.map(row=>rows.has(Number(row.id))?{...row,...rows.get(Number(row.id))}:row);
+        confirmed=true;
+        showToast(moving.length?`${moving.length} Milestone${moving.length===1?'':'s'} moved to Track ${track.sequenceNo} - ${track.name}.`:'Milestone order updated.','success');
+      }catch(error){
+        console.error('Unable to move Milestones to Track:',error);
+        const message=['PGRST202','42883'].includes(error.code)?'Run supabase-migration-milestone-track-move.sql in Supabase to enable dragging Milestones into Tracks.':error.message||String(error);
+        showToast(`Unable to move Milestones: ${message}`,'error');
+      }finally{
+        window._initiativeSequenceSaveLocks.delete(projectId);
+        if(confirmed){renderProjects();restoreDeliveryViewState(view,{restoreFocus:false});}
+      }
+    }
+
+    window.onMilestoneDrop=async function(e,projectId,targetMilestoneId){
+      const dragging=window._draggingMilestone;
+      const project=findProject(projectId);
+      const target=project?.milestones?.find(m=>Number(m.id)===Number(targetMilestoneId));
+      const group=dragging&&Number(dragging.projectId)===Number(projectId)?dragGroup(project,dragging.milestoneId):[];
+      const crossTrack=group.length===1&&target&&Number(group[0].trackId||0)!==Number(target.trackId||0);
+      if(!project||!target||!target.trackId||!(group.length>1||crossTrack))return baseDrop.apply(this,arguments);
+      e.preventDefault();e.stopPropagation();
+      const bounds=e.currentTarget.getBoundingClientRect();
+      const insertAfter=e.clientY>=bounds.top+bounds.height/2;
+      clearMilestoneDragState();clearGroupMarks();
+      if(group.some(m=>Number(m.id)===Number(target.id)))return;
+      await moveMilestonesToTrack(project,group,target.trackId,target.id,insertAfter);
+    };
+
+    // Dropping on a Track card (header or empty area) appends the Milestones to that Track.
+    function trackDropContext(event){
+      const dragging=window._draggingMilestone;
+      if(!dragging||window._draggingTrack||event.target.closest?.('tr[data-milestone-row]'))return null;
+      const card=event.target.closest?.('#projects-container [data-track-completed]');
+      const trackId=trackIdOfCard(card);
+      if(!card||!trackId)return null;
+      const identity=typeof trackCardIdentity==='function'?trackCardIdentity(card):null;
+      if(identity&&Number(identity.initiativeId)!==Number(dragging.projectId))return null;
+      const project=findProject(dragging.projectId);
+      if(!project)return null;
+      const group=dragGroup(project,dragging.milestoneId);
+      if(!group.length||group.every(m=>Number(m.trackId)===Number(trackId)))return null;
+      return {card,trackId,project,group};
+    }
+    document.addEventListener('dragover',event=>{
+      const context=trackDropContext(event);
+      document.querySelectorAll('.milestone-track-drop-target').forEach(el=>{if(el!==context?.card)el.classList.remove('milestone-track-drop-target');});
+      if(!context)return;
+      event.preventDefault();
+      if(event.dataTransfer)event.dataTransfer.dropEffect='move';
+      context.card.classList.add('milestone-track-drop-target');
+      if(typeof autoScrollMilestoneDropContainer==='function')autoScrollMilestoneDropContainer(event,context.card);
+    });
+    document.addEventListener('drop',async event=>{
+      const context=trackDropContext(event);
+      if(!context)return;
+      event.preventDefault();event.stopPropagation();
+      clearMilestoneDragState();clearGroupMarks();
+      await moveMilestonesToTrack(context.project,context.group,context.trackId,null,false);
+    });
   })();
   </script>
   </body>
