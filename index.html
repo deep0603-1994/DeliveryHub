@@ -3345,6 +3345,7 @@
     adminScope: row.admin_scope || 'system',
     accessLevels: row.access_levels,
     supportDepartments: row.support_departments || [],
+    supportScope: row.support_scope || 'departments',
     authUserId: row.auth_user_id || ''
   }));
 
@@ -3982,7 +3983,7 @@
       if(status!=='Done')return null;
       completed.push(milestone);
     }
-    return completed.length?calculateHierarchyActualEndDate(completed,'endDate'):undefined;
+    return completed.length?calculateHierarchyActualEndDate(completed,'completionDate'):undefined;
   }
 
   async function synchronizeHierarchyActualEndDates(initiatives=projects){
@@ -10662,10 +10663,10 @@
     if(duplicate){showToast('An active Milestone with the same action already exists in this Initiative and Track.','error');el('inline-actions')?.focus();return false;}
     const schedule=calculateMilestoneSchedule(scheduledMilestone,{days,startDate});
     const status=getEffectiveMilestoneStatus({...milestone,days,startDate,endDate,deadline,completionDate});
-    const milestoneRecord={actions,owner,dependency:dependency||null,days:normalizeMilestoneDays(days),start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,completion_date:completionDate||null,status,deviation_days:calculateDeviation(deadline,startDate,completionDate)||null,record_status:milestone.recordStatus||'active'};
+    const milestoneRecord={actions,owner,dependency:dependency||null,days:normalizeMilestoneDays(days),start_date:startDate||null,end_date:endDate||null,deadline:deadline||null,completion_date:completionDate||null,status,deviation_days:calculateDeviation(getEffectiveMilestoneDeadline({...milestone,endDate,deadline}),startDate,completionDate)||null,record_status:milestone.recordStatus||'active'};
     if(editablePendingParallelStart)milestoneRecord.reference_offset_days=referenceOffsetDays;
     const plannerTypeControl=el('inline-planner-type');if(plannerTypeControl)milestoneRecord.planner_type_id=plannerTypeControl.value||null;
-    if(schedule.hasHistory)Object.assign(milestoneRecord,{start_date:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),deviation_days:schedule.deviationDays,remarks:schedule.remarks});
+    if(schedule.hasHistory)Object.assign(milestoneRecord,{start_date:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),deviation_days:completionDate?milestoneRecord.deviation_days:schedule.deviationDays,remarks:schedule.remarks});
     Object.assign(milestoneRecord,milestoneRemarksRecord(remarks,milestoneRecord.remarks??milestone.remarks));
     const isDraft=Number(milestoneId)<0;
     if(isDraft&&window._initiativeSequenceSaveLocks?.has(Number(projectId))){showToast('Saving milestone order — please wait','info');return false;}
@@ -10687,7 +10688,7 @@
       milestone.remarks=data?.remarks??milestoneRecord.remarks;
       milestone.milestoneRemarks=getStoredMilestoneRemarks({remarks:milestone.remarks});
       if(isDraft)milestone.persistedSequenceNo=data?.sequence_no??sequenceNo;
-      if(schedule.hasHistory)Object.assign(milestone,{startDate:data?.start_date??schedule.startDate,days:data?.days??schedule.days,deviationDays:data?.deviation_days??schedule.deviationDays});
+      if(schedule.hasHistory)Object.assign(milestone,{startDate:data?.start_date??schedule.startDate,days:data?.days??schedule.days,deviationDays:data?.deviation_days??milestoneRecord.deviation_days});
       if(isDraft)kpiMilestoneRows.push({...data});else{const ri=kpiMilestoneRows.findIndex(r=>Number(r.id)===Number(milestone.id));if(ri>=0)kpiMilestoneRows[ri]={...kpiMilestoneRows[ri],...data};}
       inlineMilestoneEditId=null;
       if(impactBelow && !await cascadeTrackMilestoneSchedule(project,milestone.id,{impactBelow:true}))return false;
@@ -12129,7 +12130,7 @@
   return rows.filter(r=>{const e=r.milestone||r.track||r.initiative||r.program,statusRec=String(e?.recordStatus||'active');if(rs==='active'&&statusRec==='deleted'||rs==='deleted'&&statusRec!=='deleted')return false;if(pf&&Number(r.program?.id)!==Number(pf)||inf&&Number(r.initiative?.id)!==Number(inf)||tf&&Number(r.track?.id)!==Number(tf))return false;const summary=!r.milestone&&r.track&&r.initiative?getTrackSummary(r.initiative,r.track):null,st=r.milestone?getEffectiveMilestoneStatus(r.milestone):summary?summary.status:r.initiative?evaluateInitiativeStatus(r.initiative):evaluateProjectStatus(r.program?.name,r.program?.revisedStartDate||r.program?.startDate,getEffectiveEndDate(r.program?.targetEndDate,r.program?.revisedEndDate),r.program?.actualEndDate),et=r.initiative?.type||'',ev=r.initiative?.vertical||r.program?.vertical||'',ei=r.initiative?.impactCategory||r.program?.impactCategory||'';if(type&&et!==type||vert&&ev!==vert||impact&&ei!==impact||sf&&st!==sf)return false;if(activeFlatKpiFilter==='wip'&&['Done','On-Hold','In-Queue'].includes(st)||activeFlatKpiFilter==='onhold'&&st!=='On-Hold'||activeFlatKpiFilter==='delay'&&!['Delay','Pending','Deviation'].includes(st)||activeFlatKpiFilter==='completed'&&st!=='Done')return false;const x=[r.program?.sequenceNo,r.program?.name,r.program?.owner,r.initiative?.sequenceNo,r.initiative?.name,r.initiative?.type,r.initiative?.crNo,r.initiative?.businessOwner,r.track?.sequenceNo,r.track?.name,r.milestone?.sequenceNo,r.milestone?.actions,r.milestone?.owner].filter(Boolean).join(' ').toLowerCase();return !q||x.includes(q);});
   }
 
-  function flatConfig(){const rel=r=>[r.program?`Program ${r.program.sequenceNo}`:'-',escapeHtml(r.program?.name||'Unmapped'),r.initiative?`Initiative ${r.initiative.sequenceNo}`:'-',escapeHtml(r.initiative?.name||'-'),r.track?`Track ${r.track.sequenceNo}`:'-',escapeHtml(r.track?.name||'-')];if(currentWorkspaceView==='programs')return{title:'Programs',sub:'Flat list of all Programs without child hierarchy.',heads:['Program No.','Program Name','Owner','Assigned To','Vertical','Status','Start Date','Target End','Countdown','Initiatives','Milestones','Progress','Actions'],row:r=>{const p=r.program,i=projects.filter(x=>Number(x.programId)===Number(p.id)),m=i.flatMap(x=>x.milestones||[]),d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateProjectStatus(p.name,p.revisedStartDate||p.startDate,getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.actualEndDate),cd=calculateCountdown(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.revisedStartDate||p.startDate,p.actualEndDate);return[`Program ${p.sequenceNo}`,escapeHtml(p.name),escapeHtml(p.owner||'-'),escapeHtml(p.assignedTo||'-'),escapeHtml(p.vertical||'-'),getStatusBadge(st),formatDate(p.revisedStartDate||p.startDate),formatDate(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate)),getCountdownDisplay(cd),i.length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProgramModal(${p.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='initiatives')return{title:'Initiatives',sub:'Flat list of Initiatives with linked Program information.',heads:['Initiative No.','Initiative Name','Program No.','Program Name','Type','CR No.','Vertical','Delivery Method','Business Owner','Assigned To','Status','Countdown','Tracks','Milestones','Progress','Actions'],row:r=>{const i=r.initiative,a=rel(r),m=i.milestones||[],d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateInitiativeStatus(i),cd=calculateCountdown(getEffectiveEndDate(i.targetEndDate,i.revisedEndDate),i.revisedStartDate||i.startDate,i.actualEndDate);return[`Initiative ${i.sequenceNo}`,escapeHtml(i.name),a[0],a[1],escapeHtml(i.type||'-'),escapeHtml(i.crNo||'-'),escapeHtml(i.vertical||'-'),escapeHtml(i.deliveryMethod||'-'),escapeHtml(i.businessOwner||'-'),escapeHtml(i.assignedTo||'-'),getStatusBadge(st),getCountdownDisplay(cd),(i.tracks||[]).length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProjectModal(${i.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='tracks')return{title:'Tracks',sub:'Flat list of Tracks linked to Initiatives and Programs.',heads:['Track No.','Track Name','Initiative No.','Initiative Name','Program No.','Program Name','Vertical','Milestones','Completed','Progress','Start Date','End Date','Status','Actions'],row:r=>{const a=rel(r),x=getTrackSummary(r.initiative,r.track);return[a[4],a[5],a[2],a[3],a[0],a[1],escapeHtml(r.initiative.vertical||'-'),x.milestoneCount,x.completedCount,`${x.progressPercentage}%`,formatDate(x.startDate),formatDate(x.endDate),getStatusBadge(x.status),`<button onclick="openTrackModal(${r.initiative.id},${r.track.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};return{title:'Milestones',sub:'Flat list of Milestones with Program, Initiative, and Track relationships.',heads:['Milestone No.','Action / Deliverable','Program No.','Program Name','Initiative No.','Initiative Name','Track No.','Track Name','Vertical','Owner','Dependency','Days','Start Date','End Date','Completion','Status','Deviation','Day Status','Actions'],row:r=>{const m=r.milestone,a=rel(r),end=calculateMilestoneEndDate(m.days,m.startDate),st=getEffectiveMilestoneStatus(m);return[`Milestone ${m.sequenceNo||m.id}`,escapeHtml(m.actions||m.title||'-'),a[0],a[1],a[2],a[3],a[4],a[5],escapeHtml(r.initiative.vertical||'-'),escapeHtml(m.owner||'-'),escapeHtml(m.dependency||'-'),escapeHtml(m.days||'-'),formatDate(m.startDate),formatDate(end),formatDate(m.completionDate),getStatusBadge(st),calculateDeviation(end,m.startDate,m.completionDate)||'-',calculateMilestoneDayStatus(end,m.completionDate)||'-',`<button onclick="openMilestoneModal(${r.initiative.id},${m.id},${m.trackId||'null'})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};}
+  function flatConfig(){const rel=r=>[r.program?`Program ${r.program.sequenceNo}`:'-',escapeHtml(r.program?.name||'Unmapped'),r.initiative?`Initiative ${r.initiative.sequenceNo}`:'-',escapeHtml(r.initiative?.name||'-'),r.track?`Track ${r.track.sequenceNo}`:'-',escapeHtml(r.track?.name||'-')];if(currentWorkspaceView==='programs')return{title:'Programs',sub:'Flat list of all Programs without child hierarchy.',heads:['Program No.','Program Name','Owner','Assigned To','Vertical','Status','Start Date','Target End','Countdown','Initiatives','Milestones','Progress','Actions'],row:r=>{const p=r.program,i=projects.filter(x=>Number(x.programId)===Number(p.id)),m=i.flatMap(x=>x.milestones||[]),d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateProjectStatus(p.name,p.revisedStartDate||p.startDate,getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.actualEndDate),cd=calculateCountdown(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate),p.revisedStartDate||p.startDate,p.actualEndDate);return[`Program ${p.sequenceNo}`,escapeHtml(p.name),escapeHtml(p.owner||'-'),escapeHtml(p.assignedTo||'-'),escapeHtml(p.vertical||'-'),getStatusBadge(st),formatDate(p.revisedStartDate||p.startDate),formatDate(getEffectiveEndDate(p.targetEndDate,p.revisedEndDate)),getCountdownDisplay(cd),i.length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProgramModal(${p.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='initiatives')return{title:'Initiatives',sub:'Flat list of Initiatives with linked Program information.',heads:['Initiative No.','Initiative Name','Program No.','Program Name','Type','CR No.','Vertical','Delivery Method','Business Owner','Assigned To','Status','Countdown','Tracks','Milestones','Progress','Actions'],row:r=>{const i=r.initiative,a=rel(r),m=i.milestones||[],d=m.filter(x=>getEffectiveMilestoneStatus(x)==='Done').length,st=evaluateInitiativeStatus(i),cd=calculateCountdown(getEffectiveEndDate(i.targetEndDate,i.revisedEndDate),i.revisedStartDate||i.startDate,i.actualEndDate);return[`Initiative ${i.sequenceNo}`,escapeHtml(i.name),a[0],a[1],escapeHtml(i.type||'-'),escapeHtml(i.crNo||'-'),escapeHtml(i.vertical||'-'),escapeHtml(i.deliveryMethod||'-'),escapeHtml(i.businessOwner||'-'),escapeHtml(i.assignedTo||'-'),getStatusBadge(st),getCountdownDisplay(cd),(i.tracks||[]).length,m.length,`${m.length?Math.round(d/m.length*100):0}%`,`<button onclick="openProjectModal(${i.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};if(currentWorkspaceView==='tracks')return{title:'Tracks',sub:'Flat list of Tracks linked to Initiatives and Programs.',heads:['Track No.','Track Name','Initiative No.','Initiative Name','Program No.','Program Name','Vertical','Milestones','Completed','Progress','Start Date','End Date','Status','Actions'],row:r=>{const a=rel(r),x=getTrackSummary(r.initiative,r.track);return[a[4],a[5],a[2],a[3],a[0],a[1],escapeHtml(r.initiative.vertical||'-'),x.milestoneCount,x.completedCount,`${x.progressPercentage}%`,formatDate(x.startDate),formatDate(x.endDate),getStatusBadge(x.status),`<button onclick="openTrackModal(${r.initiative.id},${r.track.id})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};return{title:'Milestones',sub:'Flat list of Milestones with Program, Initiative, and Track relationships.',heads:['Milestone No.','Action / Deliverable','Program No.','Program Name','Initiative No.','Initiative Name','Track No.','Track Name','Vertical','Owner','Dependency','Days','Start Date','End Date','Completion','Status','Deviation','Day Status','Actions'],row:r=>{const m=r.milestone,a=rel(r),end=calculateMilestoneEndDate(m.days,m.startDate),st=getEffectiveMilestoneStatus(m);return[`Milestone ${m.sequenceNo||m.id}`,escapeHtml(m.actions||m.title||'-'),a[0],a[1],a[2],a[3],a[4],a[5],escapeHtml(r.initiative.vertical||'-'),escapeHtml(m.owner||'-'),escapeHtml(m.dependency||'-'),escapeHtml(m.days||'-'),formatDate(m.startDate),formatDate(end),formatDate(m.completionDate),getStatusBadge(st),calculateDeviation(getEffectiveMilestoneDeadline(m),m.startDate,m.completionDate)||'-',calculateMilestoneDayStatus(end,m.completionDate)||'-',`<button onclick="openMilestoneModal(${r.initiative.id},${m.id},${m.trackId||'null'})" class="text-indigo-600"><i data-lucide="edit-2" class="w-4 h-4"></i></button>`];}};}
   const flatConfigBeforeEndDateColumns = flatConfig;
   flatConfig = function endDateColumnsConfig() {
     const config = flatConfigBeforeEndDateColumns();
@@ -14611,7 +14612,7 @@
       completion_date:
         completionDate || null,
 
-      deviation_days: schedule.hasHistory?schedule.deviationDays:calculateDeviation(deadline,startDate,completionDate) || null,
+      deviation_days: completionDate?calculateDeviation(getEffectiveMilestoneDeadline({...sourceMilestone,endDate,deadline}),startDate,completionDate)||null:schedule.hasHistory?schedule.deviationDays:null,
       record_status: existingMilestone?.recordStatus || 'active',
       ...(document.getElementById('m-planner-type')?{planner_type_id:document.getElementById('m-planner-type').value||null}:{}),
       ...milestoneRemarksRecord(milestoneRemarks,schedule.hasHistory?schedule.remarks:existingMilestone?.remarks)
@@ -14653,7 +14654,7 @@
     if (existingMilestone) {
       Object.assign(existingMilestone,{startDate:schedule.startDate,endDate,deadline,days:normalizeMilestoneDays(schedule.days),completionDate,status:finalStatus,trackId:databaseRecord.track_id});
       existingMilestone.remarks=databaseRecord.remarks;
-      if(schedule.hasHistory)Object.assign(existingMilestone,{deviationDays:schedule.deviationDays});
+      if(schedule.hasHistory)Object.assign(existingMilestone,{deviationDays:databaseRecord.deviation_days});
       if(impactBelow)await applyMilestoneScheduleImpact([{project:initiative,milestone:existingMilestone}],true);
       if(!await cascadeReferencedMilestoneSchedule(initiative,existingMilestone.id)){closeMilestoneModal();await loadInitiativesFromSupabase();return;}
     }
@@ -18027,10 +18028,10 @@
           const schedule=calculateMilestoneSchedule(milestone,field==='days'?{days:value}:field==='start_date'?{startDate:value}:{});
           const days=schedule.days,start=field==='start_date'?(value||''):schedule.startDate,completion=field==='completion_date'?(value||''):milestone.completionDate||'',end=field==='end_date'?(value||''):recalculate?schedule.endDate:milestone.endDate||'',deadline=field==='deadline'?(value||''):recalculate?schedule.deadline:milestone.deadline||'',status=completion?'Done':(hasMilestoneDeviationHistory(milestone)||milestone.status==='Deviated'?'Deviated':evaluateMilestoneStatus(milestone.actions||milestone.title,days,start,end,deadline,''));
           if(field==='start_date'&&completion&&value&&completion<value)throw new Error('Completion Date cannot be before Start Date.');
-          const payload={[field]:field==='days'?normalizeMilestoneDays(value):(value||null),status,deviation_days:calculateDeviation(deadline,start,completion)||null};
+          const payload={[field]:field==='days'?normalizeMilestoneDays(value):(value||null),status,deviation_days:calculateDeviation(getEffectiveMilestoneDeadline({...milestone,endDate:end,deadline}),start,completion)||null};
           if(recalculate)Object.assign(payload,{start_date:start||null,days:normalizeMilestoneDays(days),end_date:end||null,deadline:deadline||null});
           if(field==='completion_date')payload.completion_date=value||null;
-          if(schedule.hasHistory&&recalculate)Object.assign(payload,{start_date:start||null,days:normalizeMilestoneDays(days),deviation_days:schedule.deviationDays,remarks:schedule.remarks});
+          if(schedule.hasHistory&&recalculate)Object.assign(payload,{start_date:start||null,days:normalizeMilestoneDays(days),deviation_days:completion?payload.deviation_days:schedule.deviationDays,remarks:schedule.remarks});
           const {error}=await supabaseClient.from('milestones').update(payload).eq('id',id);if(error)throw error;
           Object.assign(milestone,{days:normalizeMilestoneDays(days),startDate:start,endDate:end,deadline,completionDate:completion,status,deviationDays:payload.deviation_days});
           if(schedule.hasHistory&&recalculate)milestone.remarks=schedule.remarks;
@@ -18045,7 +18046,7 @@
           const project=projects.find(initiative=>(initiative.milestones||[]).some(item=>Number(item.id)===Number(id)));
           const milestone=project?.milestones?.find(item=>Number(item.id)===Number(id));
           if(!project||!milestone)throw new Error('A selected Milestone could not be found. Refresh and retry.');
-          const end=milestone.deadline||milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);
+          const end=getEffectiveMilestoneDeadline(milestone);
           const completionDate=String(end||'').slice(0,10);
           if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate))throw new Error('Every selected Milestone needs a valid End Date before it can be marked Done.');
           if(completionDate>localToday())throw new Error('A future End Date cannot be used as a Completion Date.');
@@ -25074,7 +25075,7 @@
     window.openDailyMilestoneCloseOnly=function(){if(statusSaveBusy||!actionContext)return;resetCloseOnlyForm();closeDailyMilestoneCompleteChoice();const {milestone}=actionContext,modal=document.getElementById('daily-milestone-close-only-modal'),date=document.getElementById('daily-milestone-close-only-date');document.getElementById('daily-milestone-close-only-context').textContent=milestone.actions||milestone.title||'Milestone';date.max=localToday();date.value=milestone.completionDate||localToday();modal.classList.remove('hidden');modal.classList.add('flex');date.focus();};
     window.closeDailyMilestoneCloseOnly=function(){if(statusSaveBusy)return;const modal=document.getElementById('daily-milestone-close-only-modal');modal.classList.add('hidden');modal.classList.remove('flex');resetCloseOnlyForm();actionContext=null;originRow?.focus?.();};
     window.completeDailyMilestoneWithNext=function(){if(!actionContext)return;const {milestone}=actionContext;closeDailyMilestoneCompleteChoice();return originalDailyStart.call(window,milestone.id);};
-    window.confirmDailyMilestoneCloseOnly=async function(event){event.preventDefault();if(statusSaveBusy||!actionContext)return;const {project,milestone,snapshot}=actionContext;if(!canAct(project,milestone))return showToast('Permission denied.','error');const completionDate=document.getElementById('daily-milestone-close-only-date').value;if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)||completionDate>localToday())return showToast('Enter a valid Actual End Date.','error');const button=document.getElementById('daily-milestone-close-only-confirm'),cancel=document.getElementById('daily-milestone-close-only-cancel'),end=milestone.deadline||milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);statusSaveBusy=true;button.disabled=true;cancel.disabled=true;button.textContent='Saving...';try{const {data,error}=await supabaseClient.from('milestones').update({completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,milestone.startDate,completionDate)||null}).eq('id',Number(milestone.id)).select().single();if(error)throw error;if(!data)throw new Error('Supabase did not return the updated Milestone.');await loadInitiativesFromSupabase();if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();restore(snapshot);showToast('Milestone closed and Actual End Date updated.','success');statusSaveBusy=false;closeDailyMilestoneCloseOnly();}catch(error){console.error('Daily Tracker Milestone close failed:',error);showToast(error?.message||'Milestone close failed.','error');statusSaveBusy=false;button.disabled=false;cancel.disabled=false;button.textContent='Close Milestone';}};
+    window.confirmDailyMilestoneCloseOnly=async function(event){event.preventDefault();if(statusSaveBusy||!actionContext)return;const {project,milestone,snapshot}=actionContext;if(!canAct(project,milestone))return showToast('Permission denied.','error');const completionDate=document.getElementById('daily-milestone-close-only-date').value;if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)||completionDate>localToday())return showToast('Enter a valid Actual End Date.','error');const button=document.getElementById('daily-milestone-close-only-confirm'),cancel=document.getElementById('daily-milestone-close-only-cancel'),end=getEffectiveMilestoneDeadline(milestone);statusSaveBusy=true;button.disabled=true;cancel.disabled=true;button.textContent='Saving...';try{const {data,error}=await supabaseClient.from('milestones').update({completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,milestone.startDate,completionDate)||null}).eq('id',Number(milestone.id)).select().single();if(error)throw error;if(!data)throw new Error('Supabase did not return the updated Milestone.');await loadInitiativesFromSupabase();if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();restore(snapshot);showToast('Milestone closed and Actual End Date updated.','success');statusSaveBusy=false;closeDailyMilestoneCloseOnly();}catch(error){console.error('Daily Tracker Milestone close failed:',error);showToast(error?.message||'Milestone close failed.','error');statusSaveBusy=false;button.disabled=false;cancel.disabled=false;button.textContent='Close Milestone';}};
     document.getElementById('daily-milestone-action-list').addEventListener('click',function(e){const button=e.target.closest('[data-action]');if(!button||!actionContext)return;const {project,milestone}=actionContext,action=button.dataset.action;closeDailyMilestoneActionMenu();if(action==='complete')return openDailyMilestoneCompleteChoice();if(action==='deviate')return openMilestoneDeviationModal(project.id,milestone.id);if(action==='history')return openMilestoneRevisionHistory(project.id,milestone.id);openDailyMilestoneStatusModal(action);});
     window.openDailyMilestoneStatusModal=function(action){if(!actionContext||statusSaveBusy)return;const {milestone}=actionContext,newStatus=action==='hold'?'On-Hold':action==='resume'?resumedMilestoneStatus(milestone):'Critical',modal=document.getElementById('daily-milestone-status-modal');modal.dataset.status=newStatus;modal.dataset.resume=action==='resume'?'1':'';document.getElementById('daily-status-milestone').textContent=milestone.actions||milestone.title||'-';document.getElementById('daily-status-current').textContent=effective(milestone);document.getElementById('daily-status-new').textContent=newStatus==='On-Hold'?'On Hold':newStatus;const confirm=document.getElementById('daily-status-confirm');confirm.disabled=false;confirm.textContent='Confirm';document.getElementById('daily-status-cancel').disabled=false;modal.classList.remove('hidden');modal.classList.add('flex');confirm.focus();};
     window.closeDailyMilestoneStatusModal=function(){if(statusSaveBusy)return;const modal=document.getElementById('daily-milestone-status-modal');modal.classList.add('hidden');modal.classList.remove('flex');originRow?.focus?.();};
@@ -25115,7 +25116,7 @@
     async function updateStatus(status){const rows=selected().filter(({milestone})=>getEffectiveMilestoneStatus(milestone)!=='Done'&&getEffectiveMilestoneStatus(milestone)!==status);if(!allowed(rows))throw new Error('One or more selected Milestones cannot be updated.');for(const {milestone} of rows){const {error}=await supabaseClient.from('milestones').update({status}).eq('id',Number(milestone.id));if(error)throw error;}return rows.length;}
     async function finish(message){await loadInitiativesFromSupabase();renderProjects();renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();restore(bulkSnapshot);showToast(message,'success');}
     document.getElementById('daily-bulk-action-list').addEventListener('click',async function(event){const button=event.target.closest('[data-bulk-action]');if(!button||busy)return;const action=button.dataset.bulkAction,rows=selected();if(action==='complete'){hide('daily-bulk-milestone-action-modal');const input=document.getElementById('daily-bulk-completion-date');input.value=localToday();input.max=localToday();document.getElementById('daily-bulk-complete-context').textContent=`Complete ${rows.filter(({milestone})=>getEffectiveMilestoneStatus(milestone)!=='Done').length} selected Milestone(s).`;return show('daily-bulk-complete-modal');}if(action==='deviate'){hide('daily-bulk-milestone-action-modal');const {project,milestone}=rows[0];return openMilestoneDeviationModal(project.id,milestone.id);}busy=true;document.querySelectorAll('#daily-bulk-action-modal button,#daily-bulk-milestone-action-modal button').forEach(x=>x.disabled=true);try{const count=await updateStatus(action==='hold'?'On-Hold':'Critical');await finish(`${count} Milestone${count===1?'':'s'} updated.`);busy=false;hide('daily-bulk-milestone-action-modal');}catch(error){console.error('Daily Tracker bulk Milestone update failed:',error);showToast(error?.message||'Bulk Milestone update failed.','error');busy=false;document.querySelectorAll('#daily-bulk-milestone-action-modal button').forEach(x=>x.disabled=false);}});
-    window.confirmDailyBulkComplete=async function(event){event.preventDefault();if(busy)return;const date=document.getElementById('daily-bulk-completion-date').value;if(!date||date>localToday())return showToast('Enter a valid Completion Date.','error');const rows=selected().filter(({milestone})=>getEffectiveMilestoneStatus(milestone)!=='Done');if(!allowed(rows))return showToast('One or more selected Milestones cannot be updated.','error');const confirm=document.getElementById('daily-bulk-complete-confirm'),cancel=document.getElementById('daily-bulk-complete-cancel');busy=true;confirm.disabled=true;cancel.disabled=true;confirm.textContent='Saving...';try{for(const {milestone} of rows){const end=milestone.deadline||milestone.endDate||calculateMilestoneEndDate(milestone.days,milestone.startDate);const payload={completion_date:date,status:'Done',deviation_days:calculateDeviation(end,milestone.startDate,date)||null};const {error}=await supabaseClient.from('milestones').update(payload).eq('id',Number(milestone.id));if(error)throw error;}await finish(`${rows.length} Milestone${rows.length===1?'':'s'} completed.`);busy=false;hide('daily-bulk-complete-modal');}catch(error){console.error('Daily Tracker bulk completion failed:',error);showToast(error?.message||'Bulk completion failed.','error');busy=false;confirm.disabled=false;cancel.disabled=false;confirm.textContent='Complete';}};
+    window.confirmDailyBulkComplete=async function(event){event.preventDefault();if(busy)return;const date=document.getElementById('daily-bulk-completion-date').value;if(!date||date>localToday())return showToast('Enter a valid Completion Date.','error');const rows=selected().filter(({milestone})=>getEffectiveMilestoneStatus(milestone)!=='Done');if(!allowed(rows))return showToast('One or more selected Milestones cannot be updated.','error');const confirm=document.getElementById('daily-bulk-complete-confirm'),cancel=document.getElementById('daily-bulk-complete-cancel');busy=true;confirm.disabled=true;cancel.disabled=true;confirm.textContent='Saving...';try{for(const {milestone} of rows){const end=getEffectiveMilestoneDeadline(milestone);const payload={completion_date:date,status:'Done',deviation_days:calculateDeviation(end,milestone.startDate,date)||null};const {error}=await supabaseClient.from('milestones').update(payload).eq('id',Number(milestone.id));if(error)throw error;}await finish(`${rows.length} Milestone${rows.length===1?'':'s'} completed.`);busy=false;hide('daily-bulk-complete-modal');}catch(error){console.error('Daily Tracker bulk completion failed:',error);showToast(error?.message||'Bulk completion failed.','error');busy=false;confirm.disabled=false;cancel.disabled=false;confirm.textContent='Complete';}};
     document.addEventListener('keydown',function(event){if(event.key!=='Escape'||busy)return;if(document.getElementById('daily-bulk-complete-modal').classList.contains('flex')){event.preventDefault();closeDailyBulkComplete();}else if(document.getElementById('daily-bulk-milestone-action-modal').classList.contains('flex')){event.preventDefault();closeDailyBulkMilestoneActions();}},true);
   })();
   </script>
@@ -25171,7 +25172,7 @@
       showToast(`${updated} Milestone${updated===1?'':'s'} updated.`,'success');
     }catch(error){console.error('Daily Tracker Milestone change failed:',error);showToast(error?.message||'Milestone update failed.','error');save.disabled=false;save.textContent='Apply Change';}finally{state.busy=false;}
   }
-  async function applyMultiWorkflow(action){if(state.busy)return;const active=state.rows.filter(r=>{const current=getEffectiveMilestoneStatus(r.milestone);return action==='resume'?current==='On-Hold':current!=='Done';});if(!active.length)return showToast('No eligible selected Milestones.','error');let completionDate='';if(action==='complete'){completionDate=prompt('Completion Date (YYYY-MM-DD)',localToday())||'';if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)||completionDate>localToday())return showToast('Enter a valid Completion Date.','error');}if(!confirm(`${action==='complete'?'Complete':action==='hold'?'Put On Hold':action==='resume'?'Resume':'Mark as Critical'} ${active.length} selected Milestone${active.length===1?'':'s'}?`))return;state.busy=true;try{for(const row of active){let patch;if(action==='complete'){const end=row.milestone.deadline||row.milestone.endDate||calculateMilestoneEndDate(row.milestone.days,row.milestone.startDate);patch={completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,row.milestone.startDate,completionDate)||null};}else patch={status:action==='hold'?'On-Hold':action==='resume'?window.resumedMilestoneStatus(row.milestone):'Critical'};const {data:updatedMilestone,error}=await supabaseClient.from('milestones').update(patch).eq('id',row.milestone.id).select('id,status,completion_date,deviation_days').single();if(error)throw error;if(!updatedMilestone||String(updatedMilestone.id)!==String(row.milestone.id))throw new Error(`Supabase did not confirm the update for Milestone ${row.milestone.id}.`);if(action==='hold'&&String(updatedMilestone.status||'').trim()!=='On-Hold')throw new Error(`Milestone ${row.milestone.id} was not saved as On-Hold in Supabase.`);Object.assign(row.milestone,{status:updatedMilestone.status,completionDate:updatedMilestone.completion_date,deviationDays:updatedMilestone.deviation_days});}await loadInitiativesFromSupabase();resetDailyMultiSelectAfterSuccess();document.getElementById('daily-milestone-action-modal').classList.add('hidden');if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));showToast(`${active.length} Milestone${active.length===1?'':'s'} updated.`,'success');}catch(error){console.error('Daily Tracker Milestone action failed:',error);showToast(error?.message||'Milestone action failed.','error');}finally{state.busy=false;}}
+  async function applyMultiWorkflow(action){if(state.busy)return;const active=state.rows.filter(r=>{const current=getEffectiveMilestoneStatus(r.milestone);return action==='resume'?current==='On-Hold':current!=='Done';});if(!active.length)return showToast('No eligible selected Milestones.','error');let completionDate='';if(action==='complete'){completionDate=prompt('Completion Date (YYYY-MM-DD)',localToday())||'';if(!/^\d{4}-\d{2}-\d{2}$/.test(completionDate)||completionDate>localToday())return showToast('Enter a valid Completion Date.','error');}if(!confirm(`${action==='complete'?'Complete':action==='hold'?'Put On Hold':action==='resume'?'Resume':'Mark as Critical'} ${active.length} selected Milestone${active.length===1?'':'s'}?`))return;state.busy=true;try{for(const row of active){let patch;if(action==='complete'){const end=getEffectiveMilestoneDeadline(row.milestone);patch={completion_date:completionDate,status:'Done',deviation_days:calculateDeviation(end,row.milestone.startDate,completionDate)||null};}else patch={status:action==='hold'?'On-Hold':action==='resume'?window.resumedMilestoneStatus(row.milestone):'Critical'};const {data:updatedMilestone,error}=await supabaseClient.from('milestones').update(patch).eq('id',row.milestone.id).select('id,status,completion_date,deviation_days').single();if(error)throw error;if(!updatedMilestone||String(updatedMilestone.id)!==String(row.milestone.id))throw new Error(`Supabase did not confirm the update for Milestone ${row.milestone.id}.`);if(action==='hold'&&String(updatedMilestone.status||'').trim()!=='On-Hold')throw new Error(`Milestone ${row.milestone.id} was not saved as On-Hold in Supabase.`);Object.assign(row.milestone,{status:updatedMilestone.status,completionDate:updatedMilestone.completion_date,deviationDays:updatedMilestone.deviation_days});}await loadInitiativesFromSupabase();resetDailyMultiSelectAfterSuccess();document.getElementById('daily-milestone-action-modal').classList.add('hidden');if(typeof renderProjects==='function')renderProjects();if(typeof renderDailyTrackerPage==='function')renderDailyTrackerPage();if(typeof renderAnalyticsDashboard==='function')renderAnalyticsDashboard();requestAnimationFrame(()=>scrollTo(state.snapshot.x,state.snapshot.y));showToast(`${active.length} Milestone${active.length===1?'':'s'} updated.`,'success');}catch(error){console.error('Daily Tracker Milestone action failed:',error);showToast(error?.message||'Milestone action failed.','error');}finally{state.busy=false;}}
   let multiDeviationQueue=[],multiDeviationActive=false;
   function showBulkProgress(title,total){const modal=document.getElementById('bulk-operation-progress-modal');document.getElementById('bulk-operation-progress-title').textContent=title;document.getElementById('bulk-operation-progress-detail').textContent=`Preparing ${total} selected Milestone${total===1?'':'s'}...`;document.getElementById('bulk-operation-progress-bar').style.width='0%';document.getElementById('bulk-operation-progress-count').textContent=`0 of ${total}`;modal.classList.remove('hidden');modal.classList.add('flex');}
   function updateBulkProgress(done,total,label){const pct=total?Math.round((done/total)*100):100;document.getElementById('bulk-operation-progress-bar').style.width=`${pct}%`;document.getElementById('bulk-operation-progress-count').textContent=`${done} of ${total}`;document.getElementById('bulk-operation-progress-detail').textContent=label||`Updating selected Milestones... ${pct}%`;}
@@ -25301,6 +25302,10 @@
   }
 
   function getMilestoneTotalOverallDeviation(milestone){
+    if(hasMilestoneCompletion(milestone)){
+      const deviation=calculateDeviation(getEffectiveMilestoneDeadline(milestone),milestone?.startDate??milestone?.start_date,milestone?.completionDate??milestone?.completion_date);
+      if(Number.isFinite(deviation))return deviation;
+    }
     const history=parseMilestoneRevisionData(milestone?.remarks);
     if(Array.isArray(history.revisions)&&(history.revisions.length||history.originalSchedule||!Object.hasOwn(history,'legacyRemark')))return rebuildDeviationSchedule(milestone,history).total;
     const stored=Number(milestone?.deviationDays);
@@ -25386,9 +25391,10 @@
   function normalizeMilestoneDeviationSchedule(milestone){
     const schedule=calculateMilestoneSchedule(milestone);
     if(!schedule.hasHistory)return;
-    Object.assign(milestone,{startDate:schedule.startDate,days:schedule.days,endDate:schedule.endDate,deadline:schedule.deadline,deviationDays:schedule.deviationDays,remarks:schedule.remarks});
+    const deviationDays=hasMilestoneCompletion(milestone)?getMilestoneTotalOverallDeviation({...milestone,startDate:schedule.startDate,endDate:schedule.endDate,deadline:schedule.deadline}):schedule.deviationDays;
+    Object.assign(milestone,{startDate:schedule.startDate,days:schedule.days,endDate:schedule.endDate,deadline:schedule.deadline,deviationDays,remarks:schedule.remarks});
     const kpi=kpiMilestoneRows.find(row=>Number(row.id)===Number(milestone.id));
-    if(kpi)Object.assign(kpi,{start_date:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),end_date:schedule.endDate||null,deadline:schedule.deadline||null,deviation_days:schedule.deviationDays,remarks:schedule.remarks});
+    if(kpi)Object.assign(kpi,{start_date:schedule.startDate||null,days:normalizeMilestoneDays(schedule.days),end_date:schedule.endDate||null,deadline:schedule.deadline||null,deviation_days:deviationDays,remarks:schedule.remarks});
   }
 
   function refreshDeviationViews(viewState){
@@ -25690,6 +25696,8 @@
       const startDate=Object.hasOwn(patch,'startDate')?patch.startDate:m.startDate;
       const completionDate=Object.hasOwn(patch,'completionDate')?patch.completionDate:m.completionDate;
       if(startDate&&completionDate&&completionDate<startDate)throw new Error('Completion Date cannot be before Start Date.');
+      if(completionDate&&['completionDate','startDate','endDate','deadline','days','remarks'].some(field=>Object.hasOwn(patch,field)))patch.deviationDays=calculateDeviation(getEffectiveMilestoneDeadline({...m,...patch}),startDate,completionDate)||null;
+      else if(Object.hasOwn(patch,'completionDate')&&!completionDate)patch.deviationDays=hasMilestoneDeviationHistory({...m,...patch})?getMilestoneTotalOverallDeviation({...m,...patch}):null;
       if(patch.completionDate)patch.status='Done';else if(canonicalStatus(patch.status||m.status)==='On-Hold')patch.status='On-Hold';
       return patch;
     }
@@ -27126,7 +27134,7 @@
         if(field==='created_by'||field==='archived_by')return milestone[field+'_name']||milestone[field]||milestone[field+'_email']||null;
         if(field==='updated_at')return milestone.modified_at||milestone.updated_at||null;
         if(field==='archived_at')return milestone.archived_at||((milestone.archived_by_name||milestone.archived_by)?milestone.modified_at||milestone.updated_at:null);
-        if(field==='overall_deviation'||field==='deviation_days'){if(field==='deviation_days'&&milestone.deviation_days!=null)return milestone.deviation_days;if(!milestone.remarks&&milestone.deviation_days==null)return null;return typeof getMilestoneTotalOverallDeviation==='function'?getMilestoneTotalOverallDeviation({...milestone,startDate:milestone.start_date,endDate:milestone.end_date,deviationDays:milestone.deviation_days}):milestone.deviation_days??null;}
+        if(field==='overall_deviation'||field==='deviation_days'){if(field==='deviation_days'&&milestone.deviation_days!=null)return milestone.deviation_days;if(!milestone.remarks&&milestone.deviation_days==null&&!hasMilestoneCompletion(milestone))return null;return typeof getMilestoneTotalOverallDeviation==='function'?getMilestoneTotalOverallDeviation({...milestone,startDate:milestone.start_date,endDate:milestone.end_date,deviationDays:milestone.deviation_days}):milestone.deviation_days??null;}
         if(field==='review_state')return milestone.review_state||milestone.review_status||(workflow?(workflow.reviewedIds.has('milestones:'+Number(milestone.id))||workflow.reviewedIds.has('initiatives:'+Number(milestone.initiative_id))?'Reviewed Today':'Pending for Review'):null);
         if(field==='remark_text'){try{const parsed=JSON.parse(milestone.remarks||'null');return typeof parsed==='string'?parsed:parsed?.legacyRemark||null;}catch{return milestone.remarks||null;}}
         return milestone[field]??null;
@@ -27361,7 +27369,7 @@
       const extras={program:['sequence_no','vertical','is_active'],initiative:['sequence_no','vertical','program_id','record_status'],track:['sequence_no','display_order','initiative_id','record_status'],milestone:['sequence_no','initiative_id','track_id','record_status'],planner_template:['is_active']};
       function sourceColumns(source){
         const sourceFields=selectedBySource.get(source)||[],columns=[...new Set(['id',...sourceFields.filter(field=>field.column&&!field.computed).map(field=>field.column),...(extras[source]||[])])];
-        if(source==='milestone'&&sourceFields.some(field=>field.computed&&['milestone.overall_deviation','milestone.owner_department','milestone.dependency_department','milestone.remark_text'].includes(field.id)))for(const field of ['remarks','deviation_days','start_date','end_date','owner','dependency'])if(!columns.includes(field))columns.push(field);
+        if(source==='milestone'&&sourceFields.some(field=>field.computed&&['milestone.overall_deviation','milestone.owner_department','milestone.dependency_department','milestone.remark_text'].includes(field.id)))for(const field of ['remarks','deviation_days','start_date','end_date','deadline','revised_end_date','completion_date','owner','dependency'])if(!columns.includes(field))columns.push(field);
         return columns;
       }
       async function readSourceRows(source,joinField=null,joinValues=[]){
@@ -31752,7 +31760,12 @@ ALTER TABLE public.user_master
   ADD COLUMN IF NOT EXISTS admin_scope text NOT NULL DEFAULT 'system',
   ADD COLUMN IF NOT EXISTS assigned_verticals text[],
   ADD COLUMN IF NOT EXISTS access_levels text[] NOT NULL DEFAULT ARRAY['program','support','reporting'],
-  ADD COLUMN IF NOT EXISTS support_departments text[] NOT NULL DEFAULT '{}';
+  ADD COLUMN IF NOT EXISTS support_departments text[] NOT NULL DEFAULT '{}',
+  ADD COLUMN IF NOT EXISTS support_scope text NOT NULL DEFAULT 'departments';
+
+ALTER TABLE public.user_master ALTER COLUMN access_levels SET DEFAULT ARRAY['program','reporting'];
+UPDATE public.user_master SET access_levels=ARRAY['program','support','reporting'],support_scope='all',support_departments='{}'
+WHERE role='Admin' AND admin_scope='system';
 
 UPDATE public.user_master SET assigned_verticals=ARRAY[coalesce(nullif(btrim(assigned_vertical),''),'All')] WHERE assigned_verticals IS NULL;
 UPDATE public.user_master SET role='Level 1' WHERE role='Level 2';
@@ -31862,6 +31875,15 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
     WHERE u.auth_user_id=p_creator OR (u.auth_user_id IS NULL AND lower(btrim(u.email))=(SELECT lower(btrim(email)) FROM auth.users WHERE id=p_creator))
     ORDER BY (u.auth_user_id IS NOT NULL) DESC LIMIT 1),false);
 $$;
+CREATE OR REPLACE FUNCTION public.delivery_rbac_support_allowed(a jsonb,p_fields jsonb)
+RETURNS boolean LANGUAGE sql IMMUTABLE SET search_path='' AS $$
+  SELECT coalesce((a->>'role'='Admin' AND a->>'admin_scope'='system') OR (
+    (a->'access_levels') ? 'support' AND (
+      a->>'support_scope'='all' OR (a->>'support_scope'='departments' AND
+        (a->'support_departments') ? coalesce(btrim(p_fields->>'Department'),''))
+    ) AND (nullif(btrim(p_fields->>'Vertical'),'') IS NULL OR public.delivery_rbac_vertical_allowed(a,btrim(p_fields->>'Vertical')))
+  ),false);
+$$;
 CREATE OR REPLACE FUNCTION public.delivery_rbac_scope(p_kind text,p_context boolean DEFAULT false)
 RETURNS TABLE(resource_id text,context_only boolean)
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
@@ -31877,36 +31899,55 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
     WHERE g.user_id=(a.j->>'id')::bigint AND g.revoked_at IS NULL
   ), p AS MATERIALIZED(
     SELECT x.id FROM public.programs x,actor a WHERE
-      a.sys OR (a.va AND public.delivery_rbac_vertical_allowed(a.j,x.vertical))
+      a.sys OR (a.va AND a.level<=1 AND public.delivery_rbac_vertical_allowed(a.j,x.vertical))
     UNION SELECT x.id FROM public.programs x,actor a WHERE
       a.j->>'role'<>'Admin' AND a.level<=1 AND public.delivery_rbac_assignment_keys(x.program_owner,x.assigned_to,NULL,x.functional_engineer_id,x.technical_engineer_id) && a.keys
         AND public.delivery_rbac_vertical_allowed(a.j,x.vertical)
-    UNION SELECT x.id FROM public.programs x JOIN shares s ON s.resource_type='program' AND s.resource_id=x.id::text
+    UNION SELECT x.id FROM public.programs x JOIN shares s ON s.resource_type='program' AND s.resource_id=x.id::text CROSS JOIN actor a
+      WHERE NOT a.va OR public.delivery_rbac_vertical_allowed(a.j,x.vertical)
   ), i AS MATERIALIZED(
-    SELECT x.id,x.program_id FROM public.initiatives x,actor a WHERE
-      a.sys OR (a.va AND public.delivery_rbac_vertical_allowed(a.j,x.vertical))
+    SELECT x.id,x.program_id FROM public.initiatives x LEFT JOIN public.programs parent ON parent.id=x.program_id CROSS JOIN actor a WHERE
+      a.sys OR (a.va AND a.level<=2 AND public.delivery_rbac_vertical_allowed(a.j,x.vertical)
+        AND (x.program_id IS NULL OR public.delivery_rbac_vertical_allowed(a.j,parent.vertical)))
     UNION SELECT x.id,x.program_id FROM public.initiatives x JOIN p ON p.id=x.program_id CROSS JOIN actor a WHERE
-      public.delivery_rbac_vertical_allowed(a.j,x.vertical) OR EXISTS(SELECT 1 FROM shares s WHERE s.resource_type='program' AND s.resource_id=x.program_id::text)
+      public.delivery_rbac_vertical_allowed(a.j,x.vertical) OR (NOT a.va AND EXISTS(SELECT 1 FROM shares s WHERE s.resource_type='program' AND s.resource_id=x.program_id::text))
     UNION SELECT x.id,x.program_id FROM public.initiatives x,actor a WHERE
       a.j->>'role'<>'Admin' AND a.level<=2 AND public.delivery_rbac_assignment_keys(x.business_owner,x.assigned_to,NULL,x.functional_engineer_id,x.technical_engineer_id) && a.keys
         AND public.delivery_rbac_vertical_allowed(a.j,x.vertical)
     UNION SELECT x.id,x.program_id FROM public.initiatives x JOIN shares s ON s.resource_type='initiative' AND s.resource_id=x.id::text
+      LEFT JOIN public.programs parent ON parent.id=x.program_id CROSS JOIN actor a
+      WHERE NOT a.va OR (public.delivery_rbac_vertical_allowed(a.j,x.vertical)
+        AND (x.program_id IS NULL OR public.delivery_rbac_vertical_allowed(a.j,parent.vertical)))
   ), t AS MATERIALIZED(
     SELECT x.id,x.initiative_id FROM public.milestone_tracks x JOIN i ON i.id=x.initiative_id
+    UNION SELECT x.id,x.initiative_id FROM public.milestone_tracks x
+      JOIN public.initiatives parent ON parent.id=x.initiative_id LEFT JOIN public.programs root ON root.id=parent.program_id CROSS JOIN actor a
+      WHERE a.va AND a.level=3 AND public.delivery_rbac_vertical_allowed(a.j,parent.vertical)
+        AND (parent.program_id IS NULL OR public.delivery_rbac_vertical_allowed(a.j,root.vertical))
     UNION SELECT x.id,x.initiative_id FROM public.milestone_tracks x JOIN shares s ON s.resource_type='track' AND s.resource_id=x.id::text
+      LEFT JOIN public.initiatives parent ON parent.id=x.initiative_id LEFT JOIN public.programs root ON root.id=parent.program_id CROSS JOIN actor a
+      WHERE NOT a.va OR (public.delivery_rbac_vertical_allowed(a.j,parent.vertical)
+        AND (parent.program_id IS NULL OR public.delivery_rbac_vertical_allowed(a.j,root.vertical)))
     UNION SELECT x.id,x.initiative_id FROM public.milestone_tracks x,actor a WHERE a.sys
   ), m AS MATERIALIZED(
     SELECT x.id,x.initiative_id,x.track_id FROM public.milestones x,actor a WHERE a.sys
+    UNION SELECT x.id,x.initiative_id,x.track_id FROM public.milestones x
+      JOIN public.initiatives parent ON parent.id=x.initiative_id LEFT JOIN public.programs root ON root.id=parent.program_id CROSS JOIN actor a
+      WHERE a.va AND a.level=4 AND public.delivery_rbac_vertical_allowed(a.j,parent.vertical)
+        AND (parent.program_id IS NULL OR public.delivery_rbac_vertical_allowed(a.j,root.vertical))
     UNION SELECT x.id,x.initiative_id,x.track_id FROM public.milestones x JOIN i ON i.id=x.initiative_id
     UNION SELECT x.id,x.initiative_id,x.track_id FROM public.milestones x JOIN t ON t.id=x.track_id AND t.initiative_id=x.initiative_id
     UNION SELECT x.id,x.initiative_id,x.track_id FROM public.milestones x LEFT JOIN public.initiatives parent ON parent.id=x.initiative_id CROSS JOIN actor a WHERE
       a.j->>'role'<>'Admin' AND a.level<=4 AND public.delivery_rbac_assignment_keys(x.owner,x.dependency,NULL,NULL,NULL) && a.keys
         AND public.delivery_rbac_vertical_allowed(a.j,parent.vertical)
     UNION SELECT x.id,x.initiative_id,x.track_id FROM public.milestones x JOIN shares s ON s.resource_type='milestone' AND s.resource_id=x.id::text
+      LEFT JOIN public.initiatives parent ON parent.id=x.initiative_id LEFT JOIN public.programs root ON root.id=parent.program_id CROSS JOIN actor a
+      WHERE NOT a.va OR (public.delivery_rbac_vertical_allowed(a.j,parent.vertical)
+        AND (parent.program_id IS NULL OR public.delivery_rbac_vertical_allowed(a.j,root.vertical)))
   ), needed_i AS MATERIALIZED(
     SELECT id FROM i UNION SELECT initiative_id FROM t UNION SELECT initiative_id FROM m
   ), needed_t AS MATERIALIZED(
-    SELECT id FROM t UNION SELECT track_id FROM m WHERE track_id IS NOT NULL
+    SELECT id FROM t UNION SELECT x.id FROM public.milestone_tracks x JOIN m ON m.track_id=x.id AND m.initiative_id=x.initiative_id
   ), needed_p AS MATERIALIZED(
     SELECT id FROM p UNION SELECT x.program_id FROM public.initiatives x JOIN needed_i ON needed_i.id=x.id WHERE x.program_id IS NOT NULL
   )
@@ -31914,12 +31955,11 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
   UNION ALL SELECT n.id::text,NOT EXISTS(SELECT 1 FROM i WHERE i.id=n.id) FROM needed_i n WHERE p_kind='initiative' AND (p_context OR EXISTS(SELECT 1 FROM i WHERE i.id=n.id))
   UNION ALL SELECT n.id::text,NOT EXISTS(SELECT 1 FROM t WHERE t.id=n.id) FROM needed_t n WHERE p_kind='track' AND (p_context OR EXISTS(SELECT 1 FROM t WHERE t.id=n.id))
   UNION ALL SELECT n.id::text,false FROM m n WHERE p_kind='milestone'
-  UNION ALL SELECT x.request_id,false FROM public.support_tickets x,actor a WHERE p_kind='support' AND (
-    a.sys OR ((a.j->'access_levels') ? 'support' AND (a.j->'support_departments') ? coalesce(btrim(x.fields->>'Department'),'')) OR
-    EXISTS(SELECT 1 FROM shares s WHERE s.resource_type='support' AND s.resource_id=x.request_id))
+  UNION ALL SELECT x.request_id,false FROM public.support_tickets x,actor a WHERE p_kind='support' AND public.delivery_rbac_support_allowed(a.j,x.fields)
   UNION ALL SELECT x.id::text,false FROM public.report_definitions x,actor a WHERE p_kind='reporting' AND (
-    a.sys OR (a.va AND public.delivery_rbac_report_in_vertical(a.j,x.created_by)) OR
-    (NOT a.va AND (a.j->'access_levels') ? 'reporting') OR EXISTS(SELECT 1 FROM shares s WHERE s.resource_type='reporting' AND s.resource_id=x.id::text));
+    a.sys OR (a.va AND (a.j->'access_levels') ? 'reporting' AND public.delivery_rbac_report_in_vertical(a.j,x.created_by)) OR
+    (NOT a.va AND (a.j->'access_levels') ? 'reporting') OR (EXISTS(SELECT 1 FROM shares s WHERE s.resource_type='reporting' AND s.resource_id=x.id::text)
+      AND (NOT a.va OR public.delivery_rbac_report_in_vertical(a.j,x.created_by))));
 $$;
 CREATE OR REPLACE FUNCTION public.delivery_rbac_action(p_kind text,p_action text)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
@@ -31965,10 +32005,15 @@ DECLARE a jsonb:=public.delivery_rbac_profile(); parent_kind text; parent_id tex
 BEGIN
   IF a IS NULL OR NOT coalesce(public.delivery_rbac_action(p_kind,'create'),false) THEN RETURN false; END IF;
   IF a->>'role'='Admin' AND a->>'admin_scope'='system' THEN RETURN true; END IF;
-  IF p_kind='support' THEN RETURN (a->'access_levels') ? 'support' AND (a->'support_departments') ? coalesce(btrim(r->'fields'->>'Department'),''); END IF;
+  IF p_kind='support' THEN RETURN public.delivery_rbac_support_allowed(a,r->'fields'); END IF;
   IF p_kind='reporting' THEN RETURN a->>'role'='Admin' AND r->>'created_by'=auth.uid()::text; END IF;
   IF p_kind IN ('program','initiative') AND NOT public.delivery_rbac_vertical_allowed(a,r->>'vertical') THEN RETURN false; END IF;
-  IF p_kind IN ('program','initiative') AND a->>'role'='Admin' THEN RETURN true; END IF;
+  IF p_kind IN ('program','initiative') AND a->>'role'='Admin' THEN
+    SELECT min(rank) INTO selected_rank FROM unnest(ARRAY['program','initiative','track','milestone']) WITH ORDINALITY t(kind,rank) WHERE (a->'access_levels') ? kind;
+    RETURN coalesce(selected_rank<=CASE p_kind WHEN 'program' THEN 1 ELSE 2 END AND
+      (p_kind='program' OR nullif(r->>'program_id','') IS NULL OR EXISTS(
+        SELECT 1 FROM public.programs parent WHERE parent.id=(r->>'program_id')::bigint AND public.delivery_rbac_vertical_allowed(a,parent.vertical))),false);
+  END IF;
   parent_kind:=CASE p_kind WHEN 'initiative' THEN 'program' WHEN 'track' THEN 'initiative' WHEN 'milestone' THEN CASE WHEN nullif(r->>'track_id','') IS NULL THEN 'initiative' ELSE 'track' END END;
   parent_id:=CASE parent_kind WHEN 'program' THEN r->>'program_id' WHEN 'initiative' THEN r->>'initiative_id' WHEN 'track' THEN r->>'track_id' END;
   IF parent_id IS NOT NULL AND public.delivery_rbac_can(parent_kind,parent_id,'write') THEN RETURN true; END IF;
@@ -32057,6 +32102,9 @@ BEGIN
   result:=result||jsonb_build_object('keys',to_jsonb(public.delivery_rbac_actor_keys(a)),'rank',coalesce(rank,99));
   IF p_kind='initiative' THEN
     result:=result||jsonb_build_object('programs',coalesce((SELECT jsonb_object_agg(resource_id,true) FROM public.delivery_rbac_scope('program',false)),'{}'));
+    IF a->>'role'='Admin' AND a->>'admin_scope'='vertical' THEN
+      result:=result||jsonb_build_object('vertical_programs',coalesce((SELECT jsonb_object_agg(id::text,true) FROM public.programs WHERE public.delivery_rbac_vertical_allowed(a,vertical)),'{}'));
+    END IF;
   ELSIF p_kind IN ('track','milestone') THEN
     result:=result||jsonb_build_object('initiatives',coalesce((SELECT jsonb_object_agg(i.id::text,jsonb_build_object('full',NOT s.context_only,'vertical',i.vertical))
       FROM public.initiatives i JOIN public.delivery_rbac_scope('initiative',p_kind='milestone') s ON s.resource_id=i.id::text),'{}'));
@@ -32073,11 +32121,13 @@ DECLARE a jsonb:=seed->'actor'; parent jsonb; assigned boolean;
 BEGIN
   IF a IS NULL OR a='null'::jsonb THEN RETURN false; END IF;
   IF a->>'role'='Admin' AND a->>'admin_scope'='system' THEN RETURN true; END IF;
-  IF p_kind='support' THEN RETURN (a->'access_levels') ? 'support' AND (a->'support_departments') ? coalesce(btrim(r->'fields'->>'Department'),''); END IF;
+  IF p_kind='support' THEN RETURN public.delivery_rbac_support_allowed(a,r->'fields'); END IF;
   IF p_kind='reporting' THEN RETURN a->>'role'='Admin' AND r->>'created_by'=a->>'verified_auth_id'; END IF;
   IF a->>'role' NOT IN ('Admin','Level 1','Level 2') THEN RETURN false; END IF;
   IF p_kind IN ('program','initiative') AND NOT public.delivery_rbac_vertical_allowed(a,r->>'vertical') THEN RETURN false; END IF;
-  IF p_kind IN ('program','initiative') AND a->>'role'='Admin' THEN RETURN a->>'admin_scope'='vertical'; END IF;
+  IF p_kind IN ('program','initiative') AND a->>'role'='Admin' THEN RETURN coalesce(a->>'admin_scope'='vertical' AND
+    (seed->>'rank')::integer<=CASE p_kind WHEN 'program' THEN 1 ELSE 2 END AND
+    (p_kind='program' OR nullif(r->>'program_id','') IS NULL OR (seed->'vertical_programs') ? (r->>'program_id')),false); END IF;
   IF p_kind IN ('program','initiative') AND a->>'role'<>'Level 1' THEN RETURN false; END IF;
   IF p_kind='initiative' AND (seed->'programs') ? (r->>'program_id') THEN RETURN true; END IF;
   IF p_kind IN ('track','milestone') THEN
@@ -32121,7 +32171,7 @@ CREATE OR REPLACE FUNCTION public.delivery_rbac_context()
 RETURNS jsonb LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
   SELECT CASE WHEN a IS NULL THEN NULL ELSE jsonb_build_object(
     'user_id',a->'id','role',a->'role','admin_scope',a->'admin_scope','vertical',a->'assigned_vertical','verticals',public.delivery_rbac_verticals(a),
-    'access_levels',a->'access_levels','support_departments',a->'support_departments',
+    'access_levels',a->'access_levels','support_departments',a->'support_departments','support_scope',a->'support_scope',
     'shares',coalesce((SELECT jsonb_agg(jsonb_build_object('type',g.resource_type,'id',g.resource_id)) FROM public.delivery_access_grants g WHERE g.user_id=(a->>'id')::bigint AND g.revoked_at IS NULL),'[]'::jsonb)) END
   FROM (SELECT public.delivery_rbac_profile() a) actor;
 $$;
@@ -32130,7 +32180,10 @@ RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path='' AS $$
 DECLARE a jsonb:=public.delivery_rbac_profile();
 BEGIN
   IF a IS NULL OR a->>'role'<>'Admin' THEN RAISE EXCEPTION 'Admin required' USING ERRCODE='42501'; END IF;
-  IF a->>'admin_scope'<>'system' THEN RETURN a->'support_departments'; END IF;
+  IF a->>'admin_scope'<>'system' THEN
+    RETURN coalesce((SELECT jsonb_agg(department ORDER BY department) FROM
+      (SELECT DISTINCT nullif(btrim(fields->>'Department'),'') department FROM public.support_tickets WHERE public.delivery_rbac_support_allowed(a,fields)) d WHERE department IS NOT NULL),'[]'::jsonb);
+  END IF;
   RETURN coalesce((SELECT jsonb_agg(department ORDER BY department) FROM
     (SELECT DISTINCT nullif(btrim(fields->>'Department'),'') department FROM public.support_tickets) d WHERE department IS NOT NULL),'[]'::jsonb);
 END $$;
@@ -32156,7 +32209,7 @@ BEGIN
     WHEN 'initiative' THEN SELECT jsonb_build_object('name',title,'vertical',vertical,'context','Program ID '||coalesce(program_id::text,'Unmapped')) INTO r FROM public.initiatives WHERE id::text=p_id;
     WHEN 'track' THEN SELECT jsonb_build_object('name',t.track_name,'vertical',i.vertical,'context','Initiative ID '||i.id) INTO r FROM public.milestone_tracks t JOIN public.initiatives i ON i.id=t.initiative_id WHERE t.id::text=p_id;
     WHEN 'milestone' THEN SELECT jsonb_build_object('name',m.actions,'vertical',i.vertical,'context','Initiative ID '||i.id||' / Track ID '||coalesce(m.track_id::text,'Untracked')) INTO r FROM public.milestones m JOIN public.initiatives i ON i.id=m.initiative_id WHERE m.id::text=p_id;
-    WHEN 'support' THEN SELECT jsonb_build_object('name',fields->>'Subject','department',btrim(fields->>'Department'),'context','Ticket '||request_id) INTO r FROM public.support_tickets WHERE request_id=p_id;
+    WHEN 'support' THEN SELECT jsonb_build_object('name',fields->>'Subject','department',btrim(fields->>'Department'),'vertical',fields->>'Vertical','context','Ticket '||request_id) INTO r FROM public.support_tickets WHERE request_id=p_id;
     WHEN 'reporting' THEN SELECT jsonb_build_object('name',r.report_name,'vertical',public.delivery_rbac_report_vertical(r.created_by),'context','Report '||r.report_type) INTO r FROM public.report_definitions r WHERE r.id::text=p_id;
     ELSE RAISE EXCEPTION 'Invalid resource type';
   END CASE;
@@ -32170,7 +32223,7 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
         EXISTS(SELECT 1 FROM public.user_master u WHERE u.id=p_user AND public.delivery_rbac_vertical_overlap(a,to_jsonb(u)) AND
           CASE WHEN p_kind='support' THEN true WHEN p_kind='reporting' THEN EXISTS(SELECT 1 FROM public.report_definitions r WHERE r.id::text=p_id AND public.delivery_rbac_report_in_vertical(to_jsonb(u),r.created_by))
             ELSE public.delivery_rbac_vertical_allowed(to_jsonb(u),o->>'vertical') END) AND
-        CASE WHEN p_kind='support' THEN (a->'support_departments') ? (o->>'department')
+        CASE WHEN p_kind='support' THEN public.delivery_rbac_support_allowed(a,jsonb_build_object('Department',o->>'department','Vertical',o->>'vertical'))
           WHEN p_kind='reporting' THEN EXISTS(SELECT 1 FROM public.report_definitions r WHERE r.id::text=p_id AND public.delivery_rbac_report_in_vertical(a,r.created_by))
           ELSE public.delivery_rbac_vertical_allowed(a,o->>'vertical') END
       )),false) AND o IS NOT NULL
@@ -32178,11 +32231,18 @@ RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
 $$;
 CREATE OR REPLACE FUNCTION public.delivery_rbac_share(p_user bigint,p_kind text,p_id text)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
-DECLARE a jsonb:=public.delivery_rbac_profile();
+DECLARE a jsonb:=public.delivery_rbac_profile(); o jsonb;
 BEGIN
   IF NOT public.delivery_rbac_may_share(p_kind,p_id,p_user) OR NOT EXISTS(SELECT 1 FROM public.user_master WHERE id=p_user AND is_active) THEN RAISE EXCEPTION 'Share Access denied' USING ERRCODE='42501'; END IF;
+  o:=public.delivery_rbac_object(p_kind,p_id);
+  IF NOT EXISTS(SELECT 1 FROM public.user_master u WHERE u.id=p_user AND CASE
+    WHEN p_kind='support' THEN public.delivery_rbac_support_allowed(to_jsonb(u),jsonb_build_object('Department',o->>'department','Vertical',o->>'vertical'))
+    WHEN u.role='Admin' AND u.admin_scope='vertical' THEN CASE WHEN p_kind='reporting'
+      THEN EXISTS(SELECT 1 FROM public.report_definitions r WHERE r.id::text=p_id AND public.delivery_rbac_report_in_vertical(to_jsonb(u),r.created_by))
+      ELSE public.delivery_rbac_vertical_allowed(to_jsonb(u),o->>'vertical') END
+    ELSE true END) THEN RAISE EXCEPTION 'Share Access is outside the recipient scope' USING ERRCODE='42501'; END IF;
   INSERT INTO public.delivery_access_grants(user_id,resource_type,resource_id,granted_by,object_snapshot)
-    VALUES(p_user,p_kind,p_id,(a->>'id')::bigint,public.delivery_rbac_object(p_kind,p_id))
+    VALUES(p_user,p_kind,p_id,(a->>'id')::bigint,o)
     ON CONFLICT(user_id,resource_type,resource_id) WHERE revoked_at IS NULL DO NOTHING;
 END $$;
 CREATE OR REPLACE FUNCTION public.delivery_rbac_revoke(p_user bigint,p_grant bigint DEFAULT NULL)
@@ -32208,15 +32268,19 @@ BEGIN
   IF a IS NULL OR NOT (p_user=(a->>'id')::bigint OR (a->>'role'='Admin' AND (a->>'admin_scope'='system' OR EXISTS(SELECT 1 FROM public.user_master u WHERE id=p_user AND public.delivery_rbac_vertical_overlap(a,to_jsonb(u)))))) THEN RAISE EXCEPTION 'Exceptional Access denied' USING ERRCODE='42501'; END IF;
   RETURN coalesce((SELECT jsonb_agg((to_jsonb(g)-'object_snapshot')||jsonb_build_object('object',
     CASE WHEN public.delivery_rbac_can(g.resource_type,g.resource_id,'read') THEN public.delivery_rbac_object(g.resource_type,g.resource_id)
-      WHEN p_user=(a->>'id')::bigint OR a->>'admin_scope'='system' THEN g.object_snapshot ELSE NULL END,
+      WHEN a->>'admin_scope'='system' OR (p_user=(a->>'id')::bigint AND NOT (a->>'role'='Admin' AND a->>'admin_scope'='vertical')) THEN g.object_snapshot ELSE NULL END,
     'granted_by_name',u.full_name) ORDER BY g.granted_at DESC)
     FROM public.delivery_access_grants g JOIN public.user_master u ON u.id=g.granted_by WHERE g.user_id=p_user),'[]'::jsonb);
 END $$;
-CREATE OR REPLACE FUNCTION public.delivery_rbac_save_user_access(p_user bigint,p_role text,p_admin_scope text,p_verticals text[],p_levels text[],p_departments text[])
+CREATE OR REPLACE FUNCTION public.delivery_rbac_save_user_access(p_user bigint,p_role text,p_admin_scope text,p_verticals text[],p_levels text[],p_departments text[],p_support_scope text)
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$
 DECLARE a jsonb:=public.delivery_rbac_profile(); canonical text[]; verticals text[];
 BEGIN
   IF a IS NULL OR a->>'role'<>'Admin' OR a->>'admin_scope'<>'system' THEN RAISE EXCEPTION 'System Admin required' USING ERRCODE='42501'; END IF;
+  IF EXISTS(SELECT 1 FROM public.user_master WHERE id=p_user AND role='Admin' AND admin_scope='system') THEN RAISE EXCEPTION 'Admin access is automatic and read-only.' USING ERRCODE='42501'; END IF;
+  IF p_role='Admin' AND p_admin_scope='system' THEN
+    p_verticals:=ARRAY['All'];p_levels:=ARRAY['program','support','reporting'];p_departments:='{}';p_support_scope:='all';
+  END IF;
   IF p_role IS NULL OR p_role NOT IN ('Admin','Level 1','Level 2','Read-Only') OR p_admin_scope IS NULL OR p_admin_scope NOT IN ('system','vertical')
     OR p_levels IS NULL OR p_departments IS NULL OR EXISTS(SELECT 1 FROM unnest(p_levels) l WHERE l IS NULL OR l NOT IN ('program','initiative','track','milestone','support','reporting'))
     OR p_verticals IS NULL OR cardinality(p_verticals)=0 OR EXISTS(SELECT 1 FROM unnest(p_verticals) v WHERE v IS NULL OR btrim(v)='')
@@ -32224,15 +32288,22 @@ BEGIN
   SELECT array_agg(DISTINCT btrim(v) ORDER BY btrim(v)) INTO verticals FROM unnest(p_verticals) v;
   IF (p_role='Admin' AND p_admin_scope='system') OR 'All'=ANY(verticals) THEN verticals:=ARRAY['All']; END IF;
   IF p_role='Admin' AND p_admin_scope='vertical' AND 'All'=ANY(verticals) THEN RAISE EXCEPTION 'Select specific Verticals for Vertical Admin'; END IF;
+  IF 'support'=ANY(p_levels) AND (p_support_scope IS NULL OR p_support_scope NOT IN ('all','departments') OR
+    (p_support_scope='departments' AND cardinality(p_departments)=0)) THEN RAISE EXCEPTION 'Select at least one Ticket Department or choose All.'; END IF;
   IF EXISTS(SELECT 1 FROM unnest(p_departments) department WHERE department IS NULL OR NOT EXISTS(SELECT 1 FROM public.support_tickets t WHERE btrim(t.fields->>'Department')=department)) THEN RAISE EXCEPTION 'Select existing Support Ticket departments'; END IF;
   SELECT coalesce(array_agg(DISTINCT l),'{}') INTO canonical FROM unnest(p_levels) l WHERE
     NOT (l IN ('initiative','track','milestone') AND 'program'=ANY(p_levels)) AND
     NOT (l IN ('track','milestone') AND 'initiative'=ANY(p_levels)) AND NOT(l='milestone' AND 'track'=ANY(p_levels));
   UPDATE public.user_master SET role=CASE WHEN p_role='Level 2' THEN 'Level 1' ELSE p_role END,
     admin_scope=CASE WHEN p_role='Admin' THEN p_admin_scope ELSE 'system' END,assigned_vertical=verticals[1],assigned_verticals=verticals,access_levels=canonical,
-    support_departments=CASE WHEN 'support'=ANY(canonical) THEN ARRAY(SELECT DISTINCT d FROM unnest(p_departments) d) ELSE '{}' END WHERE id=p_user;
+    support_scope=CASE WHEN 'support'=ANY(canonical) THEN p_support_scope ELSE 'departments' END,
+    support_departments=CASE WHEN 'support'=ANY(canonical) AND p_support_scope='departments' THEN ARRAY(SELECT DISTINCT d FROM unnest(p_departments) d) ELSE '{}' END WHERE id=p_user;
   IF NOT FOUND THEN RAISE EXCEPTION 'User not found'; END IF;
 END $$;
+CREATE OR REPLACE FUNCTION public.delivery_rbac_save_user_access(p_user bigint,p_role text,p_admin_scope text,p_verticals text[],p_levels text[],p_departments text[])
+RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
+  SELECT public.delivery_rbac_save_user_access(p_user,p_role,p_admin_scope,p_verticals,p_levels,p_departments,'departments');
+$$;
 CREATE OR REPLACE FUNCTION public.delivery_rbac_save_user(p_user bigint,p_role text,p_admin_scope text,p_vertical text,p_levels text[],p_departments text[])
 RETURNS void LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
   SELECT public.delivery_rbac_save_user_access(p_user,p_role,p_admin_scope,ARRAY[p_vertical],p_levels,p_departments);
@@ -32249,6 +32320,26 @@ BEGIN
     IF NOT EXISTS(SELECT 1 FROM public.user_master WHERE id<>OLD.id AND role='Admin' AND admin_scope='system' AND is_active) THEN RAISE EXCEPTION 'The last active System Admin cannot be removed'; END IF;
   END IF;
   IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+  IF TG_OP='UPDATE' AND OLD.role='Admin' AND OLD.admin_scope='system' AND
+    (NEW.role IS DISTINCT FROM OLD.role OR NEW.admin_scope IS DISTINCT FROM OLD.admin_scope) THEN
+    RAISE EXCEPTION 'Admin access is automatic and read-only.' USING ERRCODE='42501';
+  END IF;
+  IF NEW.role='Admin' AND NEW.admin_scope='system' THEN
+    NEW.access_levels:=ARRAY['program','support','reporting'];NEW.support_scope:='all';NEW.support_departments:='{}';
+  ELSE
+    IF NOT ('support'=ANY(NEW.access_levels)) THEN NEW.support_scope:='departments';NEW.support_departments:='{}'; END IF;
+    IF TG_OP='INSERT' OR NEW.access_levels IS DISTINCT FROM OLD.access_levels OR NEW.support_scope IS DISTINCT FROM OLD.support_scope
+      OR NEW.support_departments IS DISTINCT FROM OLD.support_departments OR NEW.role IS DISTINCT FROM OLD.role
+      OR NEW.admin_scope IS DISTINCT FROM OLD.admin_scope OR NEW.assigned_verticals IS DISTINCT FROM OLD.assigned_verticals THEN
+      IF 'support'=ANY(NEW.access_levels) AND (NEW.support_scope IS NULL OR NEW.support_scope NOT IN ('all','departments') OR
+        (NEW.support_scope='departments' AND coalesce(cardinality(NEW.support_departments),0)=0)) THEN
+        RAISE EXCEPTION 'Select at least one Ticket Department or choose All.';
+      END IF;
+      IF EXISTS(SELECT 1 FROM unnest(NEW.support_departments) d WHERE d IS NULL OR btrim(d)='' OR
+        NOT EXISTS(SELECT 1 FROM public.support_tickets t WHERE btrim(t.fields->>'Department')=d)) THEN RAISE EXCEPTION 'Select existing Support Ticket departments'; END IF;
+    END IF;
+    IF NEW.support_scope='all' THEN NEW.support_departments:='{}'; END IF;
+  END IF;
   IF NEW.role='Level 2' THEN NEW.role:='Level 1'; END IF;
   IF TG_OP='UPDATE' AND NEW.assigned_vertical IS DISTINCT FROM OLD.assigned_vertical AND NEW.assigned_verticals IS NOT DISTINCT FROM OLD.assigned_verticals THEN
     NEW.assigned_verticals:=ARRAY[NEW.assigned_vertical];
@@ -32277,12 +32368,19 @@ CREATE POLICY delivery_rbac_users_write ON public.user_master FOR ALL TO authent
 CREATE OR REPLACE FUNCTION public.support_ticket_access(p_write boolean DEFAULT false)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path='' AS $$
   SELECT a IS NOT NULL AND (NOT p_write OR coalesce(public.delivery_rbac_action('support','write'),false)) AND
-    ((a->>'role'='Admin' AND a->>'admin_scope'='system') OR (a->'access_levels') ? 'support' OR EXISTS(SELECT 1 FROM public.delivery_access_grants WHERE user_id=(a->>'id')::bigint AND resource_type='support' AND revoked_at IS NULL))
+    ((a->>'role'='Admin' AND a->>'admin_scope'='system') OR ((a->'access_levels') ? 'support' AND
+      (a->>'support_scope'='all' OR (a->>'support_scope'='departments' AND jsonb_array_length(a->'support_departments')>0))))
   FROM (SELECT public.delivery_rbac_profile() a) actor;
 $$;
 DO $$
 DECLARE f record; table_name text; owner_check text;
 BEGIN
+  FOREACH table_name IN ARRAY ARRAY['support_connectors','support_connector_batches','support_connector_runs','support_connector_files','support_connector_rows','support_connector_errors','support_connector_audit'] LOOP
+    IF to_regclass('public.'||table_name) IS NOT NULL THEN
+      EXECUTE format('DROP POLICY IF EXISTS delivery_rbac_connector_boundary ON public.%I',table_name);
+      EXECUTE format('CREATE POLICY delivery_rbac_connector_boundary ON public.%I AS RESTRICTIVE FOR ALL TO authenticated USING ((SELECT public.delivery_rbac_profile()->>''role''=''Admin'' AND public.delivery_rbac_profile()->>''admin_scope''=''system'')) WITH CHECK ((SELECT public.delivery_rbac_profile()->>''role''=''Admin'' AND public.delivery_rbac_profile()->>''admin_scope''=''system''))',table_name);
+    END IF;
+  END LOOP;
   FOREACH table_name IN ARRAY ARRAY['support_ticket_jobs','support_ticket_job_rows','support_ticket_job_batches','support_ticket_job_errors','support_ticket_batch_attempts'] LOOP
     IF to_regclass('public.'||table_name) IS NOT NULL THEN
       owner_check:=CASE WHEN table_name='support_ticket_jobs' THEN 'created_by=auth.uid() AND public.support_ticket_access(true)'
@@ -32319,7 +32417,9 @@ GRANT EXECUTE ON FUNCTION public.delivery_rbac_profile(),public.delivery_rbac_sc
   public.delivery_rbac_dependency_target(text,bigint,bigint),
   public.delivery_rbac_hierarchy(),public.delivery_rbac_departments(),public.delivery_rbac_share(bigint,text,text),public.delivery_rbac_revoke(bigint,bigint),
   public.delivery_rbac_grants(bigint),public.delivery_rbac_save_user(bigint,text,text,text,text[],text[]),
-  public.delivery_rbac_save_user_access(bigint,text,text,text[],text[],text[]) TO authenticated;
+  public.delivery_rbac_save_user_access(bigint,text,text,text[],text[],text[]),
+  public.delivery_rbac_save_user_access(bigint,text,text,text[],text[],text[],text),
+  public.delivery_rbac_support_allowed(jsonb,jsonb) TO authenticated;
 NOTIFY pgrst,'reload schema';
 COMMIT;
   </script>
@@ -32369,7 +32469,10 @@ COMMIT;
     const userVerticals=user=>user.assignedVerticals||[user.assignedVertical||'All'];
     const sameVerticals=user=>userVerticals(user).some(value=>value!=='All'&&(state.context?.verticals||[state.context?.vertical]).includes(value));
     const inherited=(levels,kind)=>{const index=hierarchy.indexOf(kind);return index<0?levels.includes(kind):hierarchy.slice(0,index+1).some(value=>levels.includes(value));};
-    const enabled=kind=>Boolean(state.context&&(system()||state.context.role==='Admin'&&kind!=='support'||inherited(state.context.access_levels||[],kind)||(state.context.shares||[]).some(share=>inherited([share.type],kind))));
+    const supportEnabled=context=>Boolean(context&&(context.access_levels||[]).includes('support')&&
+      (context.support_scope==='all'||context.support_scope==='departments'&&(context.support_departments||[]).length));
+    const enabled=kind=>Boolean(state.context&&(system()||(kind==='support'?supportEnabled(state.context):
+      inherited(state.context.access_levels||[],kind)||(state.context.shares||[]).some(share=>inherited([share.type],kind)))));
     function action(kind,operation){
       if(!state.context)return false;
       const role=state.context.role;
@@ -32389,14 +32492,15 @@ COMMIT;
       if(!action(kind,'create'))return false;
       if(parentId!=null&&can(parentKind,parentId,'write'))return true;
       if(kind==='track')return false;
-      if(admin())return parentId==null||['program','initiative','support','reporting'].includes(kind);
+      if(admin())return enabled(kind)&&(parentId==null||['program','initiative','support','reporting'].includes(kind));
       return inherited(state.context.access_levels||[],kind);
     }
     function canTicket(ticket,operation='write'){
       const context=state.context;
-      return Boolean(ticket&&action('support',operation)&&(system()||
-        inherited(context.access_levels||[],'support')&&(context.support_departments||[]).includes(String(ticket.fields?.Department||'').trim())||
-        (context.shares||[]).some(share=>share.type==='support'&&String(share.id)===String(ticket.request_id))));
+      const vertical=String(ticket?.fields?.Vertical||'').trim();
+      return Boolean(ticket&&action('support',operation)&&(system()||supportEnabled(context)&&
+        (context.support_scope==='all'||(context.support_departments||[]).includes(String(ticket.fields?.Department||'').trim()))&&
+        (!vertical||(context.verticals||[]).includes(vertical)||context.role!=='Admin'&&(context.verticals||[]).includes('All'))));
     }
     function acceptSnapshot(snapshot){
       for(const table of Object.keys(types))if(!Array.isArray(snapshot?.[table]))throw new Error(`Invalid authorized ${table} response.`);
@@ -32445,7 +32549,7 @@ COMMIT;
           const offline=window.deliveryOffline;
           try{
             const cached=await offline.get('meta',offline.scoped('rbac-v1'));
-            if(request===state.request&&String(currentUser?.id)===user&&String(cached?.context?.user_id)===user){
+            if(request===state.request&&String(currentUser?.id)===user&&String(cached?.context?.user_id)===user&&['all','departments'].includes(cached.context.support_scope)){
               acceptSnapshot(cached.snapshot);state.context=cached.context;navigation();
             }
           }catch(storageError){offline.report(storageError);}
@@ -32546,7 +32650,7 @@ COMMIT;
       button.onclick=event=>{event.stopPropagation();share(kind,id);};host.append(button);
     }
     function checklist(card,user){
-      const selected=new Set(user.accessLevels||['program','support','reporting']);
+      const selected=new Set(user.role==='Admin'&&user.adminScope==='system'?['program','support','reporting']:user.accessLevels||['program','support','reporting']);
       card.querySelectorAll('[data-rbac-level]').forEach(box=>{
         const kind=box.dataset.rbacLevel,index=hierarchy.indexOf(kind),ancestor=index>0&&hierarchy.slice(0,index).some(kind=>selected.has(kind));
         box.checked=Boolean(ancestor||selected.has(kind));box.disabled=!system()||card.dataset.rbacEditing!=='true'||card.dataset.rbacSaving==='true'||Boolean(ancestor);box.dataset.explicit=String(selected.has(kind)&&!ancestor);
@@ -32591,8 +32695,11 @@ COMMIT;
           <td><div class="rbac-vertical-picker"><button type="button" aria-label="Assigned Verticals" aria-expanded="false" aria-controls="rbac-verticals-${esc(user.id)}" data-rbac-vertical-toggle disabled></button><div id="rbac-verticals-${esc(user.id)}" class="rbac-vertical-options" data-rbac-vertical-options popover="manual" hidden>${verticals.map(vertical=>`<label><input type="checkbox" value="${esc(vertical)}" data-rbac-vertical disabled>${esc(vertical==='All'?'All Verticals':vertical)}</label>`).join('')}</div></div></td>
           <td><fieldset aria-label="Hierarchy Access" class="rbac-row-levels">${hierarchy.map(kind=>`<label><input type="checkbox" data-rbac-level="${kind}" disabled><span>${kind[0].toUpperCase()+kind.slice(1)} <small></small></span></label>`).join('')}</fieldset></td>
           <td><fieldset aria-label="Additional Access">${[['support','Support Ticket'],['reporting','Reporting']].map(([kind,label])=>`<label><input type="checkbox" data-rbac-level="${kind}" disabled><span>${label} <small></small></span></label>`).join('')}</fieldset></td>
-          <td><fieldset data-rbac-departments aria-label="Support Ticket Departments"><details><summary data-rbac-department-summary></summary><div class="rbac-departments">${state.departments.map(department=>`<label><input type="checkbox" value="${esc(department)}" data-rbac-department ${(user.supportDepartments||[]).includes(department)?'checked':''} disabled>${esc(department)}</label>`).join('')||'<small>No ticket departments loaded.</small>'}</div><small>Only selected departments are visible. Admin sees all tickets.</small></details></fieldset></td>
-          <td><div class="rbac-actions"><button type="button" data-rbac-edit ${system()?'':'disabled'}>Edit</button><button type="button" data-rbac-save hidden>Save</button><button type="button" data-rbac-cancel hidden>Cancel</button><button type="button" data-rbac-exceptional>Exceptional Access</button></div><p class="rbac-status" role="status"></p></td>
+          <td><fieldset data-rbac-departments aria-label="Support Ticket Scope"><legend>Ticket Scope</legend>
+            <label><input type="radio" name="ticket-scope-${esc(user.id)}" value="all" data-rbac-ticket-scope disabled>All</label>
+            <label><input type="radio" name="ticket-scope-${esc(user.id)}" value="departments" data-rbac-ticket-scope disabled>Select Departments</label>
+            <details data-rbac-department-picker><summary data-rbac-department-summary></summary><div class="rbac-departments">${[...new Set([...state.departments,...user.supportDepartments||[]])].map(department=>`<label><input type="checkbox" value="${esc(department)}" data-rbac-department ${(user.supportDepartments||[]).includes(department)?'checked':''} disabled>${esc(department)}</label>`).join('')||'<small>No ticket departments loaded.</small>'}</div></details><small data-rbac-ticket-hint></small></fieldset></td>
+          <td><div class="rbac-actions"><button type="button" data-rbac-edit ${system()&&selectedRole!=='system'?'':'disabled'}>Edit</button><button type="button" data-rbac-save hidden>Save</button><button type="button" data-rbac-cancel hidden>Cancel</button><button type="button" data-rbac-exceptional>Exceptional Access</button></div><p class="rbac-status" role="status">${selectedRole==='system'?'Admin access is automatic and read-only.':''}</p></td>
         </tr>`;
       }).join('')+'<tr data-rbac-empty hidden><td colspan="7">No users match your search and filters.</td></tr></tbody></table></div>';
       const searchControl=container.querySelector('[data-rbac-search]'),roleControl=container.querySelector('[data-rbac-filter-role]'),verticalControl=container.querySelector('[data-rbac-filter-vertical]');
@@ -32612,12 +32719,14 @@ COMMIT;
       container.querySelector('[data-rbac-filter-reset]').onclick=()=>{searchControl.value='';roleControl.value='';verticalControl.value='';applyDirectoryFilters();searchControl.focus();};
       container.querySelectorAll('[data-rbac-user]').forEach(card=>{
         const user=userMaster.find(user=>String(user.id)===card.dataset.rbacUser);
-        const draftForUser=()=>({...user,accessLevels:[...user.accessLevels||['program','support','reporting']],assignedVerticals:[...userVerticals(user)]});
+        const draftForUser=()=>({...user,accessLevels:[...user.accessLevels||['program','support','reporting']],assignedVerticals:[...userVerticals(user)],supportScope:user.supportScope||'departments',supportDepartments:[...user.supportDepartments||[]]});
         let draft=draftForUser(),editing=false,saving=false;
         checklist(card,draft);
         card.querySelectorAll('[data-rbac-level]').forEach(box=>box.onchange=()=>{
           const level=box.dataset.rbacLevel,index=hierarchy.indexOf(level);draft.accessLevels=draft.accessLevels.filter(value=>value!==level&&!(box.checked&&index>=0&&hierarchy.indexOf(value)>index));
-          if(box.checked)draft.accessLevels.push(level);checklist(card,draft);
+          if(box.checked)draft.accessLevels.push(level);
+          if(level==='support'&&!box.checked){draft.supportScope='departments';draft.supportDepartments=[];card.querySelectorAll('[data-rbac-department]').forEach(box=>box.checked=false);}
+          checklist(card,draft);departmentSummary();
         });
         const role=card.querySelector('[data-rbac-role]'),toggle=card.querySelector('[data-rbac-vertical-toggle]'),options=card.querySelector('[data-rbac-vertical-options]'),picker=toggle.parentElement;
         const initialRole=role.value;
@@ -32643,14 +32752,28 @@ COMMIT;
           if(box.value!=='All'&&box.checked)draft.assignedVerticals.push(box.value);
           updateVerticals(true);
         });
-        role.onchange=()=>{if(role.value==='vertical')draft.assignedVerticals=draft.assignedVerticals.filter(value=>value!=='All');updateVerticals();};
-        const departmentSummary=()=>{card.querySelector('[data-rbac-department-summary]').textContent=card.querySelectorAll('[data-rbac-department]:checked').length+' selected';};
+        role.onchange=()=>{
+          if(role.value==='vertical')draft.assignedVerticals=draft.assignedVerticals.filter(value=>value!=='All');
+          if(role.value==='system'){draft.accessLevels=['program','support','reporting'];draft.supportScope='all';draft.supportDepartments=[];}
+          draft.role=['system','vertical'].includes(role.value)?'Admin':role.value;draft.adminScope=role.value==='vertical'?'vertical':'system';
+          updateEditing();
+        };
+        const departmentSummary=()=>{
+          const automatic=role.value==='system',support=automatic||draft.accessLevels.includes('support'),scope=automatic?'all':draft.supportScope;
+          const count=card.querySelectorAll('[data-rbac-department]:checked').length,locked=!system()||!editing||saving||automatic;
+          card.querySelectorAll('[data-rbac-ticket-scope]').forEach(box=>{box.checked=support&&box.value===scope;box.disabled=locked||!support;});
+          card.querySelectorAll('[data-rbac-department]').forEach(box=>box.disabled=locked||!support||scope!=='departments');
+          card.querySelector('[data-rbac-department-picker]').hidden=!support||scope!=='departments';
+          card.querySelector('[data-rbac-department-summary]').textContent=count+' selected'+(support&&scope==='departments'&&!count?' - invalid':'');
+          card.querySelector('[data-rbac-ticket-hint]').textContent=automatic?'All access is automatically applied for Admin.':scope==='all'?'All departments within effective access.':count?'Only selected departments within effective access.':'Select at least one Ticket Department or choose All.';
+        };
+        card.querySelectorAll('[data-rbac-ticket-scope]').forEach(box=>box.onchange=()=>{draft.supportScope=box.value;departmentSummary();});
         card.querySelectorAll('[data-rbac-department]').forEach(box=>box.onchange=departmentSummary);
         const updateEditing=()=>{
           card.dataset.rbacEditing=String(editing);card.dataset.rbacSaving=String(saving);
           role.disabled=!system()||!editing||saving;
-          card.querySelectorAll('[data-rbac-department]').forEach(box=>box.disabled=!system()||!editing||saving);
           checklist(card,draft);updateVerticals();departmentSummary();
+          if(role.value==='system')card.querySelectorAll('[data-rbac-level]').forEach(box=>box.disabled=true);
           card.querySelector('[data-rbac-edit]').hidden=editing;
           card.querySelector('[data-rbac-save]').hidden=!editing;
           card.querySelector('[data-rbac-save]').disabled=saving||!system();
@@ -32658,7 +32781,7 @@ COMMIT;
           card.querySelector('[data-rbac-cancel]').disabled=saving;
         };
         card.querySelector('[data-rbac-edit]').onclick=()=>{
-          if(!system()){card.querySelector('.rbac-status').textContent='System Admin access is required to edit permissions.';return;}
+          if(!system()||initialRole==='system'){card.querySelector('.rbac-status').textContent=initialRole==='system'?'Admin access is automatic and read-only.':'Admin access is required to edit permissions.';return;}
           const other=container.querySelector('[data-rbac-editing="true"]');
           if(other&&other!==card){other.querySelector('.rbac-status').textContent='Save or cancel this row before editing another user.';other.querySelector('[data-rbac-save]').focus();return;}
           editing=true;card.querySelector('.rbac-status').textContent='';updateEditing();applyDirectoryFilters();role.focus();
@@ -32674,12 +32797,14 @@ COMMIT;
         card.querySelector('[data-rbac-exceptional]').onclick=()=>manage(user.id);
         card.querySelector('[data-rbac-save]').onclick=async event=>{
           const status=card.querySelector('.rbac-status');
-          if(!system()||!editing||saving){status.textContent=saving?'Saving is already in progress.':'Select Edit with System Admin access before saving.';return;}
+          if(!system()||initialRole==='system'||!editing||saving){status.textContent=saving?'Saving is already in progress.':'Select Edit with Admin access before saving.';return;}
           saving=true;updateEditing();
           try{
             const selectedVerticals=role.value==='system'?['All']:draft.assignedVerticals;
             if(!selectedVerticals.length)throw new Error('Select at least one Vertical.');
-            await rpc('delivery_rbac_save_user_access',{p_user:user.id,p_role:['system','vertical'].includes(role.value)?'Admin':role.value,p_admin_scope:role.value==='vertical'?'vertical':'system',p_verticals:selectedVerticals,p_levels:draft.accessLevels,p_departments:[...card.querySelectorAll('[data-rbac-department]:checked')].map(box=>box.value)});
+            const supportScope=role.value==='system'?'all':draft.supportScope,departments=supportScope==='departments'?[...card.querySelectorAll('[data-rbac-department]:checked')].map(box=>box.value):[];
+            if(draft.accessLevels.includes('support')&&supportScope!=='all'&&!departments.length)throw new Error('Select at least one Ticket Department or choose All.');
+            await rpc('delivery_rbac_save_user_access',{p_user:user.id,p_role:['system','vertical'].includes(role.value)?'Admin':role.value,p_admin_scope:role.value==='vertical'?'vertical':'system',p_verticals:selectedVerticals,p_levels:draft.accessLevels,p_departments:departments,p_support_scope:supportScope});
             if(await loadUsersFromSupabase()===false)throw new Error('Access was saved, but User Master could not be refreshed. Refresh and retry.');
             if(await window.loadInitiativesFromSupabase()===false)throw new Error('Access was saved, but the hierarchy could not be refreshed. Refresh and retry.');
             renderUserRoleManagement();showToast('User access updated.','success');
@@ -32910,7 +33035,7 @@ BEGIN
   )
   SELECT jsonb_build_object('as_of',today,'updated_at',current_timestamp,'include_support',p_include_support,'todo_pending',(SELECT count(*) FROM todo_rows),
     'available',jsonb_build_object('milestone',is_admin OR (context->'access_levels') ?| ARRAY['program','initiative','track','milestone'] OR EXISTS(SELECT 1 FROM milestone_scope),
-      'support',(actor->>'role'='Admin' AND actor->>'admin_scope'='system') OR (context->'access_levels') ? 'support' OR EXISTS(SELECT 1 FROM ticket_scope),'todo',true))
+      'support',public.support_ticket_access(false),'todo',true))
     ||CASE WHEN p_metric IS NULL THEN jsonb_build_object('counts',coalesce((SELECT value FROM counts),'{}'::jsonb))
       ELSE jsonb_build_object('metric',p_metric,'total',(SELECT count(*) FROM matching),'records',coalesce((SELECT jsonb_agg(record ORDER BY high DESC,due_date NULLS LAST,kind,id) FROM details),'[]'::jsonb)) END
     INTO result;
